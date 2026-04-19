@@ -1,0 +1,10 @@
+# Node dependencies
+node_modules/
+dist/
+
+# Obsidian specific
+.obsidian/workspace.json
+.obsidian/cache/
+
+# OS files
+.DS_Store
