@@ -12,6 +12,9 @@ dependencies = [
   "pyyaml"
 ]
 
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["forge*"]

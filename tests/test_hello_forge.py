@@ -1,16 +1,20 @@
 import os
 import pytest
 from fastapi.testclient import TestClient
-from forge.api.server import app, states
+from forge.api.server import app, get_session_manager, VaultSessionManager
 
 VAULT = os.path.join(os.path.dirname(__file__), "vault")
 
+_test_manager = VaultSessionManager()
+
 
 @pytest.fixture(autouse=True)
-def reset_states():
-  states.clear()
+def reset_manager():
+  _test_manager.clear()
+  app.dependency_overrides[get_session_manager] = lambda: _test_manager
   yield
-  states.clear()
+  _test_manager.clear()
+  app.dependency_overrides.clear()
 
 
 client = TestClient(app)
@@ -19,7 +23,10 @@ client = TestClient(app)
 def test_connect():
   resp = client.post("/connect", json={"vault_path": VAULT})
   assert resp.status_code == 200
-  assert resp.json() == {"status": "connected", "vault_path": VAULT}
+  body = resp.json()
+  assert body["status"] == "connected"
+  assert body["vault_path"] == VAULT
+  assert body["warnings"] == []
 
 
 def test_hello_forge_stdout():
@@ -33,6 +40,13 @@ def test_hello_forge_stdout():
   data = resp.json()
   assert data["type"] == "action"
   assert "Hello Forge" in data["stdout"]
+
+
+def test_connect_force_reloads():
+  client.post("/connect", json={"vault_path": VAULT})
+  resp = client.post("/connect", json={"vault_path": VAULT, "force": True})
+  assert resp.status_code == 200
+  assert resp.json()["status"] == "connected"
 
 
 def test_hello_forge_unknown_snippet():

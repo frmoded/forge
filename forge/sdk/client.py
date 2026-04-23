@@ -8,15 +8,20 @@ class Forge:
   def __init__(self):
     self._vault_path = None
 
-  def connect(self, path):
+  def connect(self, path, force=False):
     self._vault_path = path
     try:
       resp = requests.post(f"{BASE_URL}/connect",
-                           json={"vault_path": path}, timeout=2)
+                           json={"vault_path": path, "force": force}, timeout=2)
       resp.raise_for_status()
       return resp.json()
     except requests.exceptions.ConnectionError:
       return {"status": "offline", "vault_path": path}
+
+  def reload(self):
+    if self._vault_path is None:
+      raise RuntimeError("call connect() before reload()")
+    return self.connect(self._vault_path, force=True)
 
   def execute(self, snippet_id, **kwargs):
     if self._vault_path is None:
