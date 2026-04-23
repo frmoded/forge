@@ -1,14 +1,21 @@
 from forge.sdk import Forge
 
+VAULT = "/Users/odedfuhrmann/projects/obsidian_sandbox/sandbox"
+
 
 def main():
-  # Initialize the Forge client
   client = Forge()
 
-  # Verify Phase 1: Ensure the skeleton returns 3
-  result = client.test()
+  client.connect(VAULT)
 
-  print(f"Forge test result: {result}")
+  # Execute a data note — returns its YAML properties
+  # data_result = client.execute("hello_forge")
+  # print("data:", data_result)
+
+  # Execute an action note — runs its Python facet, captures stdout
+  action_result = client.execute("hello_forge", x=10, y=5)
+  print("action result:", action_result["result"])
+  print("captured stdout:", action_result["stdout"])
 
 
 if __name__ == "__main__":
