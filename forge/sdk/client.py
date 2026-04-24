@@ -32,7 +32,10 @@ class Forge:
       "kwargs": kwargs,
     }, timeout=5)
     if not resp.ok:
-      detail = resp.json().get("detail", resp.text) if resp.content else resp.reason
+      try:
+        detail = resp.json().get("detail", resp.text)
+      except Exception:
+        detail = resp.text or resp.reason
       raise RuntimeError(f"execute failed ({resp.status_code}): {detail}")
     return resp.json()
 

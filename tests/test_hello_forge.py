@@ -59,6 +59,32 @@ def test_hello_forge_unknown_snippet():
   assert resp.status_code == 404
 
 
+def test_greet_with_name():
+  client.post("/connect", json={"vault_path": VAULT})
+  resp = client.post("/execute", json={
+    "vault_path": VAULT,
+    "snippet_id": "greet",
+    "kwargs": {"name": "Alice"},
+  })
+  assert resp.status_code == 200
+  data = resp.json()
+  assert data["type"] == "action"
+  assert "Hello Alice" in data["stdout"]
+
+
+def test_hello_world_delegates_to_greet():
+  client.post("/connect", json={"vault_path": VAULT})
+  resp = client.post("/execute", json={
+    "vault_path": VAULT,
+    "snippet_id": "hello_world",
+    "kwargs": {},
+  })
+  assert resp.status_code == 200
+  data = resp.json()
+  assert data["type"] == "action"
+  assert "Hello world" in data["stdout"]
+
+
 def test_execute_without_connect():
   resp = client.post("/execute", json={
     "vault_path": VAULT,

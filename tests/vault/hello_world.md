@@ -1,12 +1,12 @@
 ---
 type: action
 inputs: []
-description: Hello Forge 
+description: Hello world 
 ---
 
 # English
 
-print "Hello Forge"
+[[greet]] "world"
 
 ---
 
@@ -14,5 +14,5 @@ print "Hello Forge"
 
 ```python
 def run(context):
-  print(f"Hello Forge")
+  return context.execute("greet", name="world")
 ```

@@ -9,3 +9,7 @@ dist/
 # OS files
 .DS_Store
 
+.venv/
+.vscode/
+forge.egg-info/
+

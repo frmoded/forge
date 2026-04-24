@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from forge.core.logic import get_test_value
 from forge.core.registry import SnippetRegistry, GraphResolver
-from forge.core.executor import extract_python, exec_python
+from forge.core.executor import extract_python, exec_python, SnippetExecError
 
 app = FastAPI()
 
@@ -96,7 +96,10 @@ def execute(req: ExecuteRequest, manager: VaultSessionManager = Depends(get_sess
     code = extract_python(body)
     if code is None:
       raise HTTPException(status_code=422, detail="no Python heading found in snippet")
-    stdout, result = exec_python(code, req.kwargs)
+    try:
+      stdout, result = exec_python(code, req.kwargs, state["resolver"])
+    except SnippetExecError as e:
+      raise HTTPException(status_code=422, detail={"error": str(e), "stdout": e.stdout})
     return {"type": "action", "result": result, "stdout": stdout}
 
   raise HTTPException(status_code=422, detail=f"unknown snippet type: {snippet_type}")
