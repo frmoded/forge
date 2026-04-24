@@ -52,6 +52,24 @@ class ForgeContext:
     raise ValueError(f"unknown type '{snippet_type}' for snippet '{snippet_id}'")
 
 
+def extract_section(body, heading):
+  """Extract plain-text content under a markdown heading (any level, case-insensitive)."""
+  pattern = re.compile(rf'^#{{1,6}}\s+{re.escape(heading)}\s*$', re.IGNORECASE)
+  lines = body.splitlines()
+  collecting = False
+  section_lines = []
+  for line in lines:
+    if pattern.match(line.strip()):
+      collecting = True
+      continue
+    if not collecting:
+      continue
+    if line.startswith("#") or line.strip() == "---":
+      break
+    section_lines.append(line)
+  return "\n".join(section_lines).strip() or None
+
+
 def extract_python(body):
   lines = body.splitlines()
   collecting = False

@@ -39,6 +39,22 @@ class Forge:
       raise RuntimeError(f"execute failed ({resp.status_code}): {detail}")
     return resp.json()
 
+  def generate(self, snippet_id, recursive=False):
+    if self._vault_path is None:
+      raise RuntimeError("call connect() before generate()")
+    resp = requests.post(f"{BASE_URL}/generate", json={
+      "vault_path": self._vault_path,
+      "snippet_id": snippet_id,
+      "recursive": recursive,
+    }, timeout=60)
+    if not resp.ok:
+      try:
+        detail = resp.json().get("detail", resp.text)
+      except Exception:
+        detail = resp.text or resp.reason
+      raise RuntimeError(f"generate failed ({resp.status_code}): {detail}")
+    return resp.json()
+
   def test(self):
     try:
       resp = requests.get(f"{BASE_URL}/test", timeout=2)

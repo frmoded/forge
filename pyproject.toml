@@ -9,7 +9,9 @@ dependencies = [
   "fastapi",
   "uvicorn",
   "requests",
-  "pyyaml"
+  "pyyaml",
+  "anthropic",
+  "python-dotenv"
 ]
 
 [project.optional-dependencies]

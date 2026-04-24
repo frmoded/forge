@@ -12,4 +12,5 @@ dist/
 .venv/
 .vscode/
 forge.egg-info/
+.env
 

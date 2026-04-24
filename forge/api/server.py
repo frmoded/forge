@@ -1,9 +1,13 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from forge.core.logic import get_test_value
 from forge.core.registry import SnippetRegistry, GraphResolver
 from forge.core.executor import extract_python, exec_python, SnippetExecError
+from forge.core.llm import generate_snippet_code
 
 app = FastAPI()
 
@@ -59,6 +63,12 @@ class ExecuteRequest(BaseModel):
   kwargs: dict = {}
 
 
+class GenerateRequest(BaseModel):
+  vault_path: str
+  snippet_id: str
+  recursive: bool = False
+
+
 @app.get("/test")
 def test():
   return {"result": get_test_value()}
@@ -103,3 +113,17 @@ def execute(req: ExecuteRequest, manager: VaultSessionManager = Depends(get_sess
     return {"type": "action", "result": result, "stdout": stdout}
 
   raise HTTPException(status_code=422, detail=f"unknown snippet type: {snippet_type}")
+
+
+@app.post("/generate")
+def generate(req: GenerateRequest, manager: VaultSessionManager = Depends(get_session_manager)):
+  state = manager.get(req.vault_path)
+  if state is None:
+    raise HTTPException(status_code=400, detail="vault not connected — call /connect first")
+  try:
+    generated = generate_snippet_code(req.snippet_id, state["registry"], req.recursive)
+  except KeyError as e:
+    raise HTTPException(status_code=404, detail=str(e))
+  except RuntimeError as e:
+    raise HTTPException(status_code=500, detail=str(e))
+  return {"snippet_id": req.snippet_id, "recursive": req.recursive, "generated": generated}
