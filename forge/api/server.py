@@ -1,13 +1,20 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import logging
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from forge.core.logic import get_test_value
 from forge.core.registry import SnippetRegistry, GraphResolver
-from forge.core.executor import extract_python, exec_python, SnippetExecError
+from forge.core.executor import extract_python, exec_python, SnippetExecError, extract_section
 from forge.core.llm import generate_snippet_code
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+logger.addHandler(_handler)
 
 app = FastAPI()
 
@@ -126,4 +133,10 @@ def generate(req: GenerateRequest, manager: VaultSessionManager = Depends(get_se
     raise HTTPException(status_code=404, detail=str(e))
   except RuntimeError as e:
     raise HTTPException(status_code=500, detail=str(e))
+
+  for sid, code in generated.items():
+    snippet = state["registry"].get(sid)
+    english = extract_section(snippet["body"], "english") if snippet else None
+    logger.info("generated [%s]\n  english: %s\n  python:\n%s", sid, english or "(none)", code)
+
   return {"snippet_id": req.snippet_id, "recursive": req.recursive, "generated": generated}

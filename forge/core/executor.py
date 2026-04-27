@@ -1,6 +1,8 @@
 import io
 import re
 import sys
+import math
+import random
 import builtins
 
 _PYTHON_HEADING = re.compile(r'^#{1,6}\s+python\s*$', re.IGNORECASE)
@@ -97,7 +99,7 @@ def extract_python(body):
 def exec_python(code, kwargs, resolver=None):
   buf = io.StringIO()
   context = ForgeContext(resolver, kwargs) if resolver is not None else None
-  local_ns = {**kwargs, "kwargs": kwargs, "__builtins__": _SAFE_BUILTINS}
+  local_ns = {**kwargs, "kwargs": kwargs, "__builtins__": _SAFE_BUILTINS, "random": random, "math": math}
   pre_exec_keys = set(local_ns.keys())
   old_stdout = sys.stdout
   sys.stdout = buf

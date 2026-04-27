@@ -38,8 +38,5 @@ def _parse_frontmatter(content):
   parts = content.split("---", 2)
   if len(parts) < 3:
     return {}, content
-  try:
-    meta = yaml.safe_load(parts[1]) or {}
-  except Exception:
-    meta = {}
+  meta = yaml.safe_load(parts[1]) or {}
   return meta, parts[2].strip()
