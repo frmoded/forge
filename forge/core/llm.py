@@ -16,7 +16,7 @@ Forge snippets are Python functions. Follow these conventions exactly:
 - Side-effect output:           print(...)
 - Return the result value at the end of the function.
 
-Available modules (already in scope, do NOT import them): random, math
+Available modules (already in scope, do NOT import them): random, math, numpy
 
 Output ONLY valid Python code. No markdown fences, no explanation, no comments."""
 

@@ -11,7 +11,8 @@ dependencies = [
   "requests",
   "pyyaml",
   "anthropic",
-  "python-dotenv"
+  "python-dotenv",
+  "numpy"
 ]
 
 [project.optional-dependencies]
