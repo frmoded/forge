@@ -17,14 +17,11 @@ After install, try `[[<vault_name>/...]]` to invoke any of its snippets.
 # Python
 
 ```python
-def run(context):
+def run(context, vault_name, version=None):
   from pathlib import Path
 
   if context.vault_path is None:
     raise RuntimeError("install requires an active session vault_path")
-
-  vault_name = context["vault_name"]
-  version = context.get("version")
 
   entry = context.execute(
     "forge/registry/lookup",

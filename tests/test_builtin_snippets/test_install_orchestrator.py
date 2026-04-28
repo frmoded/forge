@@ -52,7 +52,7 @@ def test_orchestrator_calls_subsnippets_in_order():
   }
   ctx = _FakeContext("/v", "forge-core", None, responses)
 
-  result = run(ctx)
+  result = run(ctx, "forge-core")
   call_ids = [c[0] for c in ctx.calls]
   assert call_ids == [
     "forge/registry/lookup",
@@ -80,7 +80,7 @@ def test_orchestrator_wires_outputs_into_inputs():
     "forge/registry/refresh": {},
   }
   ctx = _FakeContext("/my-vault", "lib", "0.3.0", responses)
-  run(ctx)
+  run(ctx, "lib", version="0.3.0")
 
   by_id = {sid: kw for sid, kw in ctx.calls}
 
@@ -111,7 +111,7 @@ def test_orchestrator_passes_through_optional_version():
     "forge/registry/refresh": {},
   }
   ctx = _FakeContext("/v", "n", None, responses)
-  result = run(ctx)
+  result = run(ctx, "n")
   by_id = {sid: kw for sid, kw in ctx.calls}
   assert by_id["forge/registry/lookup"]["version"] is None
   # add_dep records the *resolved* version from the lookup result
@@ -124,4 +124,4 @@ def test_orchestrator_requires_vault_path():
   run = _orchestrator_callable()
   ctx = _FakeContext(None, "forge-core", None, {})
   with pytest.raises(RuntimeError, match="vault_path"):
-    run(ctx)
+    run(ctx, "forge-core")
