@@ -148,14 +148,17 @@ def test_install_e2e_full_pipeline(tmp_path, monkeypatch, local_registry_server)
   cache_path = tmp_path / "cache" / "tarballs" / f"{sha}.tar.gz"
   assert cache_path.is_file()
 
-  assert "forge-core" in result and "0.1.0" in result
+  assert result["vault_name"] == "forge-core"
+  assert result["version"] == "0.1.0"
+  assert "[[forge-core/" in result["message"]
 
   # 10) Run install a second time. Cache hit on tarball — no second download.
   _, result2 = _run_install(
     code=install_code, registry=registry, resolver=resolver,
     vault_path=authoring, vault_name="forge-core",
   )
-  assert "forge-core" in result2 and "0.1.0" in result2
+  assert result2["vault_name"] == "forge-core"
+  assert result2["version"] == "0.1.0"
   tarball_hits = local_registry_server.request_counts["/forge-core-0.1.0.tar.gz"]
   assert tarball_hits == 1, f"expected 1 tarball download (cache hit on second install), got {tarball_hits}"
 

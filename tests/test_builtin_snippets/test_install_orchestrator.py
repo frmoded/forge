@@ -61,7 +61,9 @@ def test_orchestrator_calls_subsnippets_in_order():
     "forge/manifest/add_dep",
     "forge/registry/refresh",
   ]
-  assert result == "Installed forge-core@0.2.0"
+  assert result["vault_name"] == "forge-core"
+  assert result["version"] == "0.2.0"
+  assert "[[forge-core/" in result["message"]
 
 
 def test_orchestrator_wires_outputs_into_inputs():
@@ -114,7 +116,8 @@ def test_orchestrator_passes_through_optional_version():
   assert by_id["forge/registry/lookup"]["version"] is None
   # add_dep records the *resolved* version from the lookup result
   assert by_id["forge/manifest/add_dep"]["dep_version"] == "9.9.9"
-  assert result == "Installed n@9.9.9"
+  assert result["vault_name"] == "n"
+  assert result["version"] == "9.9.9"
 
 
 def test_orchestrator_requires_vault_path():

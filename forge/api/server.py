@@ -91,7 +91,12 @@ def connect(req: ConnectRequest, manager: VaultSessionManager = Depends(get_sess
   else:
     manager.connect(req.vault_path)
   state = manager.get(req.vault_path)
-  return {"status": "connected", "vault_path": req.vault_path, "warnings": state["registry"].errors}
+  return {
+    "status": "connected",
+    "vault_path": req.vault_path,
+    "warnings": state["registry"].errors,
+    "snippets": state["registry"].list_snippets(),
+  }
 
 
 @app.post("/execute")

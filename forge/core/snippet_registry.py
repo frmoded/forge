@@ -85,6 +85,13 @@ class SnippetRegistry:
   def loaded_vaults(self) -> list:
     return list(self._vaults.keys())
 
+  def list_snippets(self) -> dict:
+    """Return {vault_name: sorted([bare_id, ...])}. Used by /connect for inventory."""
+    return {
+      vault: sorted(snippets.keys())
+      for vault, snippets in self._vaults.items()
+    }
+
   def resolution_order(self) -> list:
     return list(self._order)
 

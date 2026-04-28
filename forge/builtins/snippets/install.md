@@ -54,5 +54,9 @@ def run(context):
 
   context.execute("forge/registry/refresh")
 
-  return f"Installed {vault_name}@{entry['version']}"
+  return {
+    "vault_name": vault_name,
+    "version": entry["version"],
+    "message": f"Installed {vault_name}@{entry['version']}. Now try [[{vault_name}/...]] to invoke any of its snippets.",
+  }
 ```
