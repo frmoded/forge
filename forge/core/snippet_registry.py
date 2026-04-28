@@ -4,6 +4,7 @@ import yaml
 
 AUTHORING_VAULT = "authoring"
 BUILTIN_VAULT = "forge"
+_MANIFEST_FILENAME = "forge.toml"
 
 
 class SnippetRegistry:
@@ -14,15 +15,35 @@ class SnippetRegistry:
     self.errors: list = []
 
   def scan(self, vault_path, vault_name: str = AUTHORING_VAULT, source: str = "authoring"):
-    """Scan a filesystem vault, indexing every .md file with type=action|data."""
+    """Scan a filesystem vault.
+
+    Top-level subdirectories that contain a forge.toml are treated as library
+    vaults and indexed under their own namespace (per ADR 0001/0002). All other
+    .md files are indexed under vault_name.
+    """
     self.errors = []
     self._vaults[vault_name] = {}
-    for root, _, files in os.walk(vault_path):
+    vault_path = os.fspath(vault_path)
+
+    library_dirs = self._detect_library_vaults(vault_path)
+    library_dir_names = {os.path.basename(p) for p in library_dirs}
+
+    for root, dirs, files in os.walk(vault_path):
+      if root == vault_path:
+        # prune library vault subdirs from the authoring traversal
+        dirs[:] = [d for d in dirs if d not in library_dir_names]
       for fname in files:
         if fname.endswith(".md"):
-          err = self._index(os.path.join(root, fname), vault_name, source)
+          err = self._index_authoring_file(
+            os.path.join(root, fname), vault_name, source
+          )
           if err:
             self.errors.append(err)
+
+    for lib_path in library_dirs:
+      self._scan_library_vault(lib_path)
+
+    self._auto_set_resolution_order(vault_path)
 
   def register_builtin_vault(self, snippets: list) -> None:
     """Ingest pre-parsed builtin snippets (from forge.builtins.loader)."""
@@ -67,7 +88,66 @@ class SnippetRegistry:
   def resolution_order(self) -> list:
     return list(self._order)
 
-  def _index(self, filepath: str, vault_name: str, source: str) -> Optional[str]:
+  # --- internals ---
+
+  def _detect_library_vaults(self, vault_path: str) -> list:
+    if not os.path.isdir(vault_path):
+      return []
+    out = []
+    for entry in sorted(os.listdir(vault_path)):
+      sub = os.path.join(vault_path, entry)
+      if os.path.isdir(sub) and os.path.isfile(os.path.join(sub, _MANIFEST_FILENAME)):
+        out.append(sub)
+    return out
+
+  def _scan_library_vault(self, lib_path: str) -> Optional[str]:
+    try:
+      from forge.core.manifest import read_manifest
+      m = read_manifest(lib_path)
+      name = m.name
+    except Exception as e:
+      self.errors.append(f"{lib_path}: failed to read library manifest: {e}")
+      return None
+
+    self._vaults[name] = {}
+    for root, _, files in os.walk(lib_path):
+      for fname in files:
+        if not fname.endswith(".md"):
+          continue
+        filepath = os.path.join(root, fname)
+        try:
+          with open(filepath, encoding="utf-8") as f:
+            content = f.read()
+          meta, body = parse_frontmatter(content)
+          rel = os.path.relpath(filepath, lib_path)
+          bare_id = os.path.splitext(rel)[0].replace(os.sep, "/")
+          if meta.get("type") in ("action", "data"):
+            self._vaults[name][bare_id] = {
+              "meta": meta,
+              "body": body,
+              "path": filepath,
+              "vault": name,
+              "source": "library",
+              "snippet_id": f"{name}/{bare_id}",
+            }
+        except Exception as e:
+          self.errors.append(f"{filepath}: {e}")
+    return name
+
+  def _auto_set_resolution_order(self, vault_path: str) -> None:
+    manifest_path = os.path.join(vault_path, _MANIFEST_FILENAME)
+    if not os.path.isfile(manifest_path):
+      return
+    try:
+      from forge.core.manifest import read_manifest
+      m = read_manifest(vault_path)
+    except Exception as e:
+      self.errors.append(f"{manifest_path}: {e}")
+      return
+    lib_order = [d.name for d in m.dependencies]
+    self.set_resolution_order([AUTHORING_VAULT, *lib_order])
+
+  def _index_authoring_file(self, filepath: str, vault_name: str, source: str) -> Optional[str]:
     try:
       with open(filepath, encoding="utf-8") as f:
         content = f.read()

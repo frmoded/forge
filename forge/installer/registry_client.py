@@ -15,8 +15,13 @@ _TTL_SECONDS = 5 * 60
 _cache: dict = {}
 
 
-def fetch_index(url: str) -> dict:
-  """GET, parse, validate, and cache the registry index."""
+def fetch_index(url: str, allow_insecure_schemes: bool = False) -> dict:
+  """GET, parse, validate, and cache the registry index.
+
+  allow_insecure_schemes: when True, accept http:// tarball URLs in addition
+  to https://. Intended for integration tests against local servers; never
+  enable in production.
+  """
   cached = _cache.get(url)
   now = time.monotonic()
   if cached is not None:
@@ -25,7 +30,7 @@ def fetch_index(url: str) -> dict:
       return data
 
   raw = get_json(url)
-  _validate_index(raw)
+  _validate_index(raw, allow_insecure_schemes=allow_insecure_schemes)
   _cache[url] = (now + _TTL_SECONDS, raw)
   return raw
 
@@ -57,7 +62,7 @@ def clear_cache() -> None:
   _cache.clear()
 
 
-def _validate_index(raw: dict) -> None:
+def _validate_index(raw: dict, allow_insecure_schemes: bool = False) -> None:
   if not isinstance(raw, dict):
     raise ValidationError("registry index is not a JSON object")
 
@@ -70,10 +75,10 @@ def _validate_index(raw: dict) -> None:
     raise ValidationError("'vaults' must be an object")
 
   for name, vault in vaults.items():
-    _validate_vault(name, vault)
+    _validate_vault(name, vault, allow_insecure_schemes=allow_insecure_schemes)
 
 
-def _validate_vault(name: str, vault: dict) -> None:
+def _validate_vault(name: str, vault: dict, allow_insecure_schemes: bool = False) -> None:
   if not isinstance(vault, dict):
     raise ValidationError(f"vault '{name}' is not an object")
 
@@ -87,7 +92,7 @@ def _validate_vault(name: str, vault: dict) -> None:
 
   for version_str, version_entry in versions.items():
     _validate_version_key(name, version_str)
-    _validate_version_entry(name, version_str, version_entry)
+    _validate_version_entry(name, version_str, version_entry, allow_insecure_schemes=allow_insecure_schemes)
 
 
 def _validate_version_key(vault_name: str, version_str: str) -> None:
@@ -97,13 +102,15 @@ def _validate_version_key(vault_name: str, version_str: str) -> None:
     raise ValidationError(f"vault '{vault_name}' has invalid SemVer key '{version_str}': {e}")
 
 
-def _validate_version_entry(vault_name: str, version_str: str, entry: dict) -> None:
+def _validate_version_entry(vault_name: str, version_str: str, entry: dict, allow_insecure_schemes: bool = False) -> None:
   if not isinstance(entry, dict):
     raise ValidationError(f"{vault_name}@{version_str}: entry must be an object")
 
   tarball = entry.get("tarball")
-  if not isinstance(tarball, str) or not tarball.startswith("https://"):
-    raise ValidationError(f"{vault_name}@{version_str}: tarball must be an HTTPS URL")
+  allowed_prefixes = ("https://", "http://") if allow_insecure_schemes else ("https://",)
+  if not isinstance(tarball, str) or not tarball.startswith(allowed_prefixes):
+    expected = "HTTPS" if not allow_insecure_schemes else "HTTPS or HTTP"
+    raise ValidationError(f"{vault_name}@{version_str}: tarball must be a {expected} URL")
 
   sha = entry.get("sha256")
   if not isinstance(sha, str) or not _SHA256_RE.match(sha):
