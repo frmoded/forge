@@ -70,7 +70,8 @@ class ConnectRequest(BaseModel):
 class ExecuteRequest(BaseModel):
   vault_path: str
   snippet_id: str
-  kwargs: dict = {}
+  args: list = []
+  inputs: dict = {}
 
 
 class GenerateRequest(BaseModel):
@@ -125,7 +126,8 @@ def execute(req: ExecuteRequest, manager: VaultSessionManager = Depends(get_sess
     trusted = snippet.get("source") == "builtin"
     try:
       stdout, result = exec_python(
-        code, req.kwargs, state["resolver"],
+        code, req.inputs, state["resolver"],
+        args=req.args,
         vault_path=req.vault_path,
         registry=state["registry"],
         trusted=trusted,

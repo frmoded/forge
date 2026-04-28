@@ -106,7 +106,7 @@ def test_install_via_api_full_flow(tmp_path, monkeypatch, local_registry_server,
   resp = api_client.post("/execute", json={
     "vault_path": str(authoring),
     "snippet_id": "install",
-    "kwargs": {"vault_name": "forge-core"},
+    "inputs": {"vault_name": "forge-core"},
   })
   assert resp.status_code == 200, resp.text
   payload = resp.json()
@@ -129,7 +129,7 @@ def test_install_via_api_full_flow(tmp_path, monkeypatch, local_registry_server,
   resp = api_client.post("/execute", json={
     "vault_path": str(authoring),
     "snippet_id": "forge-core/hello_registry",
-    "kwargs": {},
+    "inputs": {},
   })
   assert resp.status_code == 200, resp.text
   payload = resp.json()
@@ -168,7 +168,7 @@ def test_install_via_api_propagates_failure(tmp_path, monkeypatch, local_registr
   resp = api_client.post("/execute", json={
     "vault_path": str(authoring),
     "snippet_id": "install",
-    "kwargs": {"vault_name": "forge-core"},
+    "inputs": {"vault_name": "forge-core"},
   })
   assert resp.status_code == 422
   detail = resp.json()["detail"]

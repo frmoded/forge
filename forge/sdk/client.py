@@ -23,13 +23,14 @@ class Forge:
       raise RuntimeError("call connect() before reload()")
     return self.connect(self._vault_path, force=True)
 
-  def execute(self, snippet_id, **kwargs):
+  def execute(self, snippet_id, *args, **inputs):
     if self._vault_path is None:
       raise RuntimeError("call connect() before execute()")
     resp = requests.post(f"{BASE_URL}/execute", json={
       "vault_path": self._vault_path,
       "snippet_id": snippet_id,
-      "kwargs": kwargs,
+      "args": list(args),
+      "inputs": inputs,
     }, timeout=5)
     if not resp.ok:
       try:

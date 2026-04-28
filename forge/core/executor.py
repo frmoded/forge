@@ -27,19 +27,19 @@ class ForgeContext:
   """Passed as the `context` argument to run(context). Carries session state and
   allows snippets to call other snippets."""
 
-  def __init__(self, resolver, kwargs, vault_path=None, registry=None):
+  def __init__(self, resolver, inputs, vault_path=None, registry=None):
     self._resolver = resolver
-    self._kwargs = kwargs
+    self._inputs = inputs
     self.vault_path = vault_path
     self.registry = registry
 
   def get(self, key, default=None):
-    return self._kwargs.get(key, default)
+    return self._inputs.get(key, default)
 
   def __getitem__(self, key):
-    return self._kwargs[key]
+    return self._inputs[key]
 
-  def execute(self, snippet_id, **kwargs):
+  def execute(self, snippet_id, *args, **inputs):
     if self._resolver is None:
       raise RuntimeError("context.execute requires a resolver")
     # SnippetResolutionError propagates with structured "searched" info per ADR 0002
@@ -53,7 +53,8 @@ class ForgeContext:
         raise ValueError(f"no Python heading in snippet '{snippet_id}'")
       nested_trusted = snippet.get("source") == "builtin"
       nested_stdout, result = exec_python(
-        code, kwargs, self._resolver,
+        code, inputs, self._resolver,
+        args=args,
         vault_path=self.vault_path,
         registry=self.registry,
         trusted=nested_trusted,
@@ -108,11 +109,11 @@ def extract_python(body):
   return "\n".join(code_lines).strip() or None
 
 
-def exec_python(code, kwargs, resolver=None, vault_path=None, registry=None, trusted=False):
+def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False):
   buf = io.StringIO()
-  context = ForgeContext(resolver, kwargs, vault_path=vault_path, registry=registry)
+  context = ForgeContext(resolver, inputs, vault_path=vault_path, registry=registry)
   builtins_for_exec = builtins.__dict__ if trusted else _SAFE_BUILTINS
-  local_ns = {**kwargs, "kwargs": kwargs, "__builtins__": builtins_for_exec, "random": random, "math": math, "numpy": numpy}
+  local_ns = {**inputs, "inputs": inputs, "__builtins__": builtins_for_exec, "random": random, "math": math, "numpy": numpy}
   pre_exec_keys = set(local_ns.keys())
   old_stdout = sys.stdout
   sys.stdout = buf
@@ -120,7 +121,13 @@ def exec_python(code, kwargs, resolver=None, vault_path=None, registry=None, tru
     exec(compile(code, "<snippet>", "exec"), local_ns)
     fn = _find_entrypoint(local_ns, pre_exec_keys)
     if fn is not None:
-      result = fn(context, **kwargs) if _takes_kwargs(fn) else fn(context)
+      # Snippets are called as fn(context, *args, **inputs); Python's normal
+      # parameter resolution maps positionals to declared params and rejects
+      # mismatches with TypeError.
+      if _takes_only_context(fn):
+        result = fn(context)
+      else:
+        result = fn(context, *args, **inputs)
       local_ns["result"] = result
   except Exception as e:
     raise SnippetExecError(str(e), stdout=buf.getvalue()) from e
@@ -140,13 +147,16 @@ def _find_entrypoint(local_ns, pre_exec_keys):
   return new_callables[0] if new_callables else None
 
 
-def _takes_kwargs(fn):
-  """True if the function accepts more than one positional argument."""
+def _takes_only_context(fn):
+  """True if the function declares exactly one positional parameter and no var-args.
+  Lets snippets like `def run(context):` ignore extra inputs cleanly."""
   import inspect
   try:
     sig = inspect.signature(fn)
-    params = [p for p in sig.parameters.values()
-              if p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY)]
-    return len(params) > 1
+    pos_params = [p for p in sig.parameters.values()
+                  if p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY)]
+    has_var_pos = any(p.kind == p.VAR_POSITIONAL for p in sig.parameters.values())
+    has_var_kw = any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values())
+    return len(pos_params) == 1 and not has_var_pos and not has_var_kw
   except (ValueError, TypeError):
     return False

@@ -30,6 +30,6 @@ def test_execute_without_connect_returns_400(client):
   resp = client.post("/execute", json={
     "vault_path": VAULT,
     "snippet_id": "hello_forge",
-    "kwargs": {},
+    "inputs": {},
   })
   assert resp.status_code == 400
