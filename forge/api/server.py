@@ -117,8 +117,14 @@ def execute(req: ExecuteRequest, manager: VaultSessionManager = Depends(get_sess
     code = extract_python(body)
     if code is None:
       raise HTTPException(status_code=422, detail="no Python heading found in snippet")
+    trusted = snippet.get("source") == "builtin"
     try:
-      stdout, result = exec_python(code, req.kwargs, state["resolver"])
+      stdout, result = exec_python(
+        code, req.kwargs, state["resolver"],
+        vault_path=req.vault_path,
+        registry=state["registry"],
+        trusted=trusted,
+      )
     except SnippetExecError as e:
       raise HTTPException(status_code=422, detail={"error": str(e), "stdout": e.stdout})
     return {"type": "action", "result": result, "stdout": stdout}

@@ -24,10 +24,14 @@ class SnippetExecError(Exception):
 
 
 class ForgeContext:
-  """Passed as the `context` argument to run(context). Allows snippets to call other snippets."""
-  def __init__(self, resolver, kwargs):
+  """Passed as the `context` argument to run(context). Carries session state and
+  allows snippets to call other snippets."""
+
+  def __init__(self, resolver, kwargs, vault_path=None, registry=None):
     self._resolver = resolver
     self._kwargs = kwargs
+    self.vault_path = vault_path
+    self.registry = registry
 
   def get(self, key, default=None):
     return self._kwargs.get(key, default)
@@ -36,6 +40,8 @@ class ForgeContext:
     return self._kwargs[key]
 
   def execute(self, snippet_id, **kwargs):
+    if self._resolver is None:
+      raise RuntimeError("context.execute requires a resolver")
     # SnippetResolutionError propagates with structured "searched" info per ADR 0002
     snippet = self._resolver.resolve(snippet_id)
     meta = snippet["meta"]
@@ -45,7 +51,13 @@ class ForgeContext:
       code = extract_python(body)
       if code is None:
         raise ValueError(f"no Python heading in snippet '{snippet_id}'")
-      nested_stdout, result = exec_python(code, kwargs, self._resolver)
+      nested_trusted = snippet.get("source") == "builtin"
+      nested_stdout, result = exec_python(
+        code, kwargs, self._resolver,
+        vault_path=self.vault_path,
+        registry=self.registry,
+        trusted=nested_trusted,
+      )
       if nested_stdout:
         sys.stdout.write(nested_stdout)
       return result
@@ -96,10 +108,11 @@ def extract_python(body):
   return "\n".join(code_lines).strip() or None
 
 
-def exec_python(code, kwargs, resolver=None):
+def exec_python(code, kwargs, resolver=None, vault_path=None, registry=None, trusted=False):
   buf = io.StringIO()
-  context = ForgeContext(resolver, kwargs) if resolver is not None else None
-  local_ns = {**kwargs, "kwargs": kwargs, "__builtins__": _SAFE_BUILTINS, "random": random, "math": math, "numpy": numpy}
+  context = ForgeContext(resolver, kwargs, vault_path=vault_path, registry=registry)
+  builtins_for_exec = builtins.__dict__ if trusted else _SAFE_BUILTINS
+  local_ns = {**kwargs, "kwargs": kwargs, "__builtins__": builtins_for_exec, "random": random, "math": math, "numpy": numpy}
   pre_exec_keys = set(local_ns.keys())
   old_stdout = sys.stdout
   sys.stdout = buf
@@ -107,8 +120,7 @@ def exec_python(code, kwargs, resolver=None):
     exec(compile(code, "<snippet>", "exec"), local_ns)
     fn = _find_entrypoint(local_ns, pre_exec_keys)
     if fn is not None:
-      call_context = context if context is not None else kwargs
-      result = fn(call_context, **kwargs) if _takes_kwargs(fn) else fn(call_context)
+      result = fn(context, **kwargs) if _takes_kwargs(fn) else fn(context)
       local_ns["result"] = result
   except Exception as e:
     raise SnippetExecError(str(e), stdout=buf.getvalue()) from e
