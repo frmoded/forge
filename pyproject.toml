@@ -12,11 +12,14 @@ dependencies = [
   "pyyaml",
   "anthropic",
   "python-dotenv",
-  "numpy"
+  "numpy",
+  "tomli; python_version < '3.11'",
+  "tomli_w",
+  "packaging"
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "httpx"]
+dev = ["pytest", "httpx", "responses"]
 
 [tool.pytest.ini_options]
 log_cli = true

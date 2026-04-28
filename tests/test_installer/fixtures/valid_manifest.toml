@@ -1,0 +1,11 @@
+name = "my-vault"
+version = "0.1.0"
+description = "A test vault for unit tests."
+
+[[dependencies]]
+name = "forge-core"
+version = "0.1.0"
+
+[[dependencies]]
+name = "another-vault"
+version = "1.2.3"
