@@ -96,11 +96,15 @@ def test_generate_hello_world_recursive_executes_full_chain(client, partial_vaul
   assert "partial_greet" in generated
 
   registry = SnippetRegistry()
+  registry._vaults.setdefault("authoring", {})
   for sid, code in generated.items():
-    registry._snippets[sid] = {
+    registry._vaults["authoring"][sid] = {
       "meta": {"type": "action"},
       "body": f"# Python\n\n```python\n{code}\n```",
       "path": "",
+      "vault": "authoring",
+      "source": "authoring",
+      "snippet_id": f"authoring/{sid}",
     }
   resolver = GraphResolver(registry)
 

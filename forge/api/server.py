@@ -8,7 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from forge.core.logic import get_test_value
 from forge.core.registry import SnippetRegistry, GraphResolver
 from forge.core.executor import extract_python, exec_python, SnippetExecError, extract_section
+from forge.core.exceptions import SnippetResolutionError
 from forge.core.llm import generate_snippet_code
+from forge.builtins.loader import load_builtin_vault
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -40,6 +42,7 @@ class VaultSessionManager:
   def _load(self, vault_path):
     registry = SnippetRegistry()
     registry.scan(vault_path)
+    registry.register_builtin_vault(load_builtin_vault())
     self._states[vault_path] = {
       "registry": registry,
       "resolver": GraphResolver(registry),
@@ -97,9 +100,10 @@ def execute(req: ExecuteRequest, manager: VaultSessionManager = Depends(get_sess
   if state is None:
     raise HTTPException(status_code=400, detail="vault not connected — call /connect first")
 
-  snippet = state["resolver"].resolve(req.snippet_id)
-  if snippet is None:
-    raise HTTPException(status_code=404, detail=f"snippet '{req.snippet_id}' not found in vault index")
+  try:
+    snippet = state["resolver"].resolve(req.snippet_id)
+  except SnippetResolutionError as e:
+    raise HTTPException(status_code=404, detail=str(e))
 
   meta = snippet["meta"]
   body = snippet["body"]

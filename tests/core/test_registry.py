@@ -57,8 +57,18 @@ def test_graph_resolver_finds_indexed_snippet():
   assert resolver.resolve("hello_forge") is not None
 
 
-def test_graph_resolver_returns_none_for_missing():
+def test_graph_resolver_try_resolve_returns_none_for_missing():
   registry = SnippetRegistry()
   registry.scan(VAULT)
   resolver = GraphResolver(registry)
-  assert resolver.resolve("does_not_exist") is None
+  assert resolver.try_resolve("does_not_exist") is None
+
+
+def test_graph_resolver_resolve_raises_for_missing():
+  from forge.core.exceptions import SnippetResolutionError
+  import pytest
+  registry = SnippetRegistry()
+  registry.scan(VAULT)
+  resolver = GraphResolver(registry)
+  with pytest.raises(SnippetResolutionError):
+    resolver.resolve("does_not_exist")

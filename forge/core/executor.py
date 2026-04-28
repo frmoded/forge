@@ -36,9 +36,8 @@ class ForgeContext:
     return self._kwargs[key]
 
   def execute(self, snippet_id, **kwargs):
+    # SnippetResolutionError propagates with structured "searched" info per ADR 0002
     snippet = self._resolver.resolve(snippet_id)
-    if snippet is None:
-      raise KeyError(f"snippet '{snippet_id}' not found")
     meta = snippet["meta"]
     body = snippet["body"]
     snippet_type = meta.get("type")
