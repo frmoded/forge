@@ -16,7 +16,7 @@ Install a vault from the registry.
 # Python
 
 ```python
-def run(context):
+def compute(context):
   return "ok"
 ```
 """

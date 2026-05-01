@@ -8,13 +8,13 @@ def main():
 
   client.connect(VAULT)
 
-  # Execute a data note — returns its YAML properties
-  # data_result = client.execute("hello_forge")
+  # Compute a data note — returns its YAML properties
+  # data_result = client.compute("hello_forge")
   # print("data:", data_result)
 
-  # Execute an action note — runs its Python facet, captures stdout
-  action_result = client.execute("hello_world")
-  # action_result = client.execute("hello_forge", x=10, y=5)
+  # Compute an action note — runs its Python facet, captures stdout
+  action_result = client.compute("hello_world")
+  # action_result = client.compute("hello_forge", x=10, y=5)
   print("action result:", action_result["result"])
   print("captured stdout:", action_result["stdout"])
 

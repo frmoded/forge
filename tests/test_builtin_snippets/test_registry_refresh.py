@@ -15,7 +15,7 @@ description: tiny seed snippet for refresh tests
 # Python
 
 ```python
-def run(context):
+def compute(context):
   return 1
 ```
 """

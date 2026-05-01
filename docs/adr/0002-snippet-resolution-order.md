@@ -14,7 +14,7 @@ references snippets) get predictable behavior.
 
 ## Decision
 For bare snippet references — e.g., `[[install]]` or
-`context.execute("install")` — Forge resolves in the following order
+`context.compute("install")` — Forge resolves in the following order
 and returns the first match:
 
 1. The authoring vault (the user's primary working vault).
@@ -23,7 +23,7 @@ and returns the first match:
 3. The built-in vault (`forge`).
 
 For qualified references — e.g., `[[3js/sphere]]` or
-`context.execute("forge/install")` — resolution skips the order entirely
+`context.compute("forge/install")` — resolution skips the order entirely
 and goes directly to the named vault. If the named vault is not loaded,
 the resolver raises a structured error.
 

@@ -13,6 +13,6 @@ description: Hello world
 # Python
 
 ```python
-def run(context):
-  return context.execute("greet", name="world")
+def compute(context):
+  return context.compute("greet", name="world")
 ```

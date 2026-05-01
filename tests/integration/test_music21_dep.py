@@ -13,7 +13,7 @@ from forge.core.executor import exec_python
 
 
 _SNIPPET_BODY = """
-def run(context):
+def compute(context):
   from music21 import note
   n = note.Note("D4")
   return {"name": n.name, "octave": n.octave, "midi": n.pitch.midi}
@@ -38,7 +38,7 @@ def test_runtime_matches_direct_music21_baseline():
 def test_music21_chord_through_runtime():
   """Exercise a slightly richer surface so a future music21 break is caught here."""
   body = """
-def run(context):
+def compute(context):
   from music21 import chord
   c = chord.Chord(["C4", "E4", "G4"])
   return {

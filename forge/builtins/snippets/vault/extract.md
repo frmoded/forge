@@ -15,7 +15,7 @@ vault directory path.
 # Python
 
 ```python
-def run(context):
+def compute(context):
   from pathlib import Path
   from forge.installer.tarball import extract_tarball
   from forge.core.manifest import read_manifest

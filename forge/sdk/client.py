@@ -23,10 +23,10 @@ class Forge:
       raise RuntimeError("call connect() before reload()")
     return self.connect(self._vault_path, force=True)
 
-  def execute(self, snippet_id, *args, **inputs):
+  def compute(self, snippet_id, *args, **inputs):
     if self._vault_path is None:
-      raise RuntimeError("call connect() before execute()")
-    resp = requests.post(f"{BASE_URL}/execute", json={
+      raise RuntimeError("call connect() before compute()")
+    resp = requests.post(f"{BASE_URL}/compute", json={
       "vault_path": self._vault_path,
       "snippet_id": snippet_id,
       "args": list(args),
@@ -37,7 +37,7 @@ class Forge:
         detail = resp.json().get("detail", resp.text)
       except Exception:
         detail = resp.text or resp.reason
-      raise RuntimeError(f"execute failed ({resp.status_code}): {detail}")
+      raise RuntimeError(f"compute failed ({resp.status_code}): {detail}")
     return resp.json()
 
   def generate(self, snippet_id, recursive=False):

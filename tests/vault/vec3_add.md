@@ -7,8 +7,8 @@ description: Adds two 3D vectors and prints the result
 # Python
 
 ```python
-def vec3_add(context, a, b):
+def compute(context, a, b):
   result = (numpy.array(a) + numpy.array(b)).tolist()
-  context.execute("vec3_print", v=result)
+  context.compute("vec3_print", v=result)
   return result
 ```

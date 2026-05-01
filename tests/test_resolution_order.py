@@ -7,7 +7,7 @@ from forge.core.exceptions import SnippetResolutionError
 def _make_builtin(snippet_id: str, marker: str = "builtin") -> dict:
   return {
     "meta": {"type": "action", "marker": marker},
-    "body": f"# Python\n\n```python\ndef run(context):\n  return '{marker}'\n```\n",
+    "body": f"# Python\n\n```python\ndef compute(context):\n  return '{marker}'\n```\n",
     "path": "/builtins/x.md",
     "vault": "forge",
     "source": "builtin",

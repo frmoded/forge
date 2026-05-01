@@ -6,17 +6,17 @@ already implements everything described here; nothing here is aspirational.
 
 ## Trigger
 
-Plugin POSTs `/execute`:
+Plugin POSTs `/compute`:
 
 ```json
 {
   "vault_path": "/path/to/authoring/vault",
   "snippet_id": "install",
-  "kwargs": {"vault_name": "forge-core"}
+  "inputs": {"vault_name": "forge-core"}
 }
 ```
 
-Optional `kwargs.version` pins to a specific SemVer. Omitted means "latest"
+Optional `inputs.version` pins to a specific SemVer. Omitted means "latest"
 (resolved from the registry index's `latest` field).
 
 The plugin must have called `/connect` for `vault_path` first. `install` is a
@@ -64,7 +64,7 @@ same `vault_path`. The response includes a `snippets` map:
 Keys are vault namespaces; values are bare snippet IDs within each namespace.
 Use this to populate autocomplete and to confirm the new vault is live.
 
-The backend keeps the registry instance live across `/execute` calls — the
+The backend keeps the registry instance live across `/compute` calls — the
 install's internal `forge/registry/refresh` step mutates it in place — so the
 second `/connect` reflects post-install state without a force flag. (POST
 `/connect` with `force: true` would re-scan the filesystem; not required here.)
@@ -114,7 +114,7 @@ it didn't.
 - Two installs of **different** vaults running concurrently are safe. Each
   goes through its own pipeline; they share the registry index cache (5-min
   TTL) but don't otherwise contend.
-- Concurrent install + execute of an unrelated snippet is safe. `/execute`
+- Concurrent install + compute of an unrelated snippet is safe. `/compute`
   doesn't lock the registry; the in-place mutation by `forge/registry/refresh`
   is a single dict reassignment.
 

@@ -13,7 +13,7 @@ version.
 # Python
 
 ```python
-def run(context):
+def compute(context):
   from forge.config import get_config
   from forge.installer.registry_client import fetch_index, lookup
   cfg = get_config()

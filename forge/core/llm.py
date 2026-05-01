@@ -9,9 +9,10 @@ _client = None
 _SYSTEM_PROMPT = """You are a code generator for the Forge snippet system.
 
 Forge snippets are Python functions. Follow these conventions exactly:
-- Snippets with no inputs:      def run(context): ...
-- Snippets with named inputs:   def fn_name(context, param1, param2): ...
-- Call another snippet:         context.execute("snippet_id", param=value)
+- Every snippet's entrypoint must be named `compute`.
+- Snippets with no inputs:      def compute(context): ...
+- Snippets with named inputs:   def compute(context, param1, param2): ...
+- Call another snippet:         context.compute("snippet_id", param=value)
 - Read an input parameter:      context.get("key", default)
 - Side-effect output:           print(...)
 - Return the result value at the end of the function.
@@ -67,7 +68,7 @@ def _call_llm(snippet_id, meta, body, deps, registry):
       if dep:
         dep_desc = dep["meta"].get("description", "").strip()
         dep_inputs = dep["meta"].get("inputs") or []
-        sig = f"context.execute(\"{dep_id}\"{', ' + ', '.join(f'{i}=...' for i in dep_inputs) if dep_inputs else ''})"
+        sig = f"context.compute(\"{dep_id}\"{', ' + ', '.join(f'{i}=...' for i in dep_inputs) if dep_inputs else ''})"
         dep_lines.append(f"  - {dep_id}: {dep_desc}  →  {sig}")
     if dep_lines:
       lines.append("Available snippets to call:\n" + "\n".join(dep_lines))
@@ -84,7 +85,7 @@ def _call_llm(snippet_id, meta, body, deps, registry):
 
 
 def _find_deps(body):
-  """Find snippet IDs referenced via [[wiki-links]] or context.execute() calls."""
+  """Find snippet IDs referenced via [[wiki-links]] or context.compute() calls."""
   deps = []
   seen = set()
   for m in re.finditer(r'\[\[([^\]|#]+?)(?:\|[^\]]*)?\]\]', body):
@@ -92,7 +93,7 @@ def _find_deps(body):
     if dep not in seen:
       deps.append(dep)
       seen.add(dep)
-  for m in re.finditer(r'context\.execute\(\s*["\']([^"\']+)["\']', body):
+  for m in re.finditer(r'context\.compute\(\s*["\']([^"\']+)["\']', body):
     dep = m.group(1).strip()
     if dep not in seen:
       deps.append(dep)

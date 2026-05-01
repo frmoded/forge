@@ -26,7 +26,7 @@ Print and return "hello registry".
 # Python
 
 ```python
-def run(context):
+def compute(context):
   print("hello registry")
   return "hello registry"
 ```
@@ -102,8 +102,8 @@ def test_install_via_api_full_flow(tmp_path, monkeypatch, local_registry_server,
   assert "install" in body["snippets"]["forge"]
   assert "forge-core" not in body["snippets"]
 
-  # 5) POST /execute install.
-  resp = api_client.post("/execute", json={
+  # 5) POST /compute install.
+  resp = api_client.post("/compute", json={
     "vault_path": str(authoring),
     "snippet_id": "install",
     "inputs": {"vault_name": "forge-core"},
@@ -125,8 +125,8 @@ def test_install_via_api_full_flow(tmp_path, monkeypatch, local_registry_server,
   assert "forge-core" in body["snippets"]
   assert "hello_registry" in body["snippets"]["forge-core"]
 
-  # 8) POST /execute the new vault's snippet via qualified reference.
-  resp = api_client.post("/execute", json={
+  # 8) POST /compute the new vault's snippet via qualified reference.
+  resp = api_client.post("/compute", json={
     "vault_path": str(authoring),
     "snippet_id": "forge-core/hello_registry",
     "inputs": {},
@@ -165,7 +165,7 @@ def test_install_via_api_propagates_failure(tmp_path, monkeypatch, local_registr
   monkeypatch.setenv("FORGE_CACHE_DIR", str(tmp_path / "cache"))
 
   api_client.post("/connect", json={"vault_path": str(authoring)})
-  resp = api_client.post("/execute", json={
+  resp = api_client.post("/compute", json={
     "vault_path": str(authoring),
     "snippet_id": "install",
     "inputs": {"vault_name": "forge-core"},

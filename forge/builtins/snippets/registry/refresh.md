@@ -13,7 +13,7 @@ has changed.
 # Python
 
 ```python
-def run(context):
+def compute(context):
   if context.registry is None or context.vault_path is None:
     raise RuntimeError("registry/refresh requires registry and vault_path on context")
   context.registry.scan(context.vault_path)

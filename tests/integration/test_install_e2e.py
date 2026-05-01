@@ -30,7 +30,7 @@ Print "Hello from forge-core" and return the greeting string.
 # Python
 
 ```python
-def run(context):
+def compute(context):
   print("Hello from forge-core")
   return "Hello from forge-core"
 ```

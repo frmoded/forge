@@ -16,7 +16,7 @@ description "Authoring vault."
 # Python
 
 ```python
-def run(context):
+def compute(context):
   import os
   import re
   from pathlib import Path

@@ -13,6 +13,6 @@ print "Hello Forge"
 # Python
 
 ```python
-def run(context):
+def compute(context):
   print(f"Hello Forge")
 ```

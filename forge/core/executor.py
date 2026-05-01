@@ -39,9 +39,9 @@ class ForgeContext:
   def __getitem__(self, key):
     return self._inputs[key]
 
-  def execute(self, snippet_id, *args, **inputs):
+  def compute(self, snippet_id, *args, **inputs):
     if self._resolver is None:
-      raise RuntimeError("context.execute requires a resolver")
+      raise RuntimeError("context.compute requires a resolver")
     # SnippetResolutionError propagates with structured "searched" info per ADR 0002
     snippet = self._resolver.resolve(snippet_id)
     meta = snippet["meta"]
@@ -58,6 +58,7 @@ class ForgeContext:
         vault_path=self.vault_path,
         registry=self.registry,
         trusted=nested_trusted,
+        snippet_id=snippet["snippet_id"],
       )
       if nested_stdout:
         sys.stdout.write(nested_stdout)
@@ -109,26 +110,26 @@ def extract_python(body):
   return "\n".join(code_lines).strip() or None
 
 
-def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False):
+def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None):
   buf = io.StringIO()
   context = ForgeContext(resolver, inputs, vault_path=vault_path, registry=registry)
   builtins_for_exec = builtins.__dict__ if trusted else _SAFE_BUILTINS
   local_ns = {**inputs, "inputs": inputs, "__builtins__": builtins_for_exec, "random": random, "math": math, "numpy": numpy}
-  pre_exec_keys = set(local_ns.keys())
   old_stdout = sys.stdout
   sys.stdout = buf
   try:
     exec(compile(code, "<snippet>", "exec"), local_ns)
-    fn = _find_entrypoint(local_ns, pre_exec_keys)
-    if fn is not None:
-      # Snippets are called as fn(context, *args, **inputs); Python's normal
-      # parameter resolution maps positionals to declared params and rejects
-      # mismatches with TypeError.
-      if _takes_only_context(fn):
-        result = fn(context)
-      else:
-        result = fn(context, *args, **inputs)
-      local_ns["result"] = result
+    fn = _find_entrypoint(local_ns, snippet_id, buf.getvalue())
+    # Snippets are called as fn(context, *args, **inputs); Python's normal
+    # parameter resolution maps positionals to declared params and rejects
+    # mismatches with TypeError.
+    if _takes_only_context(fn):
+      result = fn(context)
+    else:
+      result = fn(context, *args, **inputs)
+    local_ns["result"] = result
+  except SnippetExecError:
+    raise
   except Exception as e:
     raise SnippetExecError(str(e), stdout=buf.getvalue()) from e
   finally:
@@ -136,20 +137,21 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
   return buf.getvalue(), local_ns.get("result")
 
 
-def _find_entrypoint(local_ns, pre_exec_keys):
-  """Prefer run(); fall back to the first callable added by the snippet."""
-  if callable(local_ns.get("run")):
-    return local_ns["run"]
-  new_callables = [
-    v for k, v in local_ns.items()
-    if k not in pre_exec_keys and callable(v) and not k.startswith("_")
-  ]
-  return new_callables[0] if new_callables else None
+def _find_entrypoint(local_ns, snippet_id, stdout):
+  """Strict: every snippet's Python facet must define `def compute(context, ...)`."""
+  fn = local_ns.get("compute")
+  if callable(fn):
+    return fn
+  label = f"snippet '{snippet_id}'" if snippet_id else "snippet"
+  raise SnippetExecError(
+    f"{label} has no def compute in its Python facet",
+    stdout=stdout,
+  )
 
 
 def _takes_only_context(fn):
   """True if the function declares exactly one positional parameter and no var-args.
-  Lets snippets like `def run(context):` ignore extra inputs cleanly."""
+  Lets snippets like `def compute(context):` ignore extra inputs cleanly."""
   import inspect
   try:
     sig = inspect.signature(fn)

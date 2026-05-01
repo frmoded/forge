@@ -17,39 +17,39 @@ After install, try `[[<vault_name>/...]]` to invoke any of its snippets.
 # Python
 
 ```python
-def run(context, vault_name, version=None):
+def compute(context, vault_name, version=None):
   from pathlib import Path
 
   if context.vault_path is None:
     raise RuntimeError("install requires an active session vault_path")
 
-  entry = context.execute(
+  entry = context.compute(
     "forge/registry/lookup",
     vault_name=vault_name,
     version=version,
   )
 
-  tarball_path = context.execute(
+  tarball_path = context.compute(
     "forge/registry/fetch",
     tarball_url=entry["tarball"],
     expected_sha256=entry["sha256"],
   )
 
   target_dir = str(Path(context.vault_path) / vault_name)
-  context.execute(
+  context.compute(
     "forge/vault/extract",
     tarball_path=tarball_path,
     target_dir=target_dir,
   )
 
-  context.execute(
+  context.compute(
     "forge/manifest/add_dep",
     authoring_vault_dir=context.vault_path,
     dep_name=vault_name,
     dep_version=entry["version"],
   )
 
-  context.execute("forge/registry/refresh")
+  context.compute("forge/registry/refresh")
 
   return {
     "vault_name": vault_name,

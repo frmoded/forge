@@ -27,7 +27,7 @@ def test_connect_force_reloads(client):
 
 
 def test_execute_without_connect_returns_400(client):
-  resp = client.post("/execute", json={
+  resp = client.post("/compute", json={
     "vault_path": VAULT,
     "snippet_id": "hello_forge",
     "inputs": {},

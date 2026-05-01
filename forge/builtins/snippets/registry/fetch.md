@@ -13,7 +13,7 @@ the same version are instant. Return the local path.
 # Python
 
 ```python
-def run(context):
+def compute(context):
   from pathlib import Path
   from forge.config import get_config
   from forge.installer.http import download_to_file

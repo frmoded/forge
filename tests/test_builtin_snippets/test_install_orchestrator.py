@@ -7,7 +7,7 @@ from forge.core.graph_resolver import GraphResolver
 
 
 class _FakeContext:
-  """Lightweight stand-in for ForgeContext that records execute() calls
+  """Lightweight stand-in for ForgeContext that records compute() calls
   and returns canned per-snippet responses. Exercises orchestration logic
   without hitting the real sub-snippets."""
 
@@ -23,7 +23,7 @@ class _FakeContext:
   def __getitem__(self, key):
     return self._kwargs[key]
 
-  def execute(self, snippet_id, **kwargs):
+  def compute(self, snippet_id, **kwargs):
     self.calls.append((snippet_id, kwargs))
     return self._responses.get(snippet_id)
 
@@ -34,7 +34,7 @@ def _orchestrator_callable():
   code = extract_python(install["body"])
   ns = {"__builtins__": __builtins__}
   exec(compile(code, "<install>", "exec"), ns)
-  return ns["run"]
+  return ns["compute"]
 
 
 def test_orchestrator_calls_subsnippets_in_order():

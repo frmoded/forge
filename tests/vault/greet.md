@@ -13,6 +13,6 @@ Print "Hello " followed by name.
 # Python
 
 ```python
-def hello(context, name):
+def compute(context, name):
   print(f"Hello {name}")
 ```

@@ -5,7 +5,7 @@ VAULT = str(Path(__file__).parent.parent / "vault")
 
 def test_vec3_print(client):
   client.post("/connect", json={"vault_path": VAULT})
-  resp = client.post("/execute", json={
+  resp = client.post("/compute", json={
     "vault_path": VAULT,
     "snippet_id": "vec3_print",
     "inputs": {"v": [1, 2, 3]},
@@ -20,7 +20,7 @@ def test_vec3_print(client):
 
 def test_vec3_add_returns_correct_result(client):
   client.post("/connect", json={"vault_path": VAULT})
-  resp = client.post("/execute", json={
+  resp = client.post("/compute", json={
     "vault_path": VAULT,
     "snippet_id": "vec3_add",
     "inputs": {"a": [1, 2, 3], "b": [4, 5, 6]},
@@ -32,7 +32,7 @@ def test_vec3_add_returns_correct_result(client):
 
 def test_vec3_add_prints_result(client):
   client.post("/connect", json={"vault_path": VAULT})
-  resp = client.post("/execute", json={
+  resp = client.post("/compute", json={
     "vault_path": VAULT,
     "snippet_id": "vec3_add",
     "inputs": {"a": [1, 2, 3], "b": [4, 5, 6]},
@@ -45,7 +45,7 @@ def test_vec3_add_prints_result(client):
 
 def test_vec3_add_zero_vector(client):
   client.post("/connect", json={"vault_path": VAULT})
-  resp = client.post("/execute", json={
+  resp = client.post("/compute", json={
     "vault_path": VAULT,
     "snippet_id": "vec3_add",
     "inputs": {"a": [1, 2, 3], "b": [0, 0, 0]},

@@ -67,7 +67,7 @@ class ConnectRequest(BaseModel):
   force: bool = False
 
 
-class ExecuteRequest(BaseModel):
+class ComputeRequest(BaseModel):
   vault_path: str
   snippet_id: str
   args: list = []
@@ -100,8 +100,8 @@ def connect(req: ConnectRequest, manager: VaultSessionManager = Depends(get_sess
   }
 
 
-@app.post("/execute")
-def execute(req: ExecuteRequest, manager: VaultSessionManager = Depends(get_session_manager)):
+@app.post("/compute")
+def compute(req: ComputeRequest, manager: VaultSessionManager = Depends(get_session_manager)):
   state = manager.get(req.vault_path)
   if state is None:
     raise HTTPException(status_code=400, detail="vault not connected — call /connect first")
@@ -131,6 +131,7 @@ def execute(req: ExecuteRequest, manager: VaultSessionManager = Depends(get_sess
         vault_path=req.vault_path,
         registry=state["registry"],
         trusted=trusted,
+        snippet_id=snippet["snippet_id"],
       )
     except SnippetExecError as e:
       raise HTTPException(status_code=422, detail={"error": str(e), "stdout": e.stdout})
