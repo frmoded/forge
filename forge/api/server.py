@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from forge.core.logic import get_test_value
 from forge.core.registry import SnippetRegistry, GraphResolver
 from forge.core.executor import extract_python, exec_python, SnippetExecError, extract_section
+from forge.core.serialization import serialize_result
 from forge.core.exceptions import SnippetResolutionError
 from forge.core.llm import generate_snippet_code
 from forge.builtins.loader import load_builtin_vault
@@ -135,7 +136,7 @@ def compute(req: ComputeRequest, manager: VaultSessionManager = Depends(get_sess
       )
     except SnippetExecError as e:
       raise HTTPException(status_code=422, detail={"error": str(e), "stdout": e.stdout})
-    return {"type": "action", "result": result, "stdout": stdout}
+    return {"type": "action", "result": serialize_result(result), "stdout": stdout}
 
   raise HTTPException(status_code=422, detail=f"unknown snippet type: {snippet_type}")
 
