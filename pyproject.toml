@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build-meta"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "forge-arch"
@@ -15,7 +15,8 @@ dependencies = [
   "numpy",
   "tomli; python_version < '3.11'",
   "tomli_w",
-  "packaging"
+  "packaging",
+  "music21>=8.1,<9"
 ]
 
 [project.optional-dependencies]

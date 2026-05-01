@@ -12,5 +12,7 @@ dist/
 .venv/
 .vscode/
 forge.egg-info/
+forge_arch.egg-info/
+*.egg-info/
 .env
 
