@@ -16,3 +16,8 @@ forge_arch.egg-info/
 *.egg-info/
 .env
 
+# Forge-managed state inside vaults. tests/vault/.forge/ is regenerated
+# every run; user vaults' .forge/ holds the first-run sentinel and
+# captured snapshots that travel with the vault, not this repo.
+.forge/
+

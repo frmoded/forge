@@ -6,6 +6,10 @@ AUTHORING_VAULT = "authoring"
 BUILTIN_VAULT = "forge"
 _MANIFEST_FILENAME = "forge.toml"
 _RECOGNIZED_TYPES = ("action", "data", "snapshot")
+# Forge-managed state directories that must not be walked as snippet sources.
+# .forge/edges/ holds auto-captured snapshots; if those leaked into the
+# registry they'd shadow the real snippets they were captured from.
+_RESERVED_DIRS = {".forge"}
 
 
 class SnippetRegistry:
@@ -33,6 +37,9 @@ class SnippetRegistry:
       if root == vault_path:
         # prune library vault subdirs from the authoring traversal
         dirs[:] = [d for d in dirs if d not in library_dir_names]
+      # Skip Forge-managed state dirs at every level (snapshot files in
+      # .forge/edges/ would otherwise shadow real snippets).
+      dirs[:] = [d for d in dirs if d not in _RESERVED_DIRS]
       for fname in files:
         if fname.endswith(".md"):
           err = self._index_authoring_file(

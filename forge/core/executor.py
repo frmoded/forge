@@ -46,11 +46,15 @@ class ForgeContext:
   """Passed as the `context` argument to run(context). Carries session state and
   allows snippets to call other snippets."""
 
-  def __init__(self, resolver, inputs, vault_path=None, registry=None):
+  def __init__(self, resolver, inputs, vault_path=None, registry=None, caller_id=None):
     self._resolver = resolver
     self._inputs = inputs
     self.vault_path = vault_path
     self.registry = registry
+    # The currently-executing snippet's qualified ID. Used as the `caller` for
+    # any edges captured by context.compute calls from this scope. None at the
+    # top level (no enclosing snippet — no edges to capture).
+    self._caller_id = caller_id
 
   def get(self, key, default=None):
     return self._inputs.get(key, default)
@@ -80,12 +84,41 @@ class ForgeContext:
       )
       if nested_stdout:
         sys.stdout.write(nested_stdout)
-      return result
+    elif snippet_type in ("data", "snapshot"):
+      result = read_data_snippet(snippet)
+    else:
+      raise ValueError(f"unknown type '{snippet_type}' for snippet '{snippet_id}'")
 
-    if snippet_type in ("data", "snapshot"):
-      return read_data_snippet(snippet)
+    self._capture_edge(snippet, result)
+    return result
 
-    raise ValueError(f"unknown type '{snippet_type}' for snippet '{snippet_id}'")
+  def _capture_edge(self, callee_snippet, value):
+    """Write a snapshot for the (caller, callee) edge per A7. Skipped when:
+    - There's no enclosing snippet (top-level /compute — no edge exists).
+    - vault_path isn't set (raw exec_python in a test, no filesystem to write to).
+    - The value isn't wire-serializable (Manifest objects, file handles, etc.
+      that pass between sub-snippets in pipelines like install). A divergence
+      from a strict read of A7: capture is best-effort; values that can't be
+      round-tripped through the wire format are logged and skipped rather
+      than crashing the compute.
+    """
+    if self._caller_id is None or self.vault_path is None:
+      return
+    from forge.core.snapshots import write_snapshot
+    try:
+      write_snapshot(
+        self.vault_path,
+        self._caller_id,
+        callee_snippet["snippet_id"],
+        value,
+        callee_snippet,
+      )
+    except (TypeError, ValueError) as e:
+      import logging
+      logging.getLogger(__name__).debug(
+        "snapshot capture skipped for %s -> %s: %s",
+        self._caller_id, callee_snippet["snippet_id"], e,
+      )
 
 
 def read_data_snippet(snippet):
@@ -159,7 +192,7 @@ def extract_python(body):
 
 def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None):
   buf = io.StringIO()
-  context = ForgeContext(resolver, inputs, vault_path=vault_path, registry=registry)
+  context = ForgeContext(resolver, inputs, vault_path=vault_path, registry=registry, caller_id=snippet_id)
   builtins_for_exec = builtins.__dict__ if trusted else _SAFE_BUILTINS
   local_ns = {
     **inputs,
