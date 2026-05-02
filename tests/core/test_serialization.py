@@ -67,3 +67,49 @@ def test_passthrough_when_music21_unavailable(monkeypatch):
   monkeypatch.setitem(sys.modules, "music21", None)
   assert serialize_result(42) == 42
   assert serialize_result("plain") == "plain"
+
+
+def _score_with_one_note():
+  music21 = _music21()
+  s = music21.stream.Score()
+  p = music21.stream.Part()
+  p.append(music21.note.Note("C4"))
+  s.append(p)
+  return s
+
+
+def test_title_falls_back_to_snippet_id():
+  s = _score_with_one_note()
+  snippet = {"meta": {}, "snippet_id": "authoring/weary_blues_line"}
+  result = serialize_result(s, snippet)
+  assert "weary_blues_line" in result["content"]
+  assert "Music21 Fragment" not in result["content"]
+
+
+def test_title_uses_explicit_frontmatter_title():
+  s = _score_with_one_note()
+  snippet = {
+    "meta": {"title": "Weary Blues Line", "description": "ignored"},
+    "snippet_id": "authoring/weary_blues_line",
+  }
+  result = serialize_result(s, snippet)
+  assert "Weary Blues Line" in result["content"]
+
+
+def test_description_does_not_become_title():
+  """Description is for docs; renaming the snippet should change the rendered title."""
+  s = _score_with_one_note()
+  snippet = {
+    "meta": {"description": "Opening line — should not appear as title."},
+    "snippet_id": "authoring/song_renamed",
+  }
+  result = serialize_result(s, snippet)
+  assert "song_renamed" in result["content"]
+  assert "should not appear" not in result["content"]
+
+
+def test_title_left_alone_when_no_snippet_provided():
+  s = _score_with_one_note()
+  result = serialize_result(s)
+  # music21's default still wins when we don't pass a snippet.
+  assert "Music21 Fragment" in result["content"]

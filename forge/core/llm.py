@@ -17,7 +17,14 @@ Forge snippets are Python functions. Follow these conventions exactly:
 - Side-effect output:           print(...)
 - Return the result value at the end of the function.
 
-Available modules (already in scope, do NOT import them): random, math, numpy
+Available modules (already in scope, do NOT import them):
+- General:  random, math, numpy
+- Music21:  music21, stream, note, chord, meter, key, tempo, pitch, duration, instrument
+
+Domain-specific return values:
+- Music: return a music21.stream.Stream (Score / Part / Measure / ...). The
+  runtime serializes it to MusicXML and the plugin renders it as engraved
+  notation. Do NOT return dicts of pitch/beat data — return real notes.
 
 Output ONLY valid Python code. No markdown fences, no explanation, no comments."""
 

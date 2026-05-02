@@ -6,6 +6,25 @@ import random
 import numpy
 import builtins
 
+# Domain modules pre-injected into the snippet namespace. Untrusted snippets
+# can't `import`, so anything they should be able to call has to be here.
+try:
+  import music21
+  _MUSIC21_NAMES = {
+    "music21": music21,
+    "stream": music21.stream,
+    "note": music21.note,
+    "chord": music21.chord,
+    "meter": music21.meter,
+    "key": music21.key,
+    "tempo": music21.tempo,
+    "pitch": music21.pitch,
+    "duration": music21.duration,
+    "instrument": music21.instrument,
+  }
+except ImportError:
+  _MUSIC21_NAMES = {}
+
 _PYTHON_HEADING = re.compile(r'^#{1,6}\s+python\s*$', re.IGNORECASE)
 
 _SAFE_BUILTINS = {name: getattr(builtins, name) for name in (
@@ -114,7 +133,15 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
   buf = io.StringIO()
   context = ForgeContext(resolver, inputs, vault_path=vault_path, registry=registry)
   builtins_for_exec = builtins.__dict__ if trusted else _SAFE_BUILTINS
-  local_ns = {**inputs, "inputs": inputs, "__builtins__": builtins_for_exec, "random": random, "math": math, "numpy": numpy}
+  local_ns = {
+    **inputs,
+    "inputs": inputs,
+    "__builtins__": builtins_for_exec,
+    "random": random,
+    "math": math,
+    "numpy": numpy,
+    **_MUSIC21_NAMES,
+  }
   old_stdout = sys.stdout
   sys.stdout = buf
   try:

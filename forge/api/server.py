@@ -136,7 +136,7 @@ def compute(req: ComputeRequest, manager: VaultSessionManager = Depends(get_sess
       )
     except SnippetExecError as e:
       raise HTTPException(status_code=422, detail={"error": str(e), "stdout": e.stdout})
-    return {"type": "action", "result": serialize_result(result), "stdout": stdout}
+    return {"type": "action", "result": serialize_result(result, snippet), "stdout": stdout}
 
   raise HTTPException(status_code=422, detail=f"unknown snippet type: {snippet_type}")
 
