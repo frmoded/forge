@@ -63,11 +63,10 @@ class ForgeContext:
       raise RuntimeError("context.compute requires a resolver")
     # SnippetResolutionError propagates with structured "searched" info per ADR 0002
     snippet = self._resolver.resolve(snippet_id)
-    meta = snippet["meta"]
-    body = snippet["body"]
-    snippet_type = meta.get("type")
+    snippet_type = snippet["meta"].get("type")
+
     if snippet_type == "action":
-      code = extract_python(body)
+      code = extract_python(snippet["body"])
       if code is None:
         raise ValueError(f"no Python heading in snippet '{snippet_id}'")
       nested_trusted = snippet.get("source") == "builtin"
@@ -82,9 +81,38 @@ class ForgeContext:
       if nested_stdout:
         sys.stdout.write(nested_stdout)
       return result
-    if snippet_type == "data":
-      return {k: v for k, v in meta.items() if k not in ("type", "title", "description", "inputs")}
+
+    if snippet_type in ("data", "snapshot"):
+      return read_data_snippet(snippet)
+
     raise ValueError(f"unknown type '{snippet_type}' for snippet '{snippet_id}'")
+
+
+def read_data_snippet(snippet):
+  """Deserialize a data/snapshot snippet's body via its content_type (D3, F3)."""
+  from forge.core.serialization import deserialize_from_wire
+  meta = snippet["meta"]
+  content_type = meta.get("content_type")
+  if not content_type:
+    raise ValueError(f"data snippet '{snippet['snippet_id']}' has no content_type in frontmatter")
+  body = _strip_code_fence(snippet["body"])
+  return deserialize_from_wire(content_type, body)
+
+
+def _strip_code_fence(body):
+  """A data snippet's body may be wrapped in a ```<lang> ... ``` fence for
+  readability; strip it so deserializers see the raw payload."""
+  text = body.strip()
+  if not text.startswith("```"):
+    return text
+  lines = text.splitlines()
+  # drop the opening fence (and any language tag)
+  start = 1
+  # drop the closing fence
+  end = len(lines)
+  if end > start and lines[-1].strip() == "```":
+    end -= 1
+  return "\n".join(lines[start:end])
 
 
 def extract_section(body, heading):

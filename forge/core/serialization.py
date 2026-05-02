@@ -5,7 +5,17 @@ objects into self-describing tagged payloads that the plugin can dispatch
 on by `result.type`.
 
 Plain values (str, int, dict, list, etc.) pass through untouched.
+
+Also provides wire-format helpers used by snapshot capture/read:
+  serialize_for_wire(value, snippet)  -> (content_type, content_str)
+  deserialize_from_wire(content_type, content_str) -> python value
 """
+
+import json
+
+# Tagged dicts coming back from serialize_result whose `type` is one of these
+# are treated as native wire formats — body becomes their `content` field.
+_NATIVE_WIRE_FORMATS = {"musicxml"}
 
 
 def serialize_result(value, snippet=None):
@@ -22,6 +32,33 @@ def serialize_result(value, snippet=None):
   # (Future) Drawing objects → SVG string
 
   return value
+
+
+def serialize_for_wire(value, snippet=None):
+  """Reduce a python value to (content_type, content_str) for storage.
+
+  - Tagged payloads from serialize_result (e.g. {type: musicxml, content: ...})
+    decompose into (their type, their content).
+  - Everything else round-trips through JSON. Strings, numbers, dicts, lists,
+    None — all become content_type='json' with json.dumps(value) as body.
+  """
+  payload = serialize_result(value, snippet)
+  if isinstance(payload, dict) and payload.get("type") in _NATIVE_WIRE_FORMATS:
+    return payload["type"], payload["content"]
+  return "json", json.dumps(payload)
+
+
+def deserialize_from_wire(content_type, content_str):
+  """Inverse of serialize_for_wire. Used for data snippet reads and frozen
+  snapshot reads."""
+  if content_type == "json":
+    return json.loads(content_str)
+  if content_type == "text":
+    return content_str
+  if content_type == "musicxml":
+    import music21
+    return music21.converter.parseData(content_str, format="musicxml")
+  raise ValueError(f"unsupported content_type: {content_type!r}")
 
 
 def _try_serialize_music21(value, snippet):

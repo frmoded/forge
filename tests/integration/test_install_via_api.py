@@ -99,7 +99,7 @@ def test_install_via_api_full_flow(tmp_path, monkeypatch, local_registry_server,
   assert "snippets" in body
   # Built-ins are always present after connect; forge-core is not yet installed.
   assert "forge/install" not in body["snippets"]  # bare_ids per vault, not qualified
-  assert "install" in body["snippets"]["forge"]
+  assert {"id": "install", "type": "action"} in body["snippets"]["forge"]
   assert "forge-core" not in body["snippets"]
 
   # 5) POST /compute install.
@@ -123,7 +123,7 @@ def test_install_via_api_full_flow(tmp_path, monkeypatch, local_registry_server,
 
   # 7) Inventory now includes the installed library vault.
   assert "forge-core" in body["snippets"]
-  assert "hello_registry" in body["snippets"]["forge-core"]
+  assert {"id": "hello_registry", "type": "action"} in body["snippets"]["forge-core"]
 
   # 8) POST /compute the new vault's snippet via qualified reference.
   resp = api_client.post("/compute", json={

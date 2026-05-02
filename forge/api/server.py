@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from forge.core.logic import get_test_value
 from forge.core.registry import SnippetRegistry, GraphResolver
-from forge.core.executor import extract_python, exec_python, SnippetExecError, extract_section
+from forge.core.executor import extract_python, exec_python, SnippetExecError, extract_section, read_data_snippet
 from forge.core.serialization import serialize_result
 from forge.core.exceptions import SnippetResolutionError
 from forge.core.llm import generate_snippet_code
@@ -112,16 +112,17 @@ def compute(req: ComputeRequest, manager: VaultSessionManager = Depends(get_sess
   except SnippetResolutionError as e:
     raise HTTPException(status_code=404, detail=str(e))
 
-  meta = snippet["meta"]
-  body = snippet["body"]
-  snippet_type = meta.get("type")
+  snippet_type = snippet["meta"].get("type")
 
-  if snippet_type == "data":
-    props = {k: v for k, v in meta.items() if k not in ("type", "title", "description", "inputs")}
-    return {"type": "data", "result": props, "stdout": ""}
+  if snippet_type in ("data", "snapshot"):
+    try:
+      value = read_data_snippet(snippet)
+    except (ValueError, KeyError) as e:
+      raise HTTPException(status_code=422, detail={"error": str(e), "stdout": ""})
+    return {"type": snippet_type, "result": serialize_result(value, snippet), "stdout": ""}
 
   if snippet_type == "action":
-    code = extract_python(body)
+    code = extract_python(snippet["body"])
     if code is None:
       raise HTTPException(status_code=422, detail="no Python heading found in snippet")
     trusted = snippet.get("source") == "builtin"

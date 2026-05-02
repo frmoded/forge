@@ -5,6 +5,7 @@ import yaml
 AUTHORING_VAULT = "authoring"
 BUILTIN_VAULT = "forge"
 _MANIFEST_FILENAME = "forge.toml"
+_RECOGNIZED_TYPES = ("action", "data", "snapshot")
 
 
 class SnippetRegistry:
@@ -86,9 +87,16 @@ class SnippetRegistry:
     return list(self._vaults.keys())
 
   def list_snippets(self) -> dict:
-    """Return {vault_name: sorted([bare_id, ...])}. Used by /connect for inventory."""
+    """Return {vault_name: [{id, type}, ...]} sorted by id. Used by /connect.
+
+    `type` is taken from each snippet's frontmatter — defaults to 'action'
+    for snippets registered without an explicit type.
+    """
     return {
-      vault: sorted(snippets.keys())
+      vault: [
+        {"id": bare_id, "type": snippets[bare_id]["meta"].get("type", "action")}
+        for bare_id in sorted(snippets.keys())
+      ]
       for vault, snippets in self._vaults.items()
     }
 
@@ -128,7 +136,7 @@ class SnippetRegistry:
           meta, body = parse_frontmatter(content)
           rel = os.path.relpath(filepath, lib_path)
           bare_id = os.path.splitext(rel)[0].replace(os.sep, "/")
-          if meta.get("type") in ("action", "data"):
+          if meta.get("type") in _RECOGNIZED_TYPES:
             self._vaults[name][bare_id] = {
               "meta": meta,
               "body": body,
@@ -160,7 +168,7 @@ class SnippetRegistry:
         content = f.read()
       meta, body = parse_frontmatter(content)
       bare_id = os.path.splitext(os.path.basename(filepath))[0]
-      if meta.get("type") in ("action", "data"):
+      if meta.get("type") in _RECOGNIZED_TYPES:
         self._vaults[vault_name][bare_id] = {
           "meta": meta,
           "body": body,
