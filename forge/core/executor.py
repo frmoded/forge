@@ -36,6 +36,9 @@ _SAFE_BUILTINS = {name: getattr(builtins, name) for name in (
 ) if hasattr(builtins, name)}
 
 
+_NO_FROZEN_SNAPSHOT = object()
+
+
 class SnippetExecError(Exception):
   def __init__(self, message, stdout=""):
     super().__init__(message)
@@ -67,6 +70,14 @@ class ForgeContext:
       raise RuntimeError("context.compute requires a resolver")
     # SnippetResolutionError propagates with structured "searched" info per ADR 0002
     snippet = self._resolver.resolve(snippet_id)
+
+    # A8/A9: frozen edges short-circuit. Returning the snapshot value here
+    # means the callee is never invoked and its own dependencies (if any)
+    # are not traversed — that's transitive freeze (F8) for free.
+    frozen_value = self._read_frozen_snapshot(snippet)
+    if frozen_value is not _NO_FROZEN_SNAPSHOT:
+      return frozen_value
+
     snippet_type = snippet["meta"].get("type")
 
     if snippet_type == "action":
@@ -91,6 +102,23 @@ class ForgeContext:
 
     self._capture_edge(snippet, result)
     return result
+
+  def _read_frozen_snapshot(self, callee_snippet):
+    """If this edge is frozen, return its deserialized snapshot value.
+    Otherwise return _NO_FROZEN_SNAPSHOT (a sentinel — None is a valid
+    captured value)."""
+    if self._caller_id is None or self.vault_path is None:
+      return _NO_FROZEN_SNAPSHOT
+    from forge.core.snapshots import read_snapshot
+    snap = read_snapshot(self.vault_path, self._caller_id, callee_snippet["snippet_id"])
+    if snap is None or snap["meta"].get("state") != "frozen":
+      return _NO_FROZEN_SNAPSHOT
+    from forge.core.serialization import deserialize_from_wire
+    content_type = snap["meta"].get("content_type")
+    if not content_type:
+      return _NO_FROZEN_SNAPSHOT
+    body = _strip_code_fence(snap["body"])
+    return deserialize_from_wire(content_type, body)
 
   def _capture_edge(self, callee_snippet, value):
     """Write a snapshot for the (caller, callee) edge per A7. Skipped when:
