@@ -135,6 +135,19 @@ does not re-invoke `/generate` at runtime. Runtime LLM calls inside
 Python are allowed and explicit, distinct from the `/generate`
 mechanism.
 
+As B7 — a new clause in the "Engine behavior" section, paired with B5 since it's a side artifact of /generate.
+Suggested wording:
+**B7.** After /generate produces a Python facet, Forge performs static
+analysis on the result to extract direct dependencies (calls to
+`context.compute(...)` with literal-string snippet IDs). These
+dependencies are written as a `Dependencies` section in the snippet's
+body, formatted as wikilinks. The section is delimited by a
+clearly-marked header indicating it is system-maintained. The section
+is updated at /generate time and on explicit user command; drift
+between the section and the current Python facet may occur if the user
+edits the Python directly. Drift is detected and surfaced by clients
+but not automatically resolved by Forge.
+
 ## Data snippets
 
 **D1.** A data snippet has frontmatter (including `type: data`,
