@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from forge.core.logic import get_test_value
 from forge.core.registry import SnippetRegistry, GraphResolver
 from forge.core.executor import extract_python, exec_python, SnippetExecError, extract_section, read_data_snippet
+from forge.core.snapshots import set_snapshot_state
 from forge.core.serialization import serialize_result
 from forge.core.exceptions import SnippetResolutionError
 from forge.core.llm import generate_snippet_code
@@ -79,6 +80,13 @@ class GenerateRequest(BaseModel):
   vault_path: str
   snippet_id: str
   recursive: bool = False
+
+
+class FreezeRequest(BaseModel):
+  vault_path: str
+  caller: str
+  callee: str
+  state: str
 
 
 @app.get("/test")
@@ -160,3 +168,17 @@ def generate(req: GenerateRequest, manager: VaultSessionManager = Depends(get_se
     logger.info("generated [%s]\n  english: %s\n  python:\n%s", sid, english or "(none)", code)
 
   return {"snippet_id": req.snippet_id, "recursive": req.recursive, "generated": generated}
+
+
+@app.post("/freeze")
+def freeze(req: FreezeRequest):
+  if req.state not in ("frozen", "live"):
+    raise HTTPException(status_code=422, detail=f"state must be 'frozen' or 'live', got {req.state!r}")
+  try:
+    set_snapshot_state(req.vault_path, req.caller, req.callee, req.state)
+  except FileNotFoundError:
+    raise HTTPException(
+      status_code=404,
+      detail=f"no snapshot for edge {req.caller!r} -> {req.callee!r} (the edge has never been traversed)",
+    )
+  return {"caller": req.caller, "callee": req.callee, "state": req.state}
