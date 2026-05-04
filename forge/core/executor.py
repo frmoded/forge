@@ -21,6 +21,7 @@ try:
     "pitch": music21.pitch,
     "duration": music21.duration,
     "instrument": music21.instrument,
+    "harmony": music21.harmony,
   }
 except ImportError:
   _MUSIC21_NAMES = {}
@@ -98,7 +99,8 @@ class ForgeContext:
     elif snippet_type in ("data", "snapshot"):
       result = read_data_snippet(snippet)
     else:
-      raise ValueError(f"unknown type '{snippet_type}' for snippet '{snippet_id}'")
+      raise ValueError(
+        f"unknown type '{snippet_type}' for snippet '{snippet_id}'")
 
     self._capture_edge(snippet, result)
     return result
@@ -110,7 +112,8 @@ class ForgeContext:
     if self._caller_id is None or self.vault_path is None:
       return _NO_FROZEN_SNAPSHOT
     from forge.core.snapshots import read_snapshot
-    snap = read_snapshot(self.vault_path, self._caller_id, callee_snippet["snippet_id"])
+    snap = read_snapshot(self.vault_path, self._caller_id,
+                         callee_snippet["snippet_id"])
     if snap is None or snap["meta"].get("state") != "frozen":
       return _NO_FROZEN_SNAPSHOT
     from forge.core.serialization import deserialize_from_wire
@@ -155,7 +158,8 @@ def read_data_snippet(snippet):
   meta = snippet["meta"]
   content_type = meta.get("content_type")
   if not content_type:
-    raise ValueError(f"data snippet '{snippet['snippet_id']}' has no content_type in frontmatter")
+    raise ValueError(
+      f"data snippet '{snippet['snippet_id']}' has no content_type in frontmatter")
   body = _strip_code_fence(snippet["body"])
   return deserialize_from_wire(content_type, body)
 
@@ -220,7 +224,8 @@ def extract_python(body):
 
 def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None):
   buf = io.StringIO()
-  context = ForgeContext(resolver, inputs, vault_path=vault_path, registry=registry, caller_id=snippet_id)
+  context = ForgeContext(resolver, inputs, vault_path=vault_path,
+                         registry=registry, caller_id=snippet_id)
   builtins_for_exec = builtins.__dict__ if trusted else _SAFE_BUILTINS
   local_ns = {
     **inputs,
@@ -273,7 +278,8 @@ def _takes_only_context(fn):
     sig = inspect.signature(fn)
     pos_params = [p for p in sig.parameters.values()
                   if p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY)]
-    has_var_pos = any(p.kind == p.VAR_POSITIONAL for p in sig.parameters.values())
+    has_var_pos = any(
+      p.kind == p.VAR_POSITIONAL for p in sig.parameters.values())
     has_var_kw = any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values())
     return len(pos_params) == 1 and not has_var_pos and not has_var_kw
   except (ValueError, TypeError):
