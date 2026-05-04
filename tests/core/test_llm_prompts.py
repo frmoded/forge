@@ -52,3 +52,22 @@ def test_assembled_prompt_is_non_empty():
   prompt = build_system_prompt()
   assert isinstance(prompt, str)
   assert len(prompt.strip()) > 0
+
+
+def test_music_fragment_covers_known_pitfalls():
+  """Regression — these rules were added after concrete bugs in generated
+  music snippets. Removing one is almost always a mistake; test exists to
+  make that an explicit conversation."""
+  import forge.core.llm  # noqa: F401  (ensure registration)
+  prompt = build_system_prompt()
+  # MetronomeMark referent guidance
+  assert "MetronomeMark" in prompt
+  assert "referent" in prompt
+  assert "dotted quarter" in prompt or "dots=1" in prompt
+  # Instrument-on-Part
+  assert "instrument" in prompt and "Piano" in prompt
+  # ChordSymbol vs addLyric
+  assert "ChordSymbol" in prompt
+  assert "addLyric" in prompt
+  # Bar duration derived from time signature
+  assert "barDuration" in prompt
