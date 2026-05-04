@@ -3,30 +3,12 @@ import re
 from anthropic import Anthropic
 from forge.core.executor import extract_section, extract_python
 from forge.core.registry import SnippetRegistry
+from forge.core.llm_prompts import build_system_prompt
+# Side-effect import: registers the music-domain fragment with llm_prompts.
+# Each new domain (arch, moda, ...) gets a parallel import here.
+import forge.music.llm_prompt  # noqa: F401
 
 _client = None
-
-_SYSTEM_PROMPT = """You are a code generator for the Forge snippet system.
-
-Forge snippets are Python functions. Follow these conventions exactly:
-- Every snippet's entrypoint must be named `compute`.
-- Snippets with no inputs:      def compute(context): ...
-- Snippets with named inputs:   def compute(context, param1, param2): ...
-- Call another snippet:         context.compute("snippet_id", param=value)
-- Read an input parameter:      context.get("key", default)
-- Side-effect output:           print(...)
-- Return the result value at the end of the function.
-
-Available modules (already in scope, do NOT import them):
-- General:  random, math, numpy
-- Music21:  music21, stream, note, chord, meter, key, tempo, pitch, duration, instrument
-
-Domain-specific return values:
-- Music: return a music21.stream.Stream (Score / Part / Measure / ...). The
-  runtime serializes it to MusicXML and the plugin renders it as engraved
-  notation. Do NOT return dicts of pitch/beat data — return real notes.
-
-Output ONLY valid Python code. No markdown fences, no explanation, no comments."""
 
 
 def generate_snippet_code(snippet_id: str, registry: SnippetRegistry, recursive: bool = False) -> dict[str, str]:
@@ -85,7 +67,7 @@ def _call_llm(snippet_id, meta, body, deps, registry):
   message = client.messages.create(
     model="claude-sonnet-4-6",
     max_tokens=8192,
-    system=_SYSTEM_PROMPT,
+    system=build_system_prompt(),
     messages=[{"role": "user", "content": prompt}],
   )
   if message.stop_reason == "max_tokens":
