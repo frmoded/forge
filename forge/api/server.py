@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import os
 import logging
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
@@ -9,6 +10,7 @@ from forge.core.logic import get_test_value
 from forge.core.registry import SnippetRegistry, GraphResolver
 from forge.core.executor import extract_python, exec_python, SnippetExecError, extract_section, read_data_snippet
 from forge.core.snapshots import set_snapshot_state
+from forge.core.dependencies import extract_dependencies, apply_dependencies_to_body
 from forge.core.serialization import serialize_result
 from forge.core.exceptions import SnippetResolutionError
 from forge.core.llm import generate_snippet_code
@@ -89,6 +91,11 @@ class FreezeRequest(BaseModel):
   state: str
 
 
+class SyncDependenciesRequest(BaseModel):
+  vault_path: str
+  snippet_id: str
+
+
 @app.get("/test")
 def test():
   return {"result": get_test_value()}
@@ -162,12 +169,62 @@ def generate(req: GenerateRequest, manager: VaultSessionManager = Depends(get_se
   except RuntimeError as e:
     raise HTTPException(status_code=500, detail=str(e))
 
+  dependencies = {sid: extract_dependencies(code) for sid, code in generated.items()}
+
   for sid, code in generated.items():
     snippet = state["registry"].get(sid)
     english = extract_section(snippet["body"], "english") if snippet else None
     logger.info("generated [%s]\n  english: %s\n  python:\n%s", sid, english or "(none)", code)
 
-  return {"snippet_id": req.snippet_id, "recursive": req.recursive, "generated": generated}
+  return {
+    "snippet_id": req.snippet_id,
+    "recursive": req.recursive,
+    "generated": generated,
+    "dependencies": dependencies,
+  }
+
+
+@app.post("/sync_dependencies")
+def sync_dependencies(req: SyncDependenciesRequest, manager: VaultSessionManager = Depends(get_session_manager)):
+  """Re-sync the # Dependencies section of a snippet to whatever its current
+  Python facet calls. Distinct from /generate — no LLM, no Python rewrite."""
+  state = manager.get(req.vault_path)
+  if state is None:
+    raise HTTPException(status_code=400, detail="vault not connected — call /connect first")
+
+  try:
+    snippet = state["resolver"].resolve(req.snippet_id)
+  except SnippetResolutionError as e:
+    raise HTTPException(status_code=404, detail=str(e))
+
+  filepath = snippet.get("path")
+  if not filepath or not os.path.isfile(filepath):
+    # Built-in vault snippets have no on-disk path; we can't write to them.
+    raise HTTPException(status_code=422, detail=f"snippet '{req.snippet_id}' has no writable filesystem path")
+
+  with open(filepath, "r", encoding="utf-8") as f:
+    content = f.read()
+
+  # Split frontmatter from body so we can rewrite the body in place.
+  if not content.startswith("---"):
+    raise HTTPException(status_code=422, detail=f"snippet '{req.snippet_id}' has no frontmatter")
+  parts = content.split("---", 2)
+  if len(parts) < 3:
+    raise HTTPException(status_code=422, detail=f"snippet '{req.snippet_id}' frontmatter is malformed")
+  frontmatter = f"---{parts[1]}---"
+  body = parts[2].lstrip("\n")
+
+  python = extract_python(body)
+  if python is None:
+    raise HTTPException(status_code=422, detail=f"snippet '{req.snippet_id}' has no Python facet")
+
+  deps = extract_dependencies(python)
+  new_body = apply_dependencies_to_body(body, deps)
+
+  with open(filepath, "w", encoding="utf-8") as f:
+    f.write(f"{frontmatter}\n\n{new_body}")
+
+  return {"snippet_id": req.snippet_id, "dependencies": deps}
 
 
 @app.post("/freeze")
