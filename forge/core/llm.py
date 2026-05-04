@@ -84,10 +84,15 @@ def _call_llm(snippet_id, meta, body, deps, registry):
   client = _get_client()
   message = client.messages.create(
     model="claude-sonnet-4-6",
-    max_tokens=1024,
+    max_tokens=8192,
     system=_SYSTEM_PROMPT,
     messages=[{"role": "user", "content": prompt}],
   )
+  if message.stop_reason == "max_tokens":
+    import logging
+    logging.getLogger(__name__).warning(
+      "generation hit max_tokens for snippet '%s' — output may be truncated", snippet_id,
+    )
   return message.content[0].text.strip()
 
 
