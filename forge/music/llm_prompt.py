@@ -37,6 +37,14 @@ Music21 idioms — common pitfalls to avoid:
   duplicates the chord name above and below the staff. addLyric is for
   sung text, not chord names.
 
+- harmony.ChordSymbol is engraving-only — it labels the staff but
+  produces NO MIDI sound. To make the chord audible, also insert a
+  sounding chord at the same offset:
+    cs = harmony.ChordSymbol("E7"); m.insert(0, cs)
+    c  = chord.Chord(cs.pitches, quarterLength=bar_ql); m.insert(0, c)
+  Without the chord.Chord (or notes/Rests with actual pitches), playback
+  is silent for that measure regardless of the instrument set.
+
 - When placing a chord symbol and a chord at the start of a Measure,
   prefer m.insert(0, cs) and m.insert(0, c) over append() so the offset
   is explicit.

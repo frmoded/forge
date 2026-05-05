@@ -89,3 +89,6 @@ def test_music_fragment_covers_known_pitfalls():
   assert "addLyric" in prompt
   # Bar duration derived from time signature
   assert "barDuration" in prompt
+  # ChordSymbol is silent — must add a sounding chord too
+  assert "engraving-only" in prompt or "produces NO MIDI" in prompt
+  assert "chord.Chord(cs.pitches" in prompt
