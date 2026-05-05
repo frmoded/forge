@@ -92,3 +92,16 @@ def test_music_fragment_covers_known_pitfalls():
   # ChordSymbol is silent — must add a sounding chord too
   assert "engraving-only" in prompt or "produces NO MIDI" in prompt
   assert "chord.Chord(cs.pitches" in prompt
+  # Bar lengths must total ts.barDuration.quarterLength
+  assert "ts.barDuration.quarterLength" in prompt
+  assert "fall short or overflow" in prompt
+  # Don't reach into uninjected music21 submodules
+  assert "music21.<other>" in prompt or "AttributeError" in prompt
+  # No dead code
+  assert "dead code" in prompt
+  # No bend / glissando engraving
+  assert "bend" in prompt and ("glissando" in prompt or "continuous-pitch" in prompt)
+  # Metadata on first Measure, not Part
+  assert "FIRST Measure" in prompt
+  # Don't force a mode when reading key from another snippet
+  assert "asKey('major')" in prompt or "force a mode" in prompt

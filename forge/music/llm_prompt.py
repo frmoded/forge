@@ -50,7 +50,39 @@ Music21 idioms — common pitfalls to avoid:
   is explicit.
 
 - Don't hardcode bar length in quarterLength. Derive it from the time
-  signature: meter.TimeSignature('12/8').barDuration.quarterLength."""
+  signature: meter.TimeSignature('12/8').barDuration.quarterLength.
+
+- Every Measure's notes and rests must total exactly the time signature's
+  bar length: ts.barDuration.quarterLength (6.0 for 12/8, 4.0 for 4/4,
+  3.0 for 3/4). Do not write bars that fall short or overflow. When in
+  doubt, fill remaining time with a Rest.
+
+- Use only the modules listed above (stream, note, chord, meter, key,
+  tempo, pitch, duration, instrument, harmony). Do not reach into other
+  music21 submodules via `music21.<other>` (articulations, expressions,
+  etc.) — they are not injected and will raise AttributeError.
+
+- Do not write dead code. Every helper function defined must be called,
+  every variable assigned must be read, every conditional must have
+  meaningfully different branches. Delete unused declarations before
+  returning.
+
+- Avoid bend, glissando, and continuous-pitch articulations — Verovio
+  renders them poorly. When the English asks for a bend, prefer a
+  discrete approach note (a grace-note-length pitch one scale step
+  below the target, placed BEFORE the target) rather than trying to
+  engrave a continuous bend.
+
+- When the snippet creates Measures explicitly, attach key signature,
+  time signature, and tempo marking to the FIRST Measure, not to the
+  Part. (E.g., m1.append(ks); m1.append(ts); m1.append(mm) rather than
+  part.append(ks).)
+
+- To inherit key/time/tempo from another snippet's Score, iterate
+  through the result and pick the first instance of each type. Do not
+  force a mode (e.g., do not call `asKey('major')` — that overrides
+  the actual mode of the source). Sensible fallbacks should match the
+  song's intended key, not a generic default."""
 
 
 register_fragment(MUSIC_PROMPT_FRAGMENT)
