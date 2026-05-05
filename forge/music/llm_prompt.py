@@ -13,7 +13,8 @@ are present.
 from forge.core.llm_prompts import register_fragment
 
 
-MUSIC_PROMPT_FRAGMENT = """Music21 modules in scope (do NOT import them):
+MUSIC_PROMPT_FRAGMENT = """Music21 modules already bound as globals (do NOT write `from music21 import ...`
+or `import music21`):
   music21, stream, note, chord, meter, key, tempo, pitch, duration, instrument, harmony.
 
 For music output: return a music21.stream.Stream (Score / Part / Measure / ...).

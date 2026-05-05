@@ -33,6 +33,11 @@ Forge snippets are Python functions. Follow these conventions exactly:
 
 General modules in scope (do NOT import them): random, math, numpy.
 
+NEVER write any `import` or `from ... import ...` statements. The modules
+listed throughout this prompt are already bound as global names in the
+snippet's namespace — just use them directly. The runtime sandbox blocks
+imports, so any import line will crash the snippet at execution time.
+
 Output ONLY valid Python code. No markdown fences, no explanation, no comments."""
 
 

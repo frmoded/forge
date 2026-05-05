@@ -23,6 +23,16 @@ def test_base_prompt_forbids_top_level_code():
   assert "Module-level statements" in BASE_SYSTEM_PROMPT
 
 
+def test_base_prompt_forbids_imports():
+  """Regression — the LLM kept emitting `from music21 import ...` even
+  though earlier wording told it not to. The sandbox blocks imports, so
+  any import line crashes the snippet."""
+  # The literal anti-patterns must appear so the LLM sees what to avoid.
+  assert "import" in BASE_SYSTEM_PROMPT
+  assert "from ... import" in BASE_SYSTEM_PROMPT
+  assert "global names" in BASE_SYSTEM_PROMPT
+
+
 def test_base_prompt_has_no_music_specific_content():
   # Music-specific terms should have moved to the music fragment.
   assert "music21" not in BASE_SYSTEM_PROMPT
