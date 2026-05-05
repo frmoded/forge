@@ -15,6 +15,14 @@ def test_base_prompt_has_snippet_conventions():
   assert "random, math, numpy" in BASE_SYSTEM_PROMPT
 
 
+def test_base_prompt_forbids_top_level_code():
+  """Regression — generated snippets sometimes duplicated logic at the
+  module level. The runtime only calls compute(), so the top-level block
+  is dead code. The prompt must keep telling generations not to do this."""
+  assert "Place ALL executable logic inside `compute`" in BASE_SYSTEM_PROMPT
+  assert "Module-level statements" in BASE_SYSTEM_PROMPT
+
+
 def test_base_prompt_has_no_music_specific_content():
   # Music-specific terms should have moved to the music fragment.
   assert "music21" not in BASE_SYSTEM_PROMPT

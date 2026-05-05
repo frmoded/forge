@@ -22,6 +22,10 @@ Forge snippets are Python functions. Follow these conventions exactly:
 - Every snippet's entrypoint must be named `compute`.
 - Snippets with no inputs:      def compute(context): ...
 - Snippets with named inputs:   def compute(context, param1, param2): ...
+- Place ALL executable logic inside `compute`. Do not write top-level
+  code that builds module state. Forge calls `compute(context)` — nothing
+  else. Module-level statements other than imports and the `compute`
+  definition are dead code.
 - Call another snippet:         context.compute("snippet_id", param=value)
 - Read an input parameter:      context.get("key", default)
 - Side-effect output:           print(...)
