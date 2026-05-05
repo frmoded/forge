@@ -104,4 +104,14 @@ def test_music_fragment_covers_known_pitfalls():
   # Metadata on first Measure, not Part
   assert "FIRST Measure" in prompt
   # Don't force a mode when reading key from another snippet
-  assert "asKey('major')" in prompt or "force a mode" in prompt
+  assert "asKey('major')" in prompt
+  assert ".tonic" in prompt
+  # Sub-durations are literal, not divided from bar_ql
+  assert "eighth = 0.5" in prompt
+  assert "do NOT depend on the time signature" in prompt
+  # Register anchoring — don't double-octave "high"
+  assert "octave 4" in prompt
+  assert "above singable range" in prompt
+  # Fallbacks are required for every extracted field
+  assert "fallback for every piece" in prompt
+  assert "blues vault" in prompt

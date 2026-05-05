@@ -57,6 +57,12 @@ Music21 idioms — common pitfalls to avoid:
   3.0 for 3/4). Do not write bars that fall short or overflow. When in
   doubt, fill remaining time with a Rest.
 
+- Do not derive sub-durations from bar_ql by guessing divisors. Use
+  literal music21 quarterLength values directly: eighth = 0.5,
+  quarter = 1.0, dotted_quarter = 1.5, half = 2.0, whole = 4.0. These
+  values do NOT depend on the time signature. Only `bar_ql` (the total
+  bar length) varies with the time signature.
+
 - Use only the modules listed above (stream, note, chord, meter, key,
   tempo, pitch, duration, instrument, harmony). Do not reach into other
   music21 submodules via `music21.<other>` (articulations, expressions,
@@ -73,16 +79,35 @@ Music21 idioms — common pitfalls to avoid:
   below the target, placed BEFORE the target) rather than trying to
   engrave a continuous bend.
 
+- When the English describes a register relative to the song ("high",
+  "octave above the tonic"), anchor the tonic to the song's HOME
+  register (octave 4 for typical vocal/treble parts), then derive
+  "high" relative to that. Do not anchor the tonic to an already-high
+  octave and then add another octave on top — that puts notes well
+  above singable range. For vocals: tonic in octave 4, "high" is
+  octave 5. Avoid octave 6+ unless the English specifically calls for
+  whistle/coloratura register.
+
 - When the snippet creates Measures explicitly, attach key signature,
   time signature, and tempo marking to the FIRST Measure, not to the
   Part. (E.g., m1.append(ks); m1.append(ts); m1.append(mm) rather than
   part.append(ks).)
 
-- To inherit key/time/tempo from another snippet's Score, iterate
-  through the result and pick the first instance of each type. Do not
-  force a mode (e.g., do not call `asKey('major')` — that overrides
-  the actual mode of the source). Sensible fallbacks should match the
-  song's intended key, not a generic default."""
+- To extract the tonic from another snippet's key, find the first
+  `key.Key` in the source's elements and use `.tonic` DIRECTLY. NEVER
+  call `.asKey('major')` or `.asKey('minor')` on it, even via a
+  re-constructed KeySignature — those silently override the source's
+  mode and can return the relative-major or relative-minor tonic
+  instead of the actual song tonic. Correct pattern:
+    found_key = next((el for el in src.flatten()
+                      if isinstance(el, key.Key)), None)
+    tonic_name = found_key.tonic.name if found_key else 'E'
+
+- Always provide a fallback for every piece of metadata you extract.
+  If you check `found_ts is None`, also check `found_key is None` and
+  `found_mm is None`. Fallbacks should match the song's intended
+  values (e.g., E minor for the blues vault), not generic defaults
+  like A minor."""
 
 
 register_fragment(MUSIC_PROMPT_FRAGMENT)
