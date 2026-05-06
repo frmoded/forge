@@ -164,7 +164,18 @@ Music21 idioms — common pitfalls to avoid:
   `meter.TimeSignature(...)`, and `tempo.MetronomeMark(...)` to the
   first Measure of its Score. Omitting any of these forces every
   downstream snippet to use a fallback default that may not match
-  the song's intended values."""
+  the song's intended values.
+
+- In the English facet, use `[[snippet_name]]` ONLY for forward
+  dependencies — snippets this one calls via `context.compute(...)`.
+  Do NOT use `[[]]` to reference parent snippets that call this one
+  (e.g., a leaf phrase referencing the chorus that uses it, or a
+  chorus referencing the song that contains it). Obsidian's backlinks
+  panel handles upward navigation automatically; manual upward `[[]]`
+  links create phantom edges in the dependency graph that don't
+  match runtime calls and can mislead the LLM at generation time
+  into trying to call the parent. To reference a parent in prose,
+  use plain text ("the song", "the chorus") without the `[[]]`."""
 
 
 register_fragment(MUSIC_PROMPT_FRAGMENT)
