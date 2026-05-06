@@ -28,6 +28,18 @@ try:
 except ImportError:
   _MUSIC21_NAMES = {}
 
+try:
+  from forge.music import lib as _music_lib
+  _FORGE_MUSIC_LIB_NAMES = {
+    "bar": _music_lib.bar,
+    "voices": _music_lib.voices,
+    "sequence": _music_lib.sequence,
+    "repeat": _music_lib.repeat,
+    "pentatonic": _music_lib.pentatonic,
+  }
+except ImportError:
+  _FORGE_MUSIC_LIB_NAMES = {}
+
 _PYTHON_HEADING = re.compile(r'^#{1,6}\s+python\s*$', re.IGNORECASE)
 
 _NO_FROZEN_SNAPSHOT = object()
@@ -232,6 +244,7 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
     "math": math,
     "numpy": numpy,
     **_MUSIC21_NAMES,
+    **_FORGE_MUSIC_LIB_NAMES,
   }
   old_stdout = sys.stdout
   sys.stdout = buf
