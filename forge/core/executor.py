@@ -6,8 +6,10 @@ import random
 import numpy
 import builtins
 
-# Domain modules pre-injected into the snippet namespace. Untrusted snippets
-# can't `import`, so anything they should be able to call has to be here.
+# Domain modules pre-injected into the snippet namespace for convenience —
+# snippets can use them without importing. Snippets get full Python power
+# (including `import` and the full builtins), per constitution B2; this
+# pre-injection is ergonomics, not sandboxing.
 try:
   import music21
   _MUSIC21_NAMES = {
@@ -27,15 +29,6 @@ except ImportError:
   _MUSIC21_NAMES = {}
 
 _PYTHON_HEADING = re.compile(r'^#{1,6}\s+python\s*$', re.IGNORECASE)
-
-_SAFE_BUILTINS = {name: getattr(builtins, name) for name in (
-  "print", "len", "range", "enumerate", "zip", "map", "filter",
-  "sorted", "reversed", "list", "dict", "set", "tuple", "str",
-  "int", "float", "bool", "type", "isinstance", "hasattr", "getattr",
-  "min", "max", "sum", "abs", "round", "any", "all", "repr", "format",
-  "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
-) if hasattr(builtins, name)}
-
 
 _NO_FROZEN_SNAPSHOT = object()
 
@@ -226,11 +219,15 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
   buf = io.StringIO()
   context = ForgeContext(resolver, inputs, vault_path=vault_path,
                          registry=registry, caller_id=snippet_id)
-  builtins_for_exec = builtins.__dict__ if trusted else _SAFE_BUILTINS
+  # Per constitution B2, snippets get full Python power. The `trusted`
+  # parameter is preserved for future use (e.g., distinguishing builtin from
+  # vault snippets in some other capacity) but no longer controls builtins
+  # exposure.
+  del trusted
   local_ns = {
     **inputs,
     "inputs": inputs,
-    "__builtins__": builtins_for_exec,
+    "__builtins__": builtins.__dict__,
     "random": random,
     "math": math,
     "numpy": numpy,

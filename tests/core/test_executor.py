@@ -65,10 +65,11 @@ def test_exec_python_math_in_scope():
   assert result == 3
 
 
-def test_exec_python_blocks_import():
-  code = "def compute(context):\n  import os\n  return os"
-  with pytest.raises(SnippetExecError):
-    exec_python(code, {})
+def test_exec_python_permits_import():
+  # Per constitution B2, snippets get full Python power, including imports.
+  code = "def compute(context):\n  import os\n  return os.path.sep"
+  _, result = exec_python(code, {})
+  assert result in ("/", "\\")
 
 
 def test_exec_python_raises_snippet_exec_error_with_stdout():
@@ -114,10 +115,12 @@ def test_trusted_permits_import():
   assert result in ("/", "\\")
 
 
-def test_untrusted_blocks_import():
-  code = "def compute(context):\n  import os\n  return os"
-  with pytest.raises(SnippetExecError):
-    exec_python(code, {}, trusted=False)
+def test_untrusted_permits_import():
+  # Per constitution B2, snippets get full Python power, including imports.
+  # The `trusted` parameter no longer gates builtins exposure.
+  code = "def compute(context):\n  import os\n  return os.path.sep"
+  _, result = exec_python(code, {}, trusted=False)
+  assert result in ("/", "\\")
 
 
 def test_trusted_permits_open(tmp_path):
@@ -150,12 +153,12 @@ def test_nested_execute_propagates_vault_path():
   assert result == "/v"
 
 
-def test_nested_execute_grants_trust_only_to_builtins():
+def test_nested_execute_permits_import_in_inner():
   from forge.core.snippet_registry import SnippetRegistry, AUTHORING_VAULT
   from forge.core.graph_resolver import GraphResolver
 
-  # The user-authored "inner" snippet tries to import — should fail even though
-  # the parent (which calls it) ran trusted.
+  # Per constitution B2, nested user-authored snippets get full Python power
+  # too — imports work regardless of how the parent was invoked.
   inner_code = "def compute(context):\n  import os\n  return os.path.sep"
   outer_code = "def compute(context):\n  return context.compute('inner')"
 
@@ -170,8 +173,8 @@ def test_nested_execute_grants_trust_only_to_builtins():
     "snippet_id": "authoring/inner",
   }
   resolver = GraphResolver(registry)
-  with pytest.raises(SnippetExecError):
-    exec_python(outer_code, {}, resolver, trusted=True)
+  _, result = exec_python(outer_code, {}, resolver, trusted=True)
+  assert result in ("/", "\\")
 
 
 def test_context_execute_without_resolver_raises():

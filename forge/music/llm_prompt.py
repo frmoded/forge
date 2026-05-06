@@ -17,6 +17,10 @@ MUSIC_PROMPT_FRAGMENT = """Music21 modules already bound as globals (do NOT writ
 or `import music21`):
   music21, stream, note, chord, meter, key, tempo, pitch, duration, instrument, harmony.
 
+Other pre-injected globals: random, math, numpy. Do NOT `import random` —
+it's already in scope. To use `copy` (e.g., copy.deepcopy), `import copy`
+inside the function — that one is not pre-injected.
+
 For music output: return a music21.stream.Stream (Score / Part / Measure / ...).
 The runtime serializes it to MusicXML and the plugin renders it as engraved
 notation. Do NOT return dicts of pitch/beat data — return real notes.
@@ -89,9 +93,18 @@ Music21 idioms — common pitfalls to avoid:
   whistle/coloratura register.
 
 - When the snippet creates Measures explicitly, attach key signature,
-  time signature, and tempo marking to the FIRST Measure, not to the
-  Part. (E.g., m1.append(ks); m1.append(ts); m1.append(mm) rather than
-  part.append(ks).)
+  time signature, and tempo marking to the FIRST Measure ONLY — never
+  to the Part, and never to BOTH. The pattern `part.append(ts);
+  m1.append(ts)` (whether the same ts object reused or a duplicate
+  created) produces redundant or conflicting metadata in the rendered
+  score. Pick the first Measure. Build each metadata object once, in a
+  local variable, and attach it once:
+    ts = meter.TimeSignature('12/8')
+    ks = key.Key('E', 'major')
+    mm = tempo.MetronomeMark(number=70,
+                              referent=duration.Duration(type='quarter', dots=1))
+    m1.append(ks); m1.append(ts); m1.append(mm)
+  Do NOT also do `part.append(ts)` or `part.append(mm)`.
 
 - To extract the tonic from another snippet's key, find the first
   `key.Key` in the source's elements and use `.tonic` DIRECTLY. NEVER
@@ -107,7 +120,51 @@ Music21 idioms — common pitfalls to avoid:
   If you check `found_ts is None`, also check `found_key is None` and
   `found_mm is None`. Fallbacks should match the song's intended
   values (e.g., E minor for the blues vault), not generic defaults
-  like A minor."""
+  like A minor.
+
+- When copying individual music21 elements (notes, rests, chords,
+  chord symbols) between streams — for example, when merging measures
+  from a sub-snippet's output into a new measure — use
+  `copy.deepcopy(el)` after `import copy`. The `.copy()` method only
+  exists on Stream subclasses; calling it on a `harmony.ChordSymbol`
+  raises AttributeError. Without copying, appending the same element
+  to multiple parents can cause music21 to behave unpredictably.
+
+- Only pass arguments to `context.compute` that the callee snippet
+  actually accepts. Most leaf snippets declare `def compute(context):`
+  with no extra params. Inventing kwargs like `instance=1` to label
+  successive calls does NOT work — the kwargs propagate to the callee
+  and either raise TypeError or are silently ignored (they don't
+  produce different results). To get different realizations of the
+  same English from successive calls, the callee itself must be
+  non-deterministic (e.g., uses `random` without a seed); kwargs at
+  the call site don't change anything.
+
+- `stream.flatten()` removes container structure (Score → Part →
+  Measure → ...) and returns leaf elements (notes, rests, metadata).
+  To get Parts from a Score, use `score.getElementsByClass(stream.Part)`
+  directly. The chain `score.flatten().getElementsByClass(stream.Part)`
+  returns nothing because flattening already discarded the Parts.
+
+- Use `flatten()` consistently for metadata extraction — `src.flatten()`
+  rather than `src.recurse()`. Both work, but consistency across snippets
+  in the same vault makes them easier to read.
+
+- Do NOT leave self-correcting "thinking out loud" comments in the
+  final code. Comments like `# 1.5 + 1.0 + 0.5 = 3.0 — nope, need 6.0`
+  followed by an adjustment, or `# adjust: make this 3.5 instead`,
+  are scratch work that should be cleaned up before returning the code.
+  Compute durations correctly the first time, or use the
+  `remaining = bar_ql - total_so_far` pattern to fill remaining time
+  with a Rest.
+
+- If a snippet acts as the harmonic frame for the song (downstream
+  snippets call `context.compute` on it to read key/time/tempo),
+  explicitly attach ALL THREE of `key.Key(tonic, mode)`,
+  `meter.TimeSignature(...)`, and `tempo.MetronomeMark(...)` to the
+  first Measure of its Score. Omitting any of these forces every
+  downstream snippet to use a fallback default that may not match
+  the song's intended values."""
 
 
 register_fragment(MUSIC_PROMPT_FRAGMENT)
