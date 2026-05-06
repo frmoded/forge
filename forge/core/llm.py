@@ -35,6 +35,8 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
     for dep_id in deps:
       _generate(dep_id, registry, recursive, results, visited)
 
+  import logging
+  logging.getLogger(__name__).info("generating snippet '%s'", snippet_id)
   results[snippet_id] = _call_llm(snippet_id, meta, body, deps, registry if recursive else None)
 
 
