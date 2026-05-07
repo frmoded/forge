@@ -57,6 +57,13 @@ def test_data_snippet_svg_returns_string():
   assert read_data_snippet(snippet) == body
 
 
+def test_data_snippet_jpeg_returns_base64_string():
+  # Body is base64-encoded JPEG bytes; deserialize is passthrough (string).
+  body = "/9j/4AAQSkZJRgABAQAAAQABAAD/4gIcAAA"
+  snippet = _make_data({"content_type": "jpeg"}, body)
+  assert read_data_snippet(snippet) == body
+
+
 def test_data_snippet_extracts_under_body_heading():
   """The 'New Snippet' modal generates: # English ... # Body ... fenced payload.
   The executor must extract from under # Body, ignoring the English facet."""

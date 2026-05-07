@@ -20,7 +20,7 @@ _NATIVE_WIRE_FORMATS = {"musicxml"}
 # Content types accepted by deserialize_from_wire — exposed via /connect so
 # the plugin's "Create new snippet" dropdown stays in sync with the backend.
 # Keep ordered: most common first (the dropdown shows them in this order).
-SUPPORTED_CONTENT_TYPES = ("json", "text", "markdown", "musicxml", "svg")
+SUPPORTED_CONTENT_TYPES = ("json", "text", "markdown", "musicxml", "svg", "jpeg")
 
 
 def serialize_result(value, snippet=None):
@@ -63,6 +63,10 @@ def deserialize_from_wire(content_type, content_str):
   if content_type == "markdown":
     return content_str
   if content_type == "svg":
+    return content_str
+  if content_type == "jpeg":
+    # Body is base64-encoded JPEG bytes. Returning the string as-is keeps the
+    # wire format predictable; consumers that want raw bytes can decode it.
     return content_str
   if content_type == "musicxml":
     import music21
