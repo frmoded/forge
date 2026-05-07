@@ -76,36 +76,114 @@ def voices(
   return score
 
 
+def _instrument_key(part: stream.Part) -> str:
+  """Return a string key identifying the part's instrument for grouping
+  in sequence(). Parts with no instrument share an empty-string key."""
+  inst = next((el for el in part.elements
+               if isinstance(el, instrument.Instrument)), None)
+  if inst is None:
+    return ''
+  return type(inst).__name__
+
+
 def sequence(*streams: StreamLike) -> stream.Score:
-  """Concatenate streams in time and return a Score. For multi-part inputs,
-  voice i across all inputs becomes Part i in the result. Single-part or
-  bare-Stream inputs become one concatenated Part. Measures are renumbered
-  sequentially in each output Part."""
+  """Concatenate streams in time and return a Score.
+
+  For each voice position across the inputs, parts are grouped by
+  instrument identity. Each unique instrument at a position becomes its
+  own continuous output stave; inputs whose part at that position has a
+  different instrument (or no part at all) are filled with rest measures
+  matching the input's bar count and time signature.
+
+  Measures are renumbered sequentially in each output stave.
+
+  Concretely: a song that sequences vocal choruses [harm-Piano, vocal-
+  Vocalist] with an instrumental chorus [harm-Piano, solo-ElectricGuitar]
+  produces three continuous staves — one each for Piano, Vocalist, and
+  ElectricGuitar — with rests where each is inactive. Sections with the
+  SAME instrument at a position merge into one stave; sections with
+  DIFFERENT instruments at the same position split into separate staves."""
   if not streams:
     return stream.Score()
 
   per_input_parts = [_extract_parts(s) for s in streams]
   n_voices = max(len(parts) for parts in per_input_parts)
 
+  # Per-input bar count and bar_ql, used to pad missing or
+  # different-instrument voices. Derived from the first part with measures.
+  per_input_padding = []
+  for parts in per_input_parts:
+    n_bars = 0
+    bar_ql = 4.0
+    for part in parts:
+      measures = list(part.getElementsByClass(stream.Measure))
+      if measures:
+        n_bars = len(measures)
+        first_ts = next(
+          (el for m in measures for el in m
+           if isinstance(el, meter.TimeSignature)),
+          None,
+        )
+        if first_ts is not None:
+          bar_ql = first_ts.barDuration.quarterLength
+        break
+    per_input_padding.append((n_bars, bar_ql))
+
   score = stream.Score()
   for voice_idx in range(n_voices):
-    combined = stream.Part()
-    next_measure_number = 1
-    for parts in per_input_parts:
+    # Group inputs' parts at this voice position by instrument identity.
+    # Each unique instrument becomes its own output stave.
+    groups: dict = {}
+    order: list = []
+    for input_idx, parts in enumerate(per_input_parts):
       if voice_idx >= len(parts):
         continue
       src_part = parts[voice_idx]
-      measures = list(src_part.getElementsByClass(stream.Measure))
-      if measures:
-        for m in measures:
-          m_copy = copy.deepcopy(m)
-          m_copy.number = next_measure_number
-          combined.append(m_copy)
-          next_measure_number += 1
-      else:
-        for el in src_part.elements:
-          combined.append(copy.deepcopy(el))
-    score.insert(0, combined)
+      key = _instrument_key(src_part)
+      if key not in groups:
+        groups[key] = []
+        order.append(key)
+      groups[key].append((input_idx, src_part))
+
+    for inst_key in order:
+      combined = stream.Part()
+      members = groups[inst_key]
+      members_by_input = {input_idx: part for input_idx, part in members}
+
+      # Carry the instrument from the first member so the stave is labeled
+      # even where inputs that don't have this instrument get padded.
+      ref_part = members[0][1]
+      ref_inst = next((el for el in ref_part.elements
+                       if isinstance(el, instrument.Instrument)), None)
+      if ref_inst is not None:
+        combined.append(copy.deepcopy(ref_inst))
+
+      next_measure_number = 1
+      for input_idx, parts in enumerate(per_input_parts):
+        if input_idx in members_by_input:
+          src_part = members_by_input[input_idx]
+          measures = list(src_part.getElementsByClass(stream.Measure))
+          if measures:
+            for m in measures:
+              m_copy = copy.deepcopy(m)
+              m_copy.number = next_measure_number
+              combined.append(m_copy)
+              next_measure_number += 1
+          else:
+            for el in src_part.elements:
+              if not isinstance(el, instrument.Instrument):
+                combined.append(copy.deepcopy(el))
+        else:
+          # Either this input lacks voice_idx entirely, or its part at
+          # voice_idx has a different instrument. Pad with rest measures.
+          n_bars, bar_ql = per_input_padding[input_idx]
+          for _ in range(n_bars):
+            m = stream.Measure(number=next_measure_number)
+            m.append(note.Rest(quarterLength=bar_ql))
+            combined.append(m)
+            next_measure_number += 1
+
+      score.insert(0, combined)
   return score
 
 

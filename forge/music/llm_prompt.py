@@ -25,7 +25,86 @@ For music output: return a music21.stream.Stream (Score / Part / Measure / ...).
 The runtime serializes it to MusicXML and the plugin renders it as engraved
 notation. Do NOT return dicts of pitch/beat data — return real notes.
 
-Music21 idioms — common pitfalls to avoid:
+Composition helpers — also pre-injected as globals (do NOT import these):
+  bar(*items, time_signature=, number=)  -> Measure
+  voices(*streams, instruments=)         -> Score (parallel / overlay)
+  sequence(*streams)                     -> Score (linear / concat)
+  repeat(stream, n)                      -> Score (n copies end-to-end)
+  pentatonic(key_or_tonic, mode='minor', octave_range=(4,5),
+             include_blue=False)         -> list[Pitch]
+
+These hide music21 boilerplate (part/measure assembly, deepcopy,
+rest-padding). Use them rather than hand-rolling those patterns.
+Idiomatic examples:
+
+  # AAB phrase structure (composing two sub-phrases linearly)
+  return sequence(repeat(phrase_a, 2), phrase_b)
+
+  # Vocal melody over harmonic frame (parallel composition)
+  return voices(form, vocal_line)
+
+  # 12-bar blues with solo between choruses 2 and 3
+  return sequence(repeat(chorus, 2), solo_chorus, chorus)
+
+  # Build a measure with auto-rest padding
+  return bar(
+      note.Note('C4', quarterLength=2.0),
+      note.Note('E4', quarterLength=2.0),
+      time_signature=ts,
+  )
+
+  # Get a pentatonic scale (with blue note for blues)
+  scale = pentatonic(found_key, mode='minor', octave_range=(4, 5),
+                     include_blue=True)
+
+Composition rules — prefer the helpers above to hand-rolled equivalents:
+
+- For linear composition (sections played end-to-end), use sequence(...)
+  — not hand-rolled measure concatenation. sequence aligns parts BY
+  POSITION across inputs (input[0].parts[0] + input[1].parts[0] + ...
+  becomes output.parts[0]; same for parts[1], etc.) and renumbers
+  measures sequentially.
+
+  When sections have different numbers of voices — e.g., vocal choruses
+  with [harm, vocal] sit alongside an instrumental solo chorus with
+  [harm, solo] — sequence auto-pads the missing voices with rest
+  measures matching the input's bar count and time signature. So a
+  song that mixes 2-voice and 3-voice sections produces 3 continuous
+  staves automatically: each section's missing voices appear as rest
+  measures in the rendered output. You do NOT need to manually build
+  silent rest-filled parts for sections that don't use a given
+  instrument; sequence handles that.
+
+  CRITICAL: do NOT manually replicate voices()/sequence() by iterating
+  `getElementsByClass(stream.Part)` and appending parts to a Score —
+  the helpers handle deepcopy, alignment, and rest-padding correctly.
+  If you find yourself walking parts yourself, stop and use the helper
+  instead. Each intermediate snippet's compute should be a few lines
+  ending in `return voices(...)` or `return sequence(...)`.
+
+- For parallel composition (multiple parts playing simultaneously),
+  use voices(...) — not hand-rolled part merging. Pass instruments via
+  voices(s1, s2, instruments=['Voice', 'AcousticGuitar']) if you need
+  to relabel parts at the composition site.
+
+- For repeating a section, use repeat(stream, n) instead of writing
+  sequence(stream, stream, ..., stream).
+
+- For pentatonic scales, use pentatonic(key_or_tonic, mode='minor', ...)
+  — don't hand-derive intervals like (0, 3, 5, 7, 10) in your own code.
+  The helper returns ordered Pitch objects across the requested octave
+  range; pass include_blue=True to add the b5.
+
+- For Measures, prefer bar(*items, time_signature=ts) over manual
+  Measure construction. bar() auto-pads with a trailing Rest if items
+  are short and raises ValueError if they overflow — you don't have
+  to compute `bar_ql - total_so_far` yourself. (Manual Measure
+  construction is still appropriate when you need to attach key/time/
+  tempo metadata explicitly or place elements at non-default offsets;
+  the music21 rules below still apply when you do.)
+
+Music21 idioms — common pitfalls to avoid (relevant when going below
+the composition-helper layer):
 
 - MetronomeMark referent must match the beat unit, not the smallest note.
   For 4/4 use referent=duration.Duration('quarter'). For compound meters

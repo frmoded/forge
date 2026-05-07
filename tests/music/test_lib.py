@@ -219,6 +219,114 @@ def test_sequence_accepts_measures_directly():
   assert [m.number for m in measures] == [1, 2]
 
 
+def test_sequence_pads_missing_voices_with_rests():
+  # Two inputs: input1 has one voice (4 bars), input2 has two voices (4 bars
+  # each). The output should have two voices, both spanning the full 8 bars.
+  # input1's missing voice 1 is padded with 4 rest measures.
+  v1a = stream.Part(); v1a.append(bar(note.Note('C4', quarterLength=4), number=1))
+
+  v2a = stream.Part(); v2a.append(bar(note.Note('D4', quarterLength=4), number=1))
+  v2b = stream.Part(); v2b.append(bar(note.Note('E4', quarterLength=4), number=1))
+  s2 = stream.Score(); s2.insert(0, v2a); s2.insert(0, v2b)
+
+  out = sequence(v1a, s2)
+  parts = list(out.getElementsByClass(stream.Part))
+  assert len(parts) == 2
+
+  # Both voices must span exactly 2 measures (input1's 1 + input2's 1).
+  for p in parts:
+    measures = list(p.getElementsByClass(stream.Measure))
+    assert len(measures) == 2
+    assert [m.number for m in measures] == [1, 2]
+
+  # Voice 1 — the one missing from input1 — must have a rest in measure 1.
+  voice_1_first_measure = list(parts[1].getElementsByClass(stream.Measure))[0]
+  rests = [el for el in voice_1_first_measure.notesAndRests
+           if isinstance(el, note.Rest)]
+  assert len(rests) >= 1
+  assert sum(r.duration.quarterLength for r in rests) == 4.0
+
+
+def test_sequence_splits_different_instruments_at_same_voice_position():
+  # A song-like case: chorus has [Piano, Vocalist], solo_chorus has
+  # [Piano, ElectricGuitar]. Voice 0 (Piano in both) merges into one
+  # continuous stave. Voice 1 differs (Vocalist vs ElectricGuitar) — must
+  # split into two separate output staves with rests where inactive.
+  def make_section(melody_inst, melody_pitch):
+    p_harm = stream.Part(); p_harm.append(instrument.Piano())
+    p_harm.append(bar(note.Note('C4', quarterLength=4), number=1))
+    p_mel = stream.Part(); p_mel.append(melody_inst)
+    p_mel.append(bar(note.Note(melody_pitch, quarterLength=4), number=1))
+    sc = stream.Score(); sc.insert(0, p_harm); sc.insert(0, p_mel)
+    return sc
+
+  chorus = make_section(instrument.Vocalist(), 'E4')
+  solo = make_section(instrument.ElectricGuitar(), 'G4')
+
+  out = sequence(chorus, chorus, solo, chorus)
+  parts = list(out.getElementsByClass(stream.Part))
+
+  # Expect 3 staves: one Piano (continuous), one Vocalist (active in 3 of 4
+  # sections, rests in the solo slot), one ElectricGuitar (active only in
+  # the solo slot, rests in the other 3 sections).
+  insts = [next(p.getElementsByClass(instrument.Instrument), None) for p in parts]
+  inst_class_names = sorted(type(i).__name__ for i in insts if i is not None)
+  assert inst_class_names == ['ElectricGuitar', 'Piano', 'Vocalist']
+
+  # Every output stave must span all 4 bars (one bar per input section).
+  for p in parts:
+    measures = list(p.getElementsByClass(stream.Measure))
+    assert len(measures) == 4
+
+  # The ElectricGuitar stave must have rests in 3 of its 4 measures
+  # (only active in the third position).
+  eg_part = next(p for p, i in zip(parts, insts)
+                 if i is not None and isinstance(i, instrument.ElectricGuitar))
+  rest_measures = sum(
+    1 for m in eg_part.getElementsByClass(stream.Measure)
+    if any(isinstance(el, note.Rest) for el in m.notesAndRests)
+    and not any(isinstance(el, note.Note) for el in m.notesAndRests)
+  )
+  assert rest_measures == 3
+
+  # The Vocalist stave must have rests in 1 of its 4 measures
+  # (silent during the solo).
+  v_part = next(p for p, i in zip(parts, insts)
+                if i is not None and isinstance(i, instrument.Vocalist))
+  rest_measures_v = sum(
+    1 for m in v_part.getElementsByClass(stream.Measure)
+    if any(isinstance(el, note.Rest) for el in m.notesAndRests)
+    and not any(isinstance(el, note.Note) for el in m.notesAndRests)
+  )
+  assert rest_measures_v == 1
+
+
+def test_sequence_pad_uses_input_time_signature():
+  # An input in 12/8 should produce 6.0-ql rest measures when its missing
+  # voice is padded, not 4.0 (the default).
+  v1a = stream.Part()
+  v1a.append(bar(note.Rest(quarterLength=6), number=1,
+                 time_signature=meter.TimeSignature('12/8')))
+
+  v2a = stream.Part()
+  v2a.append(bar(note.Note('C4', quarterLength=6), number=1,
+                 time_signature=meter.TimeSignature('12/8')))
+  v2b = stream.Part()
+  v2b.append(bar(note.Note('E4', quarterLength=6), number=1,
+                 time_signature=meter.TimeSignature('12/8')))
+  s2 = stream.Score(); s2.insert(0, v2a); s2.insert(0, v2b)
+
+  out = sequence(v1a, s2)
+  parts = list(out.getElementsByClass(stream.Part))
+
+  # Voice 1 — missing from input1 — has its measure 1 padded with a 6-ql rest.
+  voice_1_first_measure = list(parts[1].getElementsByClass(stream.Measure))[0]
+  rest_total = sum(r.duration.quarterLength
+                   for r in voice_1_first_measure.notesAndRests
+                   if isinstance(r, note.Rest))
+  assert rest_total == 6.0
+
+
 # ---------- repeat ----------
 
 def test_repeat_concatenates_n_times():
