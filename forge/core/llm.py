@@ -11,8 +11,10 @@ import forge.music.llm_prompt  # noqa: F401
 
 _client = None
 
-# In-memory cache: sha256(english + python sections) → generated code.
-# Lives only as long as the server process; restart drops it.
+# In-memory cache: sha256(snippet_id + english + python sections) → code.
+# snippet_id is part of the key so bodyless composition wrappers don't collide
+# on a single sha256("\x00") slot. Lives only as long as the server process;
+# restart drops it.
 _GENERATION_CACHE: dict[str, str] = {}
 
 
@@ -45,7 +47,7 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
   log = logging.getLogger(__name__)
   start = time.perf_counter()
 
-  cache_key = _cache_key(body)
+  cache_key = _cache_key(snippet_id, body)
   cached = _GENERATION_CACHE.get(cache_key)
   if cached is not None:
     elapsed_ms = (time.perf_counter() - start) * 1000
@@ -100,11 +102,13 @@ def _call_llm(snippet_id, meta, body, deps, registry):
   return message.content[0].text.strip()
 
 
-def _cache_key(body: str) -> str:
-  """Hash the english + python sections of a snippet body for cache lookup."""
+def _cache_key(snippet_id: str, body: str) -> str:
+  """Hash snippet_id + english + python sections for cache lookup. snippet_id
+  is included so bodyless wrappers (no # English / # Python heading) don't all
+  collide on the same sha256("\\x00") slot."""
   english = extract_section(body, "english") or ""
   python = extract_python(body) or ""
-  return hashlib.sha256(f"{english}\x00{python}".encode("utf-8")).hexdigest()
+  return hashlib.sha256(f"{snippet_id}\x00{english}\x00{python}".encode("utf-8")).hexdigest()
 
 
 def _find_deps(body):
