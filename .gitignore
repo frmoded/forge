@@ -9,6 +9,10 @@ dist/
 # OS files
 .DS_Store
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 .venv/
 .vscode/
 forge.egg-info/
