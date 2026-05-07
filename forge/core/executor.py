@@ -165,8 +165,35 @@ def read_data_snippet(snippet):
   if not content_type:
     raise ValueError(
       f"data snippet '{snippet['snippet_id']}' has no content_type in frontmatter")
-  body = _strip_code_fence(snippet["body"])
+  body = extract_body(snippet["body"])
   return deserialize_from_wire(content_type, body)
+
+
+_BODY_HEADING = re.compile(r'^#{1,6}\s+body\s*$', re.IGNORECASE)
+
+
+def extract_body(body):
+  """Extract the data payload from a snippet body. If a `# Body` heading is
+  present, take everything after it (analogous to extract_python under
+  `# Python`); otherwise, treat the whole body as the payload. A surrounding
+  ```<lang> ... ``` fence is stripped in either case.
+
+  The `# Body` shape is what the plugin's "New Snippet" modal generates:
+    # English
+    <intent>
+    # Body
+    ```json
+    {...}
+    ```
+  Plain-body data snippets (no headings, fenced or unfenced payload) remain
+  supported for back-compat with snapshots and pre-template authoring.
+  """
+  lines = body.splitlines()
+  for i, line in enumerate(lines):
+    if _BODY_HEADING.match(line.strip()):
+      payload = "\n".join(lines[i + 1:])
+      return _strip_code_fence(payload.strip())
+  return _strip_code_fence(body)
 
 
 def _strip_code_fence(body):

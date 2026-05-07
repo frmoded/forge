@@ -47,3 +47,24 @@ def test_connect_inventory_includes_type_per_snippet(client):
   for entry in authoring_entries:
     # Every test-vault snippet is currently action; the shape matters more.
     assert set(entry.keys()) == {"id", "type"}
+
+
+def test_connect_returns_supported_content_types(client):
+  """Plugin reads this to populate the data-snippet content_type dropdown."""
+  resp = client.post("/connect", json={"vault_path": VAULT})
+  body = resp.json()
+  assert "content_types" in body
+  types = body["content_types"]
+  assert isinstance(types, list)
+  # Every type listed here must be deserializable by the backend; this guards
+  # against shipping aspirational dropdown options that fail at compute time.
+  from forge.core.serialization import deserialize_from_wire
+  for ct in types:
+    if ct == "json":
+      assert deserialize_from_wire(ct, "{}") == {}
+    elif ct in ("text", "markdown"):
+      assert deserialize_from_wire(ct, "x") == "x"
+    elif ct == "musicxml":
+      pass  # exercised in test_data_snippets; importing music21 here is heavy
+    else:
+      raise AssertionError(f"untested content_type in /connect: {ct}")

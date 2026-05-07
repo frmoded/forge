@@ -45,6 +45,49 @@ def test_data_snippet_unsupported_content_type_raises():
     read_data_snippet(snippet)
 
 
+def test_data_snippet_markdown_returns_string():
+  body = "# Heading\n\nSome **bold** text."
+  snippet = _make_data({"content_type": "markdown"}, body)
+  assert read_data_snippet(snippet) == body
+
+
+def test_data_snippet_extracts_under_body_heading():
+  """The 'New Snippet' modal generates: # English ... # Body ... fenced payload.
+  The executor must extract from under # Body, ignoring the English facet."""
+  body = (
+    "# English\n"
+    "\n"
+    "An intent description that mentions {a, b, c} braces as text.\n"
+    "\n"
+    "# Body\n"
+    "\n"
+    "```json\n"
+    '{"x": 1}\n'
+    "```\n"
+  )
+  snippet = _make_data({"content_type": "json"}, body)
+  assert read_data_snippet(snippet) == {"x": 1}
+
+
+def test_data_snippet_body_heading_case_insensitive():
+  body = "# English\nintent\n\n## body\n\n```json\n42\n```"
+  snippet = _make_data({"content_type": "json"}, body)
+  assert read_data_snippet(snippet) == 42
+
+
+def test_data_snippet_body_heading_with_no_fence():
+  """Markdown payloads under # Body have no surrounding fence — extract as-is."""
+  body = "# English\n\nintent\n\n# Body\n\nplain text payload"
+  snippet = _make_data({"content_type": "text"}, body)
+  assert read_data_snippet(snippet) == "plain text payload"
+
+
+def test_data_snippet_no_body_heading_falls_back_to_whole_body():
+  """Pre-template snippets and snapshots have no headings — keep working."""
+  snippet = _make_data({"content_type": "json"}, '{"k": "v"}')
+  assert read_data_snippet(snippet) == {"k": "v"}
+
+
 def test_snapshot_type_treated_as_data():
   """Snapshots are read like data snippets per F3."""
   snippet = {
