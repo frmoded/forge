@@ -17,11 +17,16 @@ from forge.core.exceptions import SnippetResolutionError
 from forge.core.llm import generate_snippet_code
 from forge.builtins.loader import load_builtin_vault
 
+# Attach the handler to the package-root logger so every forge.* submodule
+# (forge.core.llm, forge.api.server, ...) inherits it via propagation.
+_forge_logger = logging.getLogger("forge")
+_forge_logger.setLevel(logging.INFO)
+if not _forge_logger.handlers:
+  _handler = logging.StreamHandler()
+  _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+  _forge_logger.addHandler(_handler)
+
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-_handler = logging.StreamHandler()
-_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-logger.addHandler(_handler)
 
 app = FastAPI()
 
