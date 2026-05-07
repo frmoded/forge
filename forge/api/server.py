@@ -12,7 +12,7 @@ from forge.core.registry import SnippetRegistry, GraphResolver
 from forge.core.executor import extract_python, exec_python, SnippetExecError, read_data_snippet
 from forge.core.snapshots import set_snapshot_state
 from forge.core.dependencies import extract_dependencies, apply_dependencies_to_body
-from forge.core.serialization import serialize_result
+from forge.core.serialization import serialize_result, SUPPORTED_CONTENT_TYPES
 from forge.core.exceptions import SnippetResolutionError
 from forge.core.llm import generate_snippet_code
 from forge.builtins.loader import load_builtin_vault
@@ -128,6 +128,7 @@ def connect(req: ConnectRequest, manager: VaultSessionManager = Depends(get_sess
     "vault_path": req.vault_path,
     "warnings": state["registry"].errors,
     "snippets": state["registry"].list_snippets(),
+    "content_types": list(SUPPORTED_CONTENT_TYPES),
   }
 
 
