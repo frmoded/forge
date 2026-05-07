@@ -3,12 +3,13 @@ load_dotenv()
 
 import os
 import logging
-from fastapi import FastAPI, Depends, HTTPException
+import time
+from fastapi import FastAPI, Depends, HTTPException, Request
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from forge.core.logic import get_test_value
 from forge.core.registry import SnippetRegistry, GraphResolver
-from forge.core.executor import extract_python, exec_python, SnippetExecError, extract_section, read_data_snippet
+from forge.core.executor import extract_python, exec_python, SnippetExecError, read_data_snippet
 from forge.core.snapshots import set_snapshot_state
 from forge.core.dependencies import extract_dependencies, apply_dependencies_to_body
 from forge.core.serialization import serialize_result
@@ -30,6 +31,15 @@ app.add_middleware(
   allow_methods=["*"],
   allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_request_time(request: Request, call_next):
+  start = time.perf_counter()
+  response = await call_next(request)
+  elapsed_ms = (time.perf_counter() - start) * 1000
+  logger.info("%s %s -> %s (%.0fms)", request.method, request.url.path, response.status_code, elapsed_ms)
+  return response
 
 
 class VaultSessionManager:
@@ -170,11 +180,6 @@ def generate(req: GenerateRequest, manager: VaultSessionManager = Depends(get_se
     raise HTTPException(status_code=500, detail=str(e))
 
   dependencies = {sid: extract_dependencies(code) for sid, code in generated.items()}
-
-  for sid, code in generated.items():
-    snippet = state["registry"].get(sid)
-    english = extract_section(snippet["body"], "english") if snippet else None
-    logger.info("generated [%s]\n  english: %s\n  python:\n%s", sid, english or "(none)", code)
 
   return {
     "snippet_id": req.snippet_id,

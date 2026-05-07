@@ -41,18 +41,23 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
       _generate(dep_id, registry, recursive, results, visited)
 
   import logging
+  import time
   log = logging.getLogger(__name__)
+  start = time.perf_counter()
+
   cache_key = _cache_key(body)
   cached = _GENERATION_CACHE.get(cache_key)
   if cached is not None:
-    log.info("cache hit for snippet '%s'", snippet_id)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    log.info("snippet '%s' generated via cache (%.1fms)", snippet_id, elapsed_ms)
     results[snippet_id] = cached
     return
 
-  log.info("generating snippet '%s'", snippet_id)
   code = _call_llm(snippet_id, meta, body, deps, registry if recursive else None)
   _GENERATION_CACHE[cache_key] = code
   results[snippet_id] = code
+  elapsed_ms = (time.perf_counter() - start) * 1000
+  log.info("snippet '%s' generated via LLM (%.0fms)", snippet_id, elapsed_ms)
 
 
 def _call_llm(snippet_id, meta, body, deps, registry):
