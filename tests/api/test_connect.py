@@ -62,7 +62,7 @@ def test_connect_returns_supported_content_types(client):
   for ct in types:
     if ct == "json":
       assert deserialize_from_wire(ct, "{}") == {}
-    elif ct in ("text", "markdown"):
+    elif ct in ("text", "markdown", "svg"):
       assert deserialize_from_wire(ct, "x") == "x"
     elif ct == "musicxml":
       pass  # exercised in test_data_snippets; importing music21 here is heavy

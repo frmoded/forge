@@ -51,6 +51,12 @@ def test_data_snippet_markdown_returns_string():
   assert read_data_snippet(snippet) == body
 
 
+def test_data_snippet_svg_returns_string():
+  body = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="5"/></svg>'
+  snippet = _make_data({"content_type": "svg"}, body)
+  assert read_data_snippet(snippet) == body
+
+
 def test_data_snippet_extracts_under_body_heading():
   """The 'New Snippet' modal generates: # English ... # Body ... fenced payload.
   The executor must extract from under # Body, ignoring the English facet."""
