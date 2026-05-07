@@ -11,10 +11,12 @@ import forge.music.llm_prompt  # noqa: F401
 
 _client = None
 
-# In-memory cache: sha256(snippet_id + english + python sections) → code.
-# snippet_id is part of the key so bodyless composition wrappers don't collide
-# on a single sha256("\x00") slot. Lives only as long as the server process;
-# restart drops it.
+# In-memory cache: sha256(LLM prompt) → generated code.
+# Hashing the prompt itself captures every input the model sees (snippet_id,
+# description, inputs, english, dep signatures) and ignores the body's python
+# section, which is the OUTPUT of generation and would otherwise self-invalidate
+# the cache as soon as the client writes the generated code back to disk.
+# Cache lives only as long as the server process; restart drops it.
 _GENERATION_CACHE: dict[str, str] = {}
 
 
@@ -47,22 +49,35 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
   log = logging.getLogger(__name__)
   start = time.perf_counter()
 
-  cache_key = _cache_key(snippet_id, body)
+  prompt = _build_prompt(snippet_id, meta, body, deps, registry if recursive else None)
+  cache_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+  # Diagnostic short-hashes to help spot what changed between runs. eng/py
+  # show whether the user's input/output drifted; key reflects the full prompt.
+  english = extract_section(body, "english") or ""
+  python = extract_python(body) or ""
+  diag = (
+    f"key={cache_key[:8]} eng={_short_hash(english)} py={_short_hash(python)} "
+    f"prompt_len={len(prompt)} cache_size={len(_GENERATION_CACHE)}"
+  )
+
   cached = _GENERATION_CACHE.get(cache_key)
   if cached is not None:
     elapsed_ms = (time.perf_counter() - start) * 1000
-    log.info("snippet '%s' generated via cache (%.1fms)", snippet_id, elapsed_ms)
+    log.info("snippet '%s' generated via cache (%.1fms) [%s]", snippet_id, elapsed_ms, diag)
     results[snippet_id] = cached
     return
 
-  code = _call_llm(snippet_id, meta, body, deps, registry if recursive else None)
+  code = _call_llm(snippet_id, prompt)
   _GENERATION_CACHE[cache_key] = code
   results[snippet_id] = code
   elapsed_ms = (time.perf_counter() - start) * 1000
-  log.info("snippet '%s' generated via LLM (%.0fms)", snippet_id, elapsed_ms)
+  log.info("snippet '%s' generated via LLM (%.0fms) [%s]", snippet_id, elapsed_ms, diag)
 
 
-def _call_llm(snippet_id, meta, body, deps, registry):
+def _build_prompt(snippet_id, meta, body, deps, registry):
+  """Assemble the user prompt sent to the LLM. Pulled out so the cache can
+  hash exactly what the model will see."""
   description = meta.get("description", "").strip()
   inputs = meta.get("inputs") or []
   english = extract_section(body, "english") or ""
@@ -86,7 +101,10 @@ def _call_llm(snippet_id, meta, body, deps, registry):
     if dep_lines:
       lines.append("Available snippets to call:\n" + "\n".join(dep_lines))
 
-  prompt = "\n".join(lines)
+  return "\n".join(lines)
+
+
+def _call_llm(snippet_id, prompt):
   client = _get_client()
   message = client.messages.create(
     model="claude-sonnet-4-6",
@@ -102,13 +120,9 @@ def _call_llm(snippet_id, meta, body, deps, registry):
   return message.content[0].text.strip()
 
 
-def _cache_key(snippet_id: str, body: str) -> str:
-  """Hash snippet_id + english + python sections for cache lookup. snippet_id
-  is included so bodyless wrappers (no # English / # Python heading) don't all
-  collide on the same sha256("\\x00") slot."""
-  english = extract_section(body, "english") or ""
-  python = extract_python(body) or ""
-  return hashlib.sha256(f"{snippet_id}\x00{english}\x00{python}".encode("utf-8")).hexdigest()
+def _short_hash(s: str) -> str:
+  """First 8 hex chars of sha256(s) — enough to spot drift in logs."""
+  return hashlib.sha256(s.encode("utf-8")).hexdigest()[:8]
 
 
 def _find_deps(body):
