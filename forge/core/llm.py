@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 from anthropic import Anthropic
@@ -9,6 +10,10 @@ from forge.core.llm_prompts import build_system_prompt
 import forge.music.llm_prompt  # noqa: F401
 
 _client = None
+
+# In-memory cache: sha256(english + python sections) → generated code.
+# Lives only as long as the server process; restart drops it.
+_GENERATION_CACHE: dict[str, str] = {}
 
 
 def generate_snippet_code(snippet_id: str, registry: SnippetRegistry, recursive: bool = False) -> dict[str, str]:
@@ -36,8 +41,18 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
       _generate(dep_id, registry, recursive, results, visited)
 
   import logging
-  logging.getLogger(__name__).info("generating snippet '%s'", snippet_id)
-  results[snippet_id] = _call_llm(snippet_id, meta, body, deps, registry if recursive else None)
+  log = logging.getLogger(__name__)
+  cache_key = _cache_key(body)
+  cached = _GENERATION_CACHE.get(cache_key)
+  if cached is not None:
+    log.info("cache hit for snippet '%s'", snippet_id)
+    results[snippet_id] = cached
+    return
+
+  log.info("generating snippet '%s'", snippet_id)
+  code = _call_llm(snippet_id, meta, body, deps, registry if recursive else None)
+  _GENERATION_CACHE[cache_key] = code
+  results[snippet_id] = code
 
 
 def _call_llm(snippet_id, meta, body, deps, registry):
@@ -78,6 +93,13 @@ def _call_llm(snippet_id, meta, body, deps, registry):
       "generation hit max_tokens for snippet '%s' — output may be truncated", snippet_id,
     )
   return message.content[0].text.strip()
+
+
+def _cache_key(body: str) -> str:
+  """Hash the english + python sections of a snippet body for cache lookup."""
+  english = extract_section(body, "english") or ""
+  python = extract_python(body) or ""
+  return hashlib.sha256(f"{english}\x00{python}".encode("utf-8")).hexdigest()
 
 
 def _find_deps(body):
