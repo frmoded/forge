@@ -38,6 +38,17 @@ listed throughout this prompt are already bound as global names in the
 snippet's namespace — just use them directly. The runtime sandbox blocks
 imports, so any import line will crash the snippet at execution time.
 
+Data snippet return contract:
+- TEXT data snippets (json, yaml, text, markdown, svg, musicxml) return the
+  native python value. context.compute("config_json") -> dict;
+  context.compute("notes_md") -> str.
+- BINARY data snippets (image/jpeg, image/png, audio/mpeg, audio/wav,
+  video/mp4) return a (bytes, content_type) tuple. ALWAYS unpack at the
+  call site so it's clear you're handling raw bytes plus a MIME tag:
+      data, ct = context.compute("cat_reference")
+  Treating the return as a single value will produce a tuple in places
+  that expect bytes — write the unpacking line.
+
 Output ONLY valid Python code. No markdown fences, no explanation, no comments."""
 
 

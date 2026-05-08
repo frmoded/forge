@@ -58,13 +58,22 @@ def test_connect_returns_supported_content_types(client):
   assert isinstance(types, list)
   # Every type listed here must be deserializable by the backend; this guards
   # against shipping aspirational dropdown options that fail at compute time.
-  from forge.core.serialization import deserialize_from_wire
+  from forge.core.serialization import (
+    deserialize_text, deserialize_binary,
+    is_text_content_type, is_binary_content_type,
+  )
   for ct in types:
     if ct == "json":
-      assert deserialize_from_wire(ct, "{}") == {}
-    elif ct in ("text", "markdown", "svg", "jpeg"):
-      assert deserialize_from_wire(ct, "x") == "x"
+      assert deserialize_text(ct, "{}") == {}
+    elif ct == "yaml":
+      assert deserialize_text(ct, "k: v") == {"k": "v"}
+    elif ct in ("text", "markdown", "svg"):
+      assert deserialize_text(ct, "x") == "x"
     elif ct == "musicxml":
       pass  # exercised in test_data_snippets; importing music21 here is heavy
+    elif is_binary_content_type(ct):
+      data, returned_ct = deserialize_binary(ct, b"\x00\x01")
+      assert data == b"\x00\x01"
+      assert returned_ct == ct
     else:
       raise AssertionError(f"untested content_type in /connect: {ct}")

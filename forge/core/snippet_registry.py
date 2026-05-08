@@ -43,7 +43,7 @@ class SnippetRegistry:
       for fname in files:
         if fname.endswith(".md"):
           err = self._index_authoring_file(
-            os.path.join(root, fname), vault_name, source
+            os.path.join(root, fname), vault_name, source, vault_path,
           )
           if err:
             self.errors.append(err)
@@ -149,6 +149,7 @@ class SnippetRegistry:
               "body": body,
               "path": filepath,
               "vault": name,
+              "vault_path": lib_path,
               "source": "library",
               "snippet_id": f"{name}/{bare_id}",
             }
@@ -169,7 +170,7 @@ class SnippetRegistry:
     lib_order = [d.name for d in m.dependencies]
     self.set_resolution_order([AUTHORING_VAULT, *lib_order])
 
-  def _index_authoring_file(self, filepath: str, vault_name: str, source: str) -> Optional[str]:
+  def _index_authoring_file(self, filepath: str, vault_name: str, source: str, vault_path: str) -> Optional[str]:
     try:
       with open(filepath, encoding="utf-8") as f:
         content = f.read()
@@ -181,6 +182,7 @@ class SnippetRegistry:
           "body": body,
           "path": filepath,
           "vault": vault_name,
+          "vault_path": vault_path,
           "source": source,
           "snippet_id": f"{vault_name}/{bare_id}",
         }

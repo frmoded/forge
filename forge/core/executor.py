@@ -158,15 +158,75 @@ class ForgeContext:
 
 
 def read_data_snippet(snippet):
-  """Deserialize a data/snapshot snippet's body via its content_type (D3, F3)."""
-  from forge.core.serialization import deserialize_from_wire
+  """Deserialize a data/snapshot snippet's body via its content_type.
+
+  Two paths:
+  - Text content_types (json, yaml, text, markdown, svg, musicxml): payload
+    is in the snippet body; returns the native python value.
+  - Binary content_types (image/jpeg, image/png, audio/mpeg, audio/wav,
+    video/mp4): payload lives in a sibling asset file referenced by
+    `content_ref` in frontmatter; returns (bytes, content_type) tuple.
+
+  `content_ref` and body content are mutually exclusive: a binary snippet
+  must have an empty body, a text snippet must not have content_ref."""
+  from forge.core.serialization import (
+    deserialize_text, deserialize_binary,
+    is_binary_content_type, is_text_content_type,
+  )
   meta = snippet["meta"]
+  snippet_id = snippet["snippet_id"]
   content_type = meta.get("content_type")
   if not content_type:
     raise ValueError(
-      f"data snippet '{snippet['snippet_id']}' has no content_type in frontmatter")
+      f"data snippet '{snippet_id}' has no content_type in frontmatter")
+
+  content_ref = meta.get("content_ref")
+  body_text = (snippet.get("body") or "").strip()
+
+  if content_ref:
+    if not is_binary_content_type(content_type):
+      raise ValueError(
+        f"data snippet '{snippet_id}': content_ref is only valid for binary "
+        f"content_types, got content_type={content_type!r}")
+    if body_text:
+      raise ValueError(
+        f"data snippet '{snippet_id}': content_ref and body content are "
+        f"mutually exclusive, but both are present")
+    asset_path = _resolve_content_ref(snippet, content_ref)
+    with open(asset_path, "rb") as f:
+      content_bytes = f.read()
+    return deserialize_binary(content_type, content_bytes)
+
+  if is_binary_content_type(content_type):
+    raise ValueError(
+      f"data snippet '{snippet_id}': binary content_type {content_type!r} "
+      f"requires `content_ref` in frontmatter pointing to a sibling asset")
+
+  if not is_text_content_type(content_type):
+    raise ValueError(f"unsupported content_type: {content_type!r}")
+
   body = extract_body(snippet["body"])
-  return deserialize_from_wire(content_type, body)
+  return deserialize_text(content_type, body)
+
+
+def _resolve_content_ref(snippet, content_ref):
+  """Resolve content_ref relative to the snippet's vault root. Falls back to
+  resolving relative to the snippet's .md file's directory if vault_path
+  isn't recorded — handy for tests that construct snippets by hand."""
+  import os
+  if os.path.isabs(content_ref):
+    full = content_ref
+  else:
+    base = snippet.get("vault_path")
+    if not base:
+      file_path = snippet.get("path") or ""
+      base = os.path.dirname(file_path) if file_path else ""
+    full = os.path.join(base, content_ref) if base else content_ref
+  if not os.path.isfile(full):
+    raise FileNotFoundError(
+      f"data snippet '{snippet['snippet_id']}': content_ref points to "
+      f"missing file: {full}")
+  return full
 
 
 _BODY_HEADING = re.compile(r'^#{1,6}\s+body\s*$', re.IGNORECASE)

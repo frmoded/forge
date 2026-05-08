@@ -57,11 +57,80 @@ def test_data_snippet_svg_returns_string():
   assert read_data_snippet(snippet) == body
 
 
-def test_data_snippet_jpeg_returns_base64_string():
-  # Body is base64-encoded JPEG bytes; deserialize is passthrough (string).
-  body = "/9j/4AAQSkZJRgABAQAAAQABAAD/4gIcAAA"
-  snippet = _make_data({"content_type": "jpeg"}, body)
-  assert read_data_snippet(snippet) == body
+def test_data_snippet_binary_returns_bytes_tuple(tmp_path):
+  """Binary content_types load bytes from a sibling asset file referenced by
+  content_ref and return (bytes, content_type) per the binary contract."""
+  asset = tmp_path / "_assets" / "cat.jpg"
+  asset.parent.mkdir(parents=True)
+  raw = b"\xff\xd8\xff\xe0fake-jpeg-bytes"
+  asset.write_bytes(raw)
+
+  snippet = _make_data({"content_type": "image/jpeg", "content_ref": "_assets/cat.jpg"}, "")
+  snippet["vault_path"] = str(tmp_path)
+
+  result = read_data_snippet(snippet)
+  assert isinstance(result, tuple) and len(result) == 2
+  data, ct = result
+  assert data == raw
+  assert ct == "image/jpeg"
+
+
+def test_data_snippet_binary_legacy_jpeg_alias_resolves_to_image_jpeg(tmp_path):
+  """Hand-authored vaults using the bare 'jpeg' name still work; the alias
+  normalizes to 'image/jpeg' and the tuple's content_type reflects that."""
+  asset = tmp_path / "img.jpg"
+  asset.write_bytes(b"\xff\xd8\xff")
+  snippet = _make_data({"content_type": "jpeg", "content_ref": "img.jpg"}, "")
+  snippet["vault_path"] = str(tmp_path)
+  data, ct = read_data_snippet(snippet)
+  assert data == b"\xff\xd8\xff"
+  assert ct == "image/jpeg"
+
+
+def test_data_snippet_binary_without_content_ref_raises():
+  """Binary content_types must use content_ref — body content alone is the
+  legacy shape and is no longer accepted."""
+  snippet = _make_data({"content_type": "image/jpeg"}, "/9j/4AAQ...")
+  with pytest.raises(ValueError, match="requires `content_ref`"):
+    read_data_snippet(snippet)
+
+
+def test_data_snippet_content_ref_with_text_type_raises(tmp_path):
+  """content_ref is binary-only; pairing it with a text content_type is a
+  config error."""
+  asset = tmp_path / "x.txt"
+  asset.write_text("hi")
+  snippet = _make_data({"content_type": "text", "content_ref": "x.txt"}, "")
+  snippet["vault_path"] = str(tmp_path)
+  with pytest.raises(ValueError, match="only valid for binary"):
+    read_data_snippet(snippet)
+
+
+def test_data_snippet_content_ref_and_body_mutually_exclusive(tmp_path):
+  """A binary snippet must have an empty body when content_ref is set."""
+  asset = tmp_path / "x.jpg"
+  asset.write_bytes(b"\xff\xd8\xff")
+  snippet = _make_data(
+    {"content_type": "image/jpeg", "content_ref": "x.jpg"},
+    "stray body content",
+  )
+  snippet["vault_path"] = str(tmp_path)
+  with pytest.raises(ValueError, match="mutually exclusive"):
+    read_data_snippet(snippet)
+
+
+def test_data_snippet_content_ref_missing_file_raises(tmp_path):
+  snippet = _make_data(
+    {"content_type": "image/jpeg", "content_ref": "_assets/missing.jpg"}, "",
+  )
+  snippet["vault_path"] = str(tmp_path)
+  with pytest.raises(FileNotFoundError, match="content_ref"):
+    read_data_snippet(snippet)
+
+
+def test_data_snippet_yaml_returns_native_value():
+  snippet = _make_data({"content_type": "yaml"}, "key: value\nlist:\n  - 1\n  - 2\n")
+  assert read_data_snippet(snippet) == {"key": "value", "list": [1, 2]}
 
 
 def test_data_snippet_extracts_under_body_heading():

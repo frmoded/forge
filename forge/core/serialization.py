@@ -9,6 +9,14 @@ Plain values (str, int, dict, list, etc.) pass through untouched.
 Also provides wire-format helpers used by snapshot capture/read:
   serialize_for_wire(value, snippet)  -> (content_type, content_str)
   deserialize_from_wire(content_type, content_str) -> python value
+
+Content_types come in two families. Text types (json, yaml, text, markdown,
+svg, musicxml) carry their content inline in the snippet body and deserialize
+to native python values (dict / str / music21 Stream). Binary types
+(image/jpeg, image/png, audio/mpeg, audio/wav, video/mp4) live in a sibling
+asset file referenced by `content_ref` in frontmatter; read_data_snippet
+returns them as a (bytes, content_type) tuple so callers can decide what to
+do with the payload.
 """
 
 import json
@@ -17,10 +25,44 @@ import json
 # are treated as native wire formats — body becomes their `content` field.
 _NATIVE_WIRE_FORMATS = {"musicxml"}
 
-# Content types accepted by deserialize_from_wire — exposed via /connect so
-# the plugin's "Create new snippet" dropdown stays in sync with the backend.
-# Keep ordered: most common first (the dropdown shows them in this order).
-SUPPORTED_CONTENT_TYPES = ("json", "text", "markdown", "musicxml", "svg", "jpeg")
+# Text content_types: payload is a string in the snippet body. deserialize_text
+# returns the native python value (json -> dict/list, yaml -> dict/list/etc.,
+# text/markdown/svg -> str, musicxml -> music21.stream.Stream).
+TEXT_CONTENT_TYPES = ("json", "yaml", "text", "markdown", "musicxml", "svg")
+
+# Binary content_types: payload is raw bytes in a sibling asset file pointed
+# to by `content_ref` in the snippet frontmatter. deserialize_binary returns
+# (bytes, content_type) so callers can dispatch on the MIME type without
+# guessing from magic bytes.
+BINARY_CONTENT_TYPES = (
+  "image/jpeg",
+  "image/png",
+  "audio/mpeg",
+  "audio/wav",
+  "video/mp4",
+)
+
+# Bare-name aliases for backward compatibility with hand-authored vaults that
+# predate the MIME-typed names. Any new authoring should use the canonical
+# binary form.
+_LEGACY_ALIASES = {"jpeg": "image/jpeg"}
+
+# Exposed via /connect so the plugin's "Create new snippet" dropdown stays in
+# sync with the backend. Text first, binary after — the dropdown shows them
+# in this order.
+SUPPORTED_CONTENT_TYPES = TEXT_CONTENT_TYPES + BINARY_CONTENT_TYPES
+
+
+def _normalize(content_type: str) -> str:
+  return _LEGACY_ALIASES.get(content_type, content_type)
+
+
+def is_text_content_type(content_type: str) -> bool:
+  return _normalize(content_type) in TEXT_CONTENT_TYPES
+
+
+def is_binary_content_type(content_type: str) -> bool:
+  return _normalize(content_type) in BINARY_CONTENT_TYPES
 
 
 def serialize_result(value, snippet=None):
@@ -53,25 +95,58 @@ def serialize_for_wire(value, snippet=None):
   return "json", json.dumps(payload)
 
 
-def deserialize_from_wire(content_type, content_str):
-  """Inverse of serialize_for_wire. Used for data snippet reads and frozen
-  snapshot reads."""
-  if content_type == "json":
+def deserialize_text(content_type, content_str):
+  """Deserialize a text content_type body to its native python value.
+  Binary content_types must go through deserialize_binary instead."""
+  ct = _normalize(content_type)
+  if ct == "json":
     return json.loads(content_str)
-  if content_type == "text":
+  if ct == "yaml":
+    import yaml
+    return yaml.safe_load(content_str)
+  if ct in ("text", "markdown", "svg"):
     return content_str
-  if content_type == "markdown":
-    return content_str
-  if content_type == "svg":
-    return content_str
-  if content_type == "jpeg":
-    # Body is base64-encoded JPEG bytes. Returning the string as-is keeps the
-    # wire format predictable; consumers that want raw bytes can decode it.
-    return content_str
-  if content_type == "musicxml":
+  if ct == "musicxml":
     import music21
-    return music21.converter.parseData(content_str, format="musicxml")
-  raise ValueError(f"unsupported content_type: {content_type!r}")
+    return music21.converter.parseData(content_str.strip(), format="musicxml")
+  raise ValueError(f"unsupported text content_type: {content_type!r}")
+
+
+def deserialize_binary(content_type, content_bytes):
+  """Return (bytes, content_type) for a binary content_type's payload.
+
+  The tuple shape is the public contract: callers receive raw bytes plus the
+  MIME content_type so they can dispatch (write to disk, send over HTTP,
+  decode with a format-specific lib) without guessing from magic bytes. This
+  mirrors how HTTP clients model binary responses.
+
+  Snippets that consume a binary data snippet via context.compute should
+  unpack at the call site:
+    data, ct = context.compute("cat_reference")
+  """
+  ct = _normalize(content_type)
+  if ct not in BINARY_CONTENT_TYPES:
+    raise ValueError(f"not a binary content_type: {content_type!r}")
+  if not isinstance(content_bytes, (bytes, bytearray)):
+    raise TypeError(
+      f"deserialize_binary expects bytes for content_type={content_type!r}, "
+      f"got {type(content_bytes).__name__}"
+    )
+  return (bytes(content_bytes), ct)
+
+
+def deserialize_from_wire(content_type, content_str):
+  """Back-compat shim. Snapshot reads still use this; data snippet reads go
+  through deserialize_text / deserialize_binary directly via
+  read_data_snippet, which decides based on content_ref / content_type."""
+  if is_binary_content_type(content_type):
+    # Frozen snapshots of a binary value would carry base64-encoded bytes.
+    # No first-party path captures these today (snapshot capture for a
+    # binary tuple raises and _capture_edge skips), but we decode for
+    # parity if a hand-written one ever shows up.
+    import base64
+    return deserialize_binary(content_type, base64.b64decode(content_str))
+  return deserialize_text(content_type, content_str)
 
 
 def _try_serialize_music21(value, snippet):
