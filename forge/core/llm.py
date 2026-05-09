@@ -103,15 +103,24 @@ You are given the python facet of a snippet — your job is to write the
 English facet that describes what it does, in the voice an author would
 use when first writing the snippet.
 
+Length matches code complexity:
+- A one-line `print(...)` snippet gets one literal sentence.
+- A three-line composition gets two sentences.
+- A 50-line music generator gets a paragraph or two.
+
+Voice: literal and direct. State what the code does. Do NOT add:
+- "purely as a sanity check", "minimal example", "demo", "hello world"
+  framing, or other meta-commentary about what KIND of snippet it is.
+- Hedging like "It takes no inputs and produces no musical output" —
+  if it has no inputs, just don't mention inputs.
+- Background reasoning the code itself doesn't reveal.
+
 Style:
 - Plain prose, no headings, no bullet markers, no code blocks.
 - Reference dependencies via [[wikilinks]] when the python calls
   context.compute("name") — write as [[name]].
-- Don't transcribe the code. Describe intent, structure, and notable
-  decisions a future reader would care about.
-- Mention key, time signature, tempo, instrument choices when set.
-- Inputs and side effects belong here. Pure-internal helpers don't.
-- Keep it tight. Two short paragraphs is plenty for most snippets.
+- Mention key, time signature, tempo, instrument choices when the code
+  sets them. Skip them when the code doesn't.
 
 Output ONLY the English text. No surrounding fences, no commentary."""
 
