@@ -42,6 +42,8 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
   # non-builtin callers still embed builtin dep SIGNATURES (description /
   # inputs) in their own prompt via _call_llm.
   if snippet.get("source") == "builtin":
+    import logging
+    logging.getLogger(__name__).info("snippet '%s' skipped (builtin)", snippet_id)
     return
 
   # Locked snippets: the user has explicitly frozen the python facet ("don't
@@ -50,6 +52,8 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
   # so the user gets a clear notice; this is defense-in-depth.
   meta = snippet["meta"]
   if meta.get("locked") is True:
+    import logging
+    logging.getLogger(__name__).info("snippet '%s' skipped (locked)", snippet_id)
     return
 
   body = snippet["body"]
