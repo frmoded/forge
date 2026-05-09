@@ -208,9 +208,19 @@ def sync_dependencies(req: SyncDependenciesRequest, manager: VaultSessionManager
   except SnippetResolutionError as e:
     raise HTTPException(status_code=404, detail=str(e))
 
+  if snippet.get("source") == "builtin":
+    # Builtin snippets DO have on-disk paths inside the forge package, so the
+    # filepath check below isn't enough — block them explicitly. Letting
+    # /sync_dependencies write here would leak per-user state into the
+    # shipped package (and was how install.md grew a stale # Dependencies
+    # block during pre-fix Forge-on-install runs).
+    raise HTTPException(
+      status_code=422,
+      detail=f"snippet '{req.snippet_id}' is a builtin and is not writable",
+    )
+
   filepath = snippet.get("path")
   if not filepath or not os.path.isfile(filepath):
-    # Built-in vault snippets have no on-disk path; we can't write to them.
     raise HTTPException(status_code=422, detail=f"snippet '{req.snippet_id}' has no writable filesystem path")
 
   with open(filepath, "r", encoding="utf-8") as f:
