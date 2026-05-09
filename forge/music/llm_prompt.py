@@ -15,7 +15,7 @@ from forge.core.llm_prompts import register_fragment
 
 MUSIC_PROMPT_FRAGMENT = """Music21 modules already bound as globals (do NOT write `from music21 import ...`
 or `import music21`):
-  music21, stream, note, chord, meter, key, tempo, pitch, duration, instrument, harmony.
+  music21, stream, note, chord, meter, key, tempo, pitch, duration, instrument, harmony, roman.
 
 Other pre-injected globals: random, math, numpy. Do NOT `import random` —
 it's already in scope. To use `copy` (e.g., copy.deepcopy), `import copy`

@@ -24,6 +24,7 @@ try:
     "duration": music21.duration,
     "instrument": music21.instrument,
     "harmony": music21.harmony,
+    "roman": music21.roman,
   }
 except ImportError:
   _MUSIC21_NAMES = {}
