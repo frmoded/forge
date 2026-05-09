@@ -44,10 +44,8 @@ def test_find_deps_combines_wikilink_and_compute():
 
 
 def test_generate_skips_locked_snippets(monkeypatch):
-  """`locked: true` in frontmatter freezes the python facet — recursive
-  /generate must not call the LLM for a locked snippet (and must not walk
-  its deps either, since the parent's prompt embeds dep signatures only,
-  not bodies)."""
+  """Legacy alias `locked: true` keeps working for one release cycle.
+  Same skip path as `edit_mode: python`."""
   from forge.core.llm import generate_snippet_code
   from forge.core.snippet_registry import SnippetRegistry, AUTHORING_VAULT
 
@@ -70,6 +68,105 @@ def test_generate_skips_locked_snippets(monkeypatch):
 
   result = generate_snippet_code("frozen", reg, recursive=True)
   assert result == {}
+
+
+def test_generate_skips_python_edit_mode_snippets(monkeypatch):
+  """`edit_mode: python` is the canonical signal that a snippet's python
+  facet is hand-tuned — _generate skips it the same way as the builtin
+  skip, no LLM, no recursion into deps."""
+  from forge.core.llm import generate_snippet_code
+  from forge.core.snippet_registry import SnippetRegistry, AUTHORING_VAULT
+
+  reg = SnippetRegistry()
+  reg._vaults[AUTHORING_VAULT] = {
+    "tweaked": {
+      "meta": {"type": "action", "edit_mode": "python"},
+      "body": '# English\nDo X.\n# Python\n```python\ndef compute(context):\n  return 1\n```',
+      "path": "/v/tweaked.md",
+      "vault": AUTHORING_VAULT,
+      "vault_path": "/v",
+      "source": "authoring",
+      "snippet_id": f"{AUTHORING_VAULT}/tweaked",
+    },
+  }
+
+  def fail(*args, **kwargs):
+    raise AssertionError("LLM should not be called when edit_mode=python")
+  monkeypatch.setattr("forge.core.llm._call_llm", fail)
+
+  result = generate_snippet_code("tweaked", reg, recursive=True)
+  assert result == {}
+
+
+def test_canonicalize_python_returns_llm_text(monkeypatch):
+  """canonicalize_python wraps the LLM call with a focused system prompt
+  and a python-only user message; verify the function packages the call
+  shape correctly and returns the model's text."""
+  from forge.core import llm
+  from forge.core.snippet_registry import SnippetRegistry, AUTHORING_VAULT
+
+  reg = SnippetRegistry()
+  reg._vaults[AUTHORING_VAULT] = {
+    "tweaked": {
+      "meta": {"type": "action", "description": "make a thing"},
+      "body": (
+        '# English\nold english\n# Python\n```python\n'
+        'def compute(context):\n  return context.compute("dep") + 1\n```'
+      ),
+      "path": "/v/tweaked.md",
+      "vault": AUTHORING_VAULT,
+      "vault_path": "/v",
+      "source": "authoring",
+      "snippet_id": f"{AUTHORING_VAULT}/tweaked",
+    },
+  }
+
+  captured = {}
+
+  class FakeMsg:
+    def __init__(self, text):
+      self.content = [type("C", (), {"text": text})()]
+
+  class FakeMessages:
+    def create(self, **kwargs):
+      captured.update(kwargs)
+      return FakeMsg("Calls [[dep]] and adds one to its result.")
+
+  class FakeClient:
+    messages = FakeMessages()
+
+  monkeypatch.setattr(llm, "_get_client", lambda: FakeClient())
+
+  result = llm.canonicalize_python("tweaked", reg)
+  assert result == "Calls [[dep]] and adds one to its result."
+  # The user message should embed the python facet and the snippet id.
+  user = captured["messages"][0]["content"]
+  assert "tweaked" in user
+  assert "context.compute(\"dep\")" in user
+  # The system prompt should be the canonicalize-specific one, not the
+  # standard generation prompt.
+  assert "summarizing Forge snippets" in captured["system"]
+
+
+def test_canonicalize_python_raises_when_python_facet_empty():
+  from forge.core.llm import canonicalize_python
+  from forge.core.snippet_registry import SnippetRegistry, AUTHORING_VAULT
+  import pytest
+
+  reg = SnippetRegistry()
+  reg._vaults[AUTHORING_VAULT] = {
+    "blank": {
+      "meta": {"type": "action"},
+      "body": "# English\nintent only\n",
+      "path": "/v/blank.md",
+      "vault": AUTHORING_VAULT,
+      "vault_path": "/v",
+      "source": "authoring",
+      "snippet_id": f"{AUTHORING_VAULT}/blank",
+    },
+  }
+  with pytest.raises(ValueError, match="no Python facet"):
+    canonicalize_python("blank", reg)
 
 
 def test_generate_skips_builtin_snippets(monkeypatch):

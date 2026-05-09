@@ -14,7 +14,7 @@ from forge.core.snapshots import set_snapshot_state
 from forge.core.dependencies import extract_dependencies, apply_dependencies_to_body
 from forge.core.serialization import serialize_result, SUPPORTED_CONTENT_TYPES
 from forge.core.exceptions import SnippetResolutionError
-from forge.core.llm import generate_snippet_code
+from forge.core.llm import generate_snippet_code, canonicalize_python
 from forge.builtins.loader import load_builtin_vault
 
 # Attach the handler to the package-root logger so every forge.* submodule
@@ -111,6 +111,11 @@ class SyncDependenciesRequest(BaseModel):
   snippet_id: str
 
 
+class CanonicalizeRequest(BaseModel):
+  vault_path: str
+  snippet_id: str
+
+
 @app.get("/test")
 def test():
   return {"result": get_test_value()}
@@ -193,6 +198,26 @@ def generate(req: GenerateRequest, manager: VaultSessionManager = Depends(get_se
     "generated": generated,
     "dependencies": dependencies,
   }
+
+
+@app.post("/canonicalize")
+def canonicalize(req: CanonicalizeRequest, manager: VaultSessionManager = Depends(get_session_manager)):
+  """Reverse direction of /generate: given a snippet whose Python facet has
+  been hand-tuned, ask the LLM for a canonical English description and
+  return it. The plugin writes the response back to the snippet's
+  `# English` section. Stateless on the server; no file write here."""
+  state = manager.get(req.vault_path)
+  if state is None:
+    raise HTTPException(status_code=400, detail="vault not connected — call /connect first")
+  try:
+    english = canonicalize_python(req.snippet_id, state["registry"])
+  except KeyError as e:
+    raise HTTPException(status_code=404, detail=str(e))
+  except ValueError as e:
+    raise HTTPException(status_code=422, detail=str(e))
+  except RuntimeError as e:
+    raise HTTPException(status_code=500, detail=str(e))
+  return {"snippet_id": req.snippet_id, "english": english}
 
 
 @app.post("/sync_dependencies")

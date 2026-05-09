@@ -46,14 +46,16 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
     logging.getLogger(__name__).info("snippet '%s' skipped (builtin)", snippet_id)
     return
 
-  # Locked snippets: the user has explicitly frozen the python facet ("don't
-  # regenerate, run what's there"). Same shape as the builtin skip — no LLM,
-  # no result, deps not walked. The plugin pre-checks lock before /generate
-  # so the user gets a clear notice; this is defense-in-depth.
+  # Edit-mode "python" (or the legacy alias `locked: true`): the user has
+  # explicitly switched the snippet's edit-mode to Python — they're hand-
+  # tuning the python facet and don't want LLM regeneration. Same shape as
+  # the builtin skip — no LLM, no result, deps not walked. The plugin
+  # pre-checks edit_mode before /generate so the user gets a clear notice;
+  # this is defense-in-depth.
   meta = snippet["meta"]
-  if meta.get("locked") is True:
+  if meta.get("edit_mode") == "python" or meta.get("locked") is True:
     import logging
-    logging.getLogger(__name__).info("snippet '%s' skipped (locked)", snippet_id)
+    logging.getLogger(__name__).info("snippet '%s' skipped (edit_mode=python)", snippet_id)
     return
 
   body = snippet["body"]
@@ -92,6 +94,80 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
   results[snippet_id] = code
   elapsed_ms = (time.perf_counter() - start) * 1000
   log.info("snippet '%s' generated via LLM (%.0fms) [%s]", snippet_id, elapsed_ms, diag)
+
+
+_CANONICALIZE_SYSTEM_PROMPT = """You are summarizing Forge snippets back to their canonical English description.
+
+Forge snippets are Python functions (entrypoint `compute(context, ...)`).
+You are given the python facet of a snippet — your job is to write the
+English facet that describes what it does, in the voice an author would
+use when first writing the snippet.
+
+Style:
+- Plain prose, no headings, no bullet markers, no code blocks.
+- Reference dependencies via [[wikilinks]] when the python calls
+  context.compute("name") — write as [[name]].
+- Don't transcribe the code. Describe intent, structure, and notable
+  decisions a future reader would care about.
+- Mention key, time signature, tempo, instrument choices when set.
+- Inputs and side effects belong here. Pure-internal helpers don't.
+- Keep it tight. Two short paragraphs is plenty for most snippets.
+
+Output ONLY the English text. No surrounding fences, no commentary."""
+
+
+def canonicalize_python(snippet_id: str, registry: SnippetRegistry) -> str:
+  """Reverse direction: given a snippet's current python facet, ask the LLM
+  for a canonical English description. Returned text is plain prose, ready
+  to be written into the snippet's `# English` section by the caller."""
+  snippet = registry.get(snippet_id)
+  if snippet is None:
+    raise KeyError(f"snippet '{snippet_id}' not found")
+
+  python = extract_python(snippet["body"]) or ""
+  if not python.strip():
+    raise ValueError(
+      f"snippet '{snippet_id}' has no Python facet to canonicalize")
+
+  meta = snippet["meta"]
+  description = (meta.get("description") or "").strip()
+  inputs = meta.get("inputs") or []
+
+  user_lines = [
+    f'Snippet id: {snippet_id}',
+  ]
+  if description:
+    user_lines.append(f"Frontmatter description: {description}")
+  if inputs:
+    user_lines.append(f"Inputs: {', '.join(str(i) for i in inputs)}")
+  user_lines.append("Python facet:")
+  user_lines.append("```python")
+  user_lines.append(python)
+  user_lines.append("```")
+  user_lines.append(
+    "Return the canonical English description for this snippet, suitable "
+    "as the body of the # English section."
+  )
+  prompt = "\n".join(user_lines)
+
+  import logging
+  import time
+  log = logging.getLogger(__name__)
+  start = time.perf_counter()
+  client = _get_client()
+  message = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=2048,
+    system=_CANONICALIZE_SYSTEM_PROMPT,
+    messages=[{"role": "user", "content": prompt}],
+  )
+  elapsed_ms = (time.perf_counter() - start) * 1000
+  text = message.content[0].text.strip()
+  log.info(
+    "snippet '%s' canonicalized via LLM (%.0fms) [out_len=%d]",
+    snippet_id, elapsed_ms, len(text),
+  )
+  return text
 
 
 def _build_prompt(snippet_id, meta, body, deps, registry):
