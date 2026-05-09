@@ -109,12 +109,20 @@ def sequence(*streams: StreamLike) -> stream.Score:
   per_input_parts = [_extract_parts(s) for s in streams]
   n_voices = max(len(parts) for parts in per_input_parts)
 
-  # Per-input bar count and bar_ql, used to pad missing or
-  # different-instrument voices. Derived from the first part with measures.
+  # Per-input padding metadata: bar count, bar_ql, plus the actual
+  # TimeSignature and Key objects from the input. The latter two are needed
+  # so that when an output stave starts with padded rest measures (e.g., the
+  # ElectricGuitar stave when only the third of four sections plays guitar),
+  # the leading measure still declares a time signature. Without one,
+  # MusicXML emits a part whose first measure has no <time>, and Verovio
+  # falls back to 4/4 — the rests look wrong and bars 1..N appear empty
+  # even when later measures (with their own <time>) carry actual notes.
   per_input_padding = []
   for parts in per_input_parts:
     n_bars = 0
     bar_ql = 4.0
+    ts_obj = None
+    ks_obj = None
     for part in parts:
       measures = list(part.getElementsByClass(stream.Measure))
       if measures:
@@ -124,10 +132,18 @@ def sequence(*streams: StreamLike) -> stream.Score:
            if isinstance(el, meter.TimeSignature)),
           None,
         )
+        first_ks = next(
+          (el for m in measures for el in m
+           if isinstance(el, key.Key)),
+          None,
+        )
         if first_ts is not None:
           bar_ql = first_ts.barDuration.quarterLength
+          ts_obj = first_ts
+        if first_ks is not None:
+          ks_obj = first_ks
         break
-    per_input_padding.append((n_bars, bar_ql))
+    per_input_padding.append((n_bars, bar_ql, ts_obj, ks_obj))
 
   score = stream.Score()
   for voice_idx in range(n_voices):
@@ -139,11 +155,13 @@ def sequence(*streams: StreamLike) -> stream.Score:
       if voice_idx >= len(parts):
         continue
       src_part = parts[voice_idx]
-      key = _instrument_key(src_part)
-      if key not in groups:
-        groups[key] = []
-        order.append(key)
-      groups[key].append((input_idx, src_part))
+      # Local var named `inst_key` (not `key`) so the music21 `key` module
+      # import remains visible — the padding branch below references key.Key.
+      inst_key = _instrument_key(src_part)
+      if inst_key not in groups:
+        groups[inst_key] = []
+        order.append(inst_key)
+      groups[inst_key].append((input_idx, src_part))
 
     for inst_key in order:
       combined = stream.Part()
@@ -176,9 +194,22 @@ def sequence(*streams: StreamLike) -> stream.Score:
         else:
           # Either this input lacks voice_idx entirely, or its part at
           # voice_idx has a different instrument. Pad with rest measures.
-          n_bars, bar_ql = per_input_padding[input_idx]
-          for _ in range(n_bars):
+          n_bars, bar_ql, ts_obj, ks_obj = per_input_padding[input_idx]
+          for j in range(n_bars):
             m = stream.Measure(number=next_measure_number)
+            # Carry the input's TimeSignature (and Key) onto the very first
+            # measure of the combined stave when that measure is a padded
+            # rest. Without this, a stave that starts with padding has no
+            # leading time-signature declaration and renders with the wrong
+            # bar length under Verovio.
+            is_first_in_stave = (
+              j == 0 and not list(combined.getElementsByClass(stream.Measure))
+            )
+            if is_first_in_stave:
+              if ts_obj is not None:
+                m.insert(0, copy.deepcopy(ts_obj))
+              if ks_obj is not None:
+                m.insert(0, copy.deepcopy(ks_obj))
             m.append(note.Rest(quarterLength=bar_ql))
             combined.append(m)
             next_measure_number += 1

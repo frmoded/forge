@@ -327,6 +327,36 @@ def test_sequence_pad_uses_input_time_signature():
   assert rest_total == 6.0
 
 
+def test_sequence_first_padded_measure_carries_time_signature():
+  """When an output stave starts with padded rest measures (because input 0
+  doesn't contribute to that voice), the first measure must declare a
+  TimeSignature. Without one, MusicXML emits a part with no leading <time>
+  element and renderers fall back to 4/4, breaking the layout — even when
+  later measures (carrying their own TimeSignature) do have notes."""
+  # Two inputs: input1 has only voice 0 (in 12/8), input2 has voice 0 + 1.
+  v1a = stream.Part()
+  v1a.append(bar(note.Note('C4', quarterLength=6), number=1,
+                 time_signature=meter.TimeSignature('12/8')))
+
+  v2a = stream.Part()
+  v2a.append(bar(note.Note('D4', quarterLength=6), number=1,
+                 time_signature=meter.TimeSignature('12/8')))
+  v2b = stream.Part()
+  v2b.append(bar(note.Note('E4', quarterLength=6), number=1,
+                 time_signature=meter.TimeSignature('12/8')))
+  s2 = stream.Score(); s2.insert(0, v2a); s2.insert(0, v2b)
+
+  out = sequence(v1a, s2)
+  parts = list(out.getElementsByClass(stream.Part))
+  voice_1_first_measure = list(parts[1].getElementsByClass(stream.Measure))[0]
+  ts_in_first = next(
+    (el for el in voice_1_first_measure if isinstance(el, meter.TimeSignature)),
+    None,
+  )
+  assert ts_in_first is not None, "first padded measure must declare a TimeSignature"
+  assert ts_in_first.ratioString == '12/8'
+
+
 # ---------- repeat ----------
 
 def test_repeat_concatenates_n_times():
