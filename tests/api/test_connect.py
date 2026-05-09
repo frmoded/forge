@@ -41,12 +41,13 @@ def test_connect_inventory_includes_type_per_snippet(client):
   forge_entries = body["snippets"]["forge"]
   assert isinstance(forge_entries, list)
   for entry in forge_entries:
-    assert set(entry.keys()) == {"id", "type"}
+    assert {"id", "type", "inputs"} <= set(entry.keys())
     assert entry["type"] in ("action", "data", "snapshot")
+    assert isinstance(entry["inputs"], list)
   authoring_entries = body["snippets"]["authoring"]
   for entry in authoring_entries:
     # Every test-vault snippet is currently action; the shape matters more.
-    assert set(entry.keys()) == {"id", "type"}
+    assert {"id", "type", "inputs"} <= set(entry.keys())
 
 
 def test_connect_returns_supported_content_types(client):

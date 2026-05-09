@@ -94,14 +94,19 @@ class SnippetRegistry:
     return list(self._vaults.keys())
 
   def list_snippets(self) -> dict:
-    """Return {vault_name: [{id, type}, ...]} sorted by id. Used by /connect.
+    """Return {vault_name: [{id, type, inputs}, ...]} sorted by id.
 
-    `type` is taken from each snippet's frontmatter — defaults to 'action'
-    for snippets registered without an explicit type.
-    """
+    `type` is taken from frontmatter, defaults to 'action'. `inputs` is the
+    declared input list (defaults to []). The plugin falls back to this list
+    when running an action whose local .md has no frontmatter (e.g. an empty
+    stub file in the user's vault that overlays a builtin)."""
     return {
       vault: [
-        {"id": bare_id, "type": snippets[bare_id]["meta"].get("type", "action")}
+        {
+          "id": bare_id,
+          "type": snippets[bare_id]["meta"].get("type", "action"),
+          "inputs": list(snippets[bare_id]["meta"].get("inputs") or []),
+        }
         for bare_id in sorted(snippets.keys())
       ]
       for vault, snippets in self._vaults.items()

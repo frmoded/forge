@@ -36,6 +36,14 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
   if snippet is None:
     raise KeyError(f"snippet '{snippet_id}' not found")
 
+  # Builtin snippets ship with python in the package — LLM generation would
+  # waste tokens regenerating working code, and the client has no user-vault
+  # file to write the result back to. Skip generation and dep recursion;
+  # non-builtin callers still embed builtin dep SIGNATURES (description /
+  # inputs) in their own prompt via _call_llm.
+  if snippet.get("source") == "builtin":
+    return
+
   meta = snippet["meta"]
   body = snippet["body"]
   deps = _find_deps(body)

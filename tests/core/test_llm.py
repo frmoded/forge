@@ -41,3 +41,41 @@ def test_find_deps_dedups_repeats():
 def test_find_deps_combines_wikilink_and_compute():
   body = '[[chorus]] then context.compute("forge/registry/lookup")'
   assert _find_deps(body) == ["chorus", "forge/registry/lookup"]
+
+
+def test_generate_skips_builtin_snippets(monkeypatch):
+  """Builtins ship with python in the package — _generate should skip them
+  rather than spending LLM tokens regenerating working code (and producing
+  results the client has no user-vault file to write back to)."""
+  from forge.core.llm import generate_snippet_code
+  from forge.core.snippet_registry import SnippetRegistry, BUILTIN_VAULT
+
+  reg = SnippetRegistry()
+  reg._vaults[BUILTIN_VAULT] = {
+    "install": {
+      "meta": {"type": "action", "inputs": ["vault_name"]},
+      "body": '# English\nInstall a vault.\n# Python\n```python\ndef compute(context, vault_name):\n  context.compute("forge/registry/lookup")\n```',
+      "path": "/builtin/install.md",
+      "vault": BUILTIN_VAULT,
+      "vault_path": "/builtin",
+      "source": "builtin",
+      "snippet_id": "forge/install",
+    },
+    "registry/lookup": {
+      "meta": {"type": "action"},
+      "body": "# Python\n```python\ndef compute(context):\n  pass\n```",
+      "path": "/builtin/registry/lookup.md",
+      "vault": BUILTIN_VAULT,
+      "vault_path": "/builtin",
+      "source": "builtin",
+      "snippet_id": "forge/registry/lookup",
+    },
+  }
+
+  # Fail loudly if anything tries to call the LLM.
+  def fail(*args, **kwargs):
+    raise AssertionError("LLM should not be called for builtin snippets")
+  monkeypatch.setattr("forge.core.llm._call_llm", fail)
+
+  result = generate_snippet_code("install", reg, recursive=True)
+  assert result == {}
