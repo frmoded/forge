@@ -125,18 +125,27 @@ def _short_hash(s: str) -> str:
   return hashlib.sha256(s.encode("utf-8")).hexdigest()[:8]
 
 
+_ID_CHARS = r"[\w./-]+"  # word chars (letters/digits/_), slash, period, hyphen
+
+
 def _find_deps(body):
-  """Find snippet IDs referenced via [[wiki-links]] or context.compute() calls."""
+  """Find snippet IDs referenced via [[wiki-links]] or context.compute() calls.
+
+  Only matches IDs made of valid identifier characters (\\w / . -). Prose
+  wikilinks like [[<vault_name>/...]] or f-string fragments like
+  [[{vault_name}/...]] (which the install builtin has in its English and
+  return message) are skipped — they aren't real refs and would otherwise
+  cause a recursive /generate to fail with a 404 on a phantom dep."""
   deps = []
   seen = set()
-  for m in re.finditer(r'\[\[([^\]|#]+?)(?:\|[^\]]*)?\]\]', body):
+  for m in re.finditer(rf'\[\[({_ID_CHARS})(?:\|[^\]]*)?\]\]', body):
     dep = m.group(1).strip()
-    if dep not in seen:
+    if dep and dep not in seen:
       deps.append(dep)
       seen.add(dep)
-  for m in re.finditer(r'context\.compute\(\s*["\']([^"\']+)["\']', body):
+  for m in re.finditer(rf'context\.compute\(\s*["\']({_ID_CHARS})["\']', body):
     dep = m.group(1).strip()
-    if dep not in seen:
+    if dep and dep not in seen:
       deps.append(dep)
       seen.add(dep)
   return deps
