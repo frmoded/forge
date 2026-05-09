@@ -44,7 +44,14 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
   if snippet.get("source") == "builtin":
     return
 
+  # Locked snippets: the user has explicitly frozen the python facet ("don't
+  # regenerate, run what's there"). Same shape as the builtin skip — no LLM,
+  # no result, deps not walked. The plugin pre-checks lock before /generate
+  # so the user gets a clear notice; this is defense-in-depth.
   meta = snippet["meta"]
+  if meta.get("locked") is True:
+    return
+
   body = snippet["body"]
   deps = _find_deps(body)
 
