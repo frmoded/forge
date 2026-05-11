@@ -5,9 +5,10 @@ from anthropic import Anthropic
 from forge.core.executor import extract_section, extract_python
 from forge.core.registry import SnippetRegistry
 from forge.core.llm_prompts import build_system_prompt
-# Side-effect import: registers the music-domain fragment with llm_prompts.
+# Side-effect imports: register the per-domain fragments with llm_prompts.
 # Each new domain (arch, moda, ...) gets a parallel import here.
 import forge.music.llm_prompt  # noqa: F401
+import forge.moda.llm_prompt  # noqa: F401
 
 _client = None
 

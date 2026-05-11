@@ -41,6 +41,15 @@ try:
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}
 
+try:
+  from forge.moda.types import Particle as _ModaParticle, ParticleState as _ModaParticleState
+  _FORGE_MODA_NAMES = {
+    "Particle": _ModaParticle,
+    "ParticleState": _ModaParticleState,
+  }
+except ImportError:
+  _FORGE_MODA_NAMES = {}
+
 _PYTHON_HEADING = re.compile(r'^#{1,6}\s+python\s*$', re.IGNORECASE)
 
 _NO_FROZEN_SNAPSHOT = object()
@@ -333,6 +342,7 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
     "numpy": numpy,
     **_MUSIC21_NAMES,
     **_FORGE_MUSIC_LIB_NAMES,
+    **_FORGE_MODA_NAMES,
   }
   old_stdout = sys.stdout
   sys.stdout = buf
