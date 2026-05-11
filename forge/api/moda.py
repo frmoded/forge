@@ -12,12 +12,16 @@ Wire format is camelCase JSON; Pydantic uses snake_case attributes
 with explicit aliases so the Python side reads idiomatic.
 """
 
+import logging
 import os
+import time
 from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 from forge.core.executor import extract_python, exec_python, SnippetExecError, read_data_snippet
 from forge.core.exceptions import SnippetResolutionError
@@ -192,11 +196,20 @@ def compute(req: ComputeRequest) -> dict:
   particle_state = SESSIONS.get(req.session_id)
   if particle_state is None:
     raise HTTPException(status_code=404, detail=f"unknown sessionId: {req.session_id!r}")
-  # Phase 1: no advancement. Phase 2 will invoke `go(state, dt)` here.
+
+  # Phase 2: advance one tick by invoking `go(state, dt)`. Temperature is
+  # accepted on the wire but not yet consumed — Phase 3+ will route it
+  # back into the simulation. `dt` flows in directly.
+  start = time.perf_counter()
+  new_state = _run_snippet("go", args=(particle_state, req.dt))
+  elapsed_ms = (time.perf_counter() - start) * 1000
+  logger.info("moda /compute: elapsed_ms=%.1f", elapsed_ms)
+
+  SESSIONS[req.session_id] = new_state
   return ComputeResponse(
     state=SimState(
-      tick=particle_state.tick,
-      particles=_serialize_particles(particle_state.particles),
+      tick=new_state.tick,
+      particles=_serialize_particles(new_state.particles),
     ),
   ).model_dump(by_alias=True)
 
