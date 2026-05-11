@@ -16,6 +16,7 @@ from forge.core.serialization import serialize_result, SUPPORTED_CONTENT_TYPES
 from forge.core.exceptions import SnippetResolutionError
 from forge.core.llm import generate_snippet_code, canonicalize_python
 from forge.builtins.loader import load_builtin_vault
+from forge.api.moda import router as moda_router
 
 # Attach the handler to the package-root logger so every forge.* submodule
 # (forge.core.llm, forge.api.server, ...) inherits it via propagation.
@@ -36,6 +37,8 @@ app.add_middleware(
   allow_methods=["*"],
   allow_headers=["*"],
 )
+
+app.include_router(moda_router)
 
 
 @app.middleware("http")
