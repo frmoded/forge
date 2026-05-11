@@ -79,7 +79,9 @@ Verovio inline). Future formats added as needed.
 during a compute, Forge automatically captures the value the caller
 received and stores it as a snapshot. If a snapshot already exists for
 that edge, it is overwritten with the latest. Capture is automatic;
-users do not invoke it.
+users do not invoke it. Capture requires the return value to be
+wire-serializable per F3; non-serializable returns are skipped with a
+warning rather than crashing the compute.
 
 **A8.** An edge may be in one of two states: *live* (default) or
 *frozen*. When frozen, calling the callee from the caller returns the
@@ -163,6 +165,25 @@ record. An explicit "Sync English to Python" action canonicalizes
 English from current Python via a one-shot LLM call (the inverse
 direction of B5). Round-trip regeneration is not automatic; mode-flips
 and sync are explicit user gestures, never side effects of edits.
+
+**B9.** *Snippet execution namespace.* The runtime sandbox blocks
+`import` statements; snippets cannot pull in modules at compute time.
+Instead, the engine pre-injects a fixed set of names as globals into
+each snippet's execution namespace. The base set includes `random`,
+`math`, and `numpy`. Domain layers extend the injected set by
+registering additional names through the engine's domain hooks (e.g.,
+music21 modules and helpers for music; `Particle` and `ParticleState`
+dataclasses for moda). The `/generate` system prompt and its
+domain-specific fragments document which names are available; the LLM
+is instructed to use them directly without writing import statements.
+
+A consequence: snippets that reference domain-injected names are
+implicitly version-coupled to an engine that provides them. This
+coupling is part of the platform contract but is not currently
+expressed in vault manifests — a vault that uses `Particle` will fail
+on an engine that doesn't inject it. Worth surfacing in
+`forge.toml` (as a declared engine-feature dependency) once more than
+one engine version is in circulation.
 
 ## Data snippets
 

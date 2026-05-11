@@ -19,7 +19,61 @@ returns them as a (bytes, content_type) tuple so callers can decide what to
 do with the payload.
 """
 
+import dataclasses
+import importlib
 import json
+
+
+# Tag key used by the dataclass codec. Picked to be unmistakably-internal so
+# user data dicts won't collide with the deserializer's class-lookup branch.
+# Format: {"__dataclass__": "qualified.ClassName", "fields": {...}}
+_DC_TAG = "__dataclass__"
+
+
+def _dataclass_to_jsonable(value):
+  """Walk `value`, wrapping each dataclass instance in a tagged dict so the
+  whole structure is JSON-encodable. Containers (list/tuple/dict) are
+  recursed into; tuples become lists (JSON has no tuple). Other types pass
+  through; non-JSON-friendly leaves (numpy arrays, music21 streams) will
+  still raise at json.dumps time, same as before this codec landed.
+  """
+  if dataclasses.is_dataclass(value) and not isinstance(value, type):
+    cls = type(value)
+    return {
+      _DC_TAG: f"{cls.__module__}.{cls.__qualname__}",
+      "fields": {
+        f.name: _dataclass_to_jsonable(getattr(value, f.name))
+        for f in dataclasses.fields(value)
+      },
+    }
+  if isinstance(value, dict):
+    return {k: _dataclass_to_jsonable(v) for k, v in value.items()}
+  if isinstance(value, (list, tuple)):
+    return [_dataclass_to_jsonable(v) for v in value]
+  return value
+
+
+def _jsonable_to_dataclass(value):
+  """Inverse of _dataclass_to_jsonable. Rebuilds dataclass instances by
+  importing the class via its stored qualified name and calling Cls(**fields).
+  Unknown classes raise ValueError — callers (snapshot read paths) catch the
+  cycle higher up and fall back to live recomputation if needed."""
+  if isinstance(value, dict):
+    if _DC_TAG in value:
+      qname = value[_DC_TAG]
+      module_name, _, class_name = qname.rpartition(".")
+      try:
+        cls = getattr(importlib.import_module(module_name), class_name)
+      except (ImportError, AttributeError) as e:
+        raise ValueError(f"cannot resolve dataclass {qname!r}: {e}")
+      kwargs = {
+        k: _jsonable_to_dataclass(v) for k, v in value.get("fields", {}).items()
+      }
+      return cls(**kwargs)
+    return {k: _jsonable_to_dataclass(v) for k, v in value.items()}
+  if isinstance(value, list):
+    return [_jsonable_to_dataclass(v) for v in value]
+  return value
 
 # Tagged dicts coming back from serialize_result whose `type` is one of these
 # are treated as native wire formats — body becomes their `content` field.
@@ -92,7 +146,7 @@ def serialize_for_wire(value, snippet=None):
   payload = serialize_result(value, snippet)
   if isinstance(payload, dict) and payload.get("type") in _NATIVE_WIRE_FORMATS:
     return payload["type"], payload["content"]
-  return "json", json.dumps(payload)
+  return "json", json.dumps(_dataclass_to_jsonable(payload))
 
 
 def deserialize_text(content_type, content_str):
@@ -100,7 +154,7 @@ def deserialize_text(content_type, content_str):
   Binary content_types must go through deserialize_binary instead."""
   ct = _normalize(content_type)
   if ct == "json":
-    return json.loads(content_str)
+    return _jsonable_to_dataclass(json.loads(content_str))
   if ct == "yaml":
     import yaml
     return yaml.safe_load(content_str)

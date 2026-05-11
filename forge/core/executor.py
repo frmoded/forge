@@ -144,9 +144,10 @@ class ForgeContext:
     - vault_path isn't set (raw exec_python in a test, no filesystem to write to).
     - The value isn't wire-serializable (Manifest objects, file handles, etc.
       that pass between sub-snippets in pipelines like install). A divergence
-      from a strict read of A7: capture is best-effort; values that can't be
-      round-tripped through the wire format are logged and skipped rather
-      than crashing the compute.
+      from a strict read of A7: capture is best-effort per the wire-format
+      contract in F3. Non-serializable returns are warned-and-skipped rather
+      than crashing the compute — but they ARE warned, because silent skips
+      hide missing edges in the freeze graph and the edges panel.
     """
     if self._caller_id is None or self.vault_path is None:
       return
@@ -161,9 +162,10 @@ class ForgeContext:
       )
     except (TypeError, ValueError) as e:
       import logging
-      logging.getLogger(__name__).debug(
-        "snapshot capture skipped for %s -> %s: %s",
-        self._caller_id, callee_snippet["snippet_id"], e,
+      logging.getLogger(__name__).warning(
+        "snapshot skipped for edge %s→%s: %s not wire-serializable (%s)",
+        self._caller_id, callee_snippet["snippet_id"],
+        type(value).__name__, e,
       )
 
 
