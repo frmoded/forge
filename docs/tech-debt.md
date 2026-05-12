@@ -46,3 +46,63 @@ dedicated environment.
 Until one of those, deps stay in `pyproject.toml`. New per-vault deps
 need review before merging — the bar is "would this be acceptable as a
 permanent backend dep?", not "this vault needs it."
+
+## ParticleState representation — list[dataclass] vs. numpy arrays
+
+As of Phase 3 (forge-moda), `ParticleState.particles` is a `list[Particle]`
+where each `Particle` is a dataclass. Every leaf snippet that does
+vectorized math repeats the same dance:
+
+1. Stack particle fields into numpy arrays (one list comprehension per
+   field — `xs`, `ys`, `headings`, `speeds`, ...).
+2. Do the vectorized math.
+3. Unstack: rebuild `list[Particle]` via a list comprehension over
+   `zip(...)`.
+
+This pattern now lives in `create_water_particles`, `move_all_particles`,
+and `bounce_all_particles_off_walls`. By Phase 5 (collisions) it will
+also live in `detect_particle_collisions`,
+`resolve_particle_collisions`, and `set_water_speed_from_temperature` —
+six leaves repeating the same boilerplate, all of it pure overhead.
+
+At 500 particles the overhead is invisible (~1-2 ms per leaf). At
+5,000+ particles the list-comp materialization dominates wall time and
+the actual math becomes a minority of per-tick cost.
+
+The principled fix: **store fields as numpy arrays inside
+`ParticleState`** (so `ParticleState.xs`, `ParticleState.ys`,
+`ParticleState.headings`, etc., each shape `(N,)`), and materialize
+`Particle` objects only at the wire-serialization boundary in
+`/moda/compute`. Leaves operate directly on the arrays; no stack/unstack
+per call.
+
+### Why we're not doing it now
+
+- **Performance budget is comfortable** at 500 particles. Backend
+  perf is 4-14 ms per `/compute`, well under the 33 ms target. The
+  refactor doesn't unlock any user-visible improvement yet.
+- **The repetition isn't unmanageable** — six leaves with the same
+  shape is annoying but reviewable. The pattern is consistent enough
+  that a future refactor can pattern-match across them.
+- **Conference target dominates**. Phase 5 (collisions) is the
+  remaining technical unknown; refactoring the storage shape and
+  Phase 5 in the same week increases blast radius.
+
+### When to revisit
+
+- Phase 5's measurement comes in *and* the budget is uncomfortable
+  (avg backend `/compute` > 25 ms, or p99 > 33 ms sustained). The
+  refactor frees ~5-10 ms per tick at 500 particles by eliminating
+  the per-leaf materialization passes.
+- Particle count crosses ~2,000 (whether via larger scenarios for
+  pedagogical purposes or via a stress test). At 2,000 the list-comp
+  cost is no longer invisible.
+- A new leaf is being authored that would be the seventh consumer of
+  the stack/unstack pattern. At that point the boilerplate exceeds
+  the cost of just doing the refactor.
+
+Estimated effort: one focused day. Touches `forge/moda/types.py`
+(redefine `ParticleState` fields), all leaf snippets (rewrite to
+operate on arrays directly — likely simpler than the current code),
+and `/moda/compute`'s wire serializer (single materialization step
+at the boundary).
