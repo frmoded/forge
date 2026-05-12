@@ -224,7 +224,17 @@ def compute(req: ComputeRequest) -> dict:
 
 @router.post("/click")
 def click(req: ClickRequest) -> dict:
-  if req.session_id not in SESSIONS:
+  particle_state = SESSIONS.get(req.session_id)
+  if particle_state is None:
     raise HTTPException(status_code=404, detail=f"unknown sessionId: {req.session_id!r}")
-  _ = (req.x, req.y)
+
+  # Phase 4: drop ink particles at the click position via the on_click
+  # root snippet. The wire response stays {ack: true}; the new state
+  # surfaces on the next /compute by the Phase 0 design decision.
+  start = time.perf_counter()
+  new_state = _run_snippet("on_click", args=(particle_state, req.x, req.y))
+  elapsed_ms = (time.perf_counter() - start) * 1000
+  logger.info("moda /click: elapsed_ms=%.1f", elapsed_ms)
+
+  SESSIONS[req.session_id] = new_state
   return ClickResponse().model_dump(by_alias=True)
