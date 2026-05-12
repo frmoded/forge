@@ -152,7 +152,10 @@ def _run_snippet(snippet_id: str, args=(), inputs=None):
       args=args,
       vault_path=FORGE_MODA_VAULT_PATH,
       registry=state["registry"],
-      snippet_id=snippet_id,
+      # Use the resolver's qualified id (e.g. "authoring/setup") rather
+      # than the bare input — captured edges land under that namespace,
+      # which is also what the plugin's edges panel queries by.
+      snippet_id=snippet["snippet_id"],
     )
   except SnippetExecError as e:
     raise HTTPException(status_code=500, detail=f"snippet {snippet_id!r} execution failed: {e}")
