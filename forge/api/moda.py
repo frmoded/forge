@@ -27,13 +27,18 @@ from forge.core.executor import extract_python, exec_python, SnippetExecError, r
 from forge.core.exceptions import SnippetResolutionError
 
 
-# Authoritative vault for the simulator. The override exists so this
-# isn't pinned to one developer's machine, but the default is the
-# expected layout — Forge's plan documents put forge-moda alongside
-# forge in ~/projects/.
+# Vault path the simulator invokes Forge against. Default points at the
+# authoring vault during development so edits, /moda runs, and edge
+# snapshots all happen in the same place a snippet author is looking
+# at — without it, runtime captures land in forge-moda/.forge and the
+# edges panel for the authoring file stays empty.
+#
+# For shipped builds, set FORGE_MODA_VAULT_PATH=~/projects/forge-moda
+# (the distributable). The env-var is read once at process start, so a
+# uvicorn restart is needed after changing it.
 FORGE_MODA_VAULT_PATH = os.environ.get(
   "FORGE_MODA_VAULT_PATH",
-  os.path.expanduser("~/projects/forge-moda"),
+  os.path.expanduser("~/projects/forge-vaults/forge-moda-vault"),
 )
 
 
