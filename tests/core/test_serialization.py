@@ -113,3 +113,79 @@ def test_title_left_alone_when_no_snippet_provided():
   result = serialize_result(s)
   # music21's default still wins when we don't pass a snippet.
   assert "Music21 Fragment" in result["content"]
+
+
+# ---------------------------------------------------------------------------
+# Dataclass codec round-trip (`__dataclass__`-tagged JSON)
+#
+# Added after the moda integration started capturing snapshots whose return
+# values were Particle / ParticleState dataclasses — json.dumps used to
+# silently TypeError on those and the silent skip in _capture_edge meant
+# we shipped two missing edges before noticing.
+# ---------------------------------------------------------------------------
+
+from forge.core.serialization import serialize_for_wire, deserialize_from_wire
+from forge.moda.types import Particle, ParticleState
+
+
+def _state(particles, tick=0, w=800.0, h=600.0):
+  return ParticleState(tick=tick, particles=particles, width=w, height=h)
+
+
+def test_single_dataclass_round_trips():
+  p = Particle(id=1, type="water", x=10.5, y=20.5,
+               heading=1.5, speed=50.0, mass="medium")
+  ct, body = serialize_for_wire(p)
+  assert ct == "json"
+  back = deserialize_from_wire(ct, body)
+  assert isinstance(back, Particle)
+  assert back == p
+
+
+def test_nested_list_of_dataclasses_round_trips():
+  ps = _state([Particle(id=i, type="water", x=float(i), y=float(i * 2),
+                        heading=0.5, speed=10.0, mass="medium")
+               for i in range(3)],
+              tick=7)
+  ct, body = serialize_for_wire(ps)
+  back = deserialize_from_wire(ct, body)
+  assert isinstance(back, ParticleState)
+  assert back.tick == 7
+  assert len(back.particles) == 3
+  assert all(isinstance(p, Particle) for p in back.particles)
+  assert back == ps
+
+
+def test_dict_containing_dataclass_round_trips():
+  payload = {"meta": "hi", "frame": _state([Particle(
+      id=0, type="ink", x=1.0, y=2.0, heading=0.0, speed=5.0, mass="light")])}
+  ct, body = serialize_for_wire(payload)
+  back = deserialize_from_wire(ct, body)
+  assert back["meta"] == "hi"
+  assert isinstance(back["frame"], ParticleState)
+  assert back["frame"].particles[0].mass == "light"
+
+
+def test_plain_json_values_pass_through_unchanged():
+  # Numbers, strings, lists, dicts, None — nothing dataclass-y.
+  for v in [42, "hello", [1, 2, 3], {"a": 1, "b": [True, False]}, None]:
+    ct, body = serialize_for_wire(v)
+    assert ct == "json"
+    assert deserialize_from_wire(ct, body) == v
+
+
+def test_existing_plain_json_snapshots_still_load():
+  """Snapshots captured before the codec landed are plain JSON (no
+  __dataclass__ tag). They must keep deserializing as dicts/lists so
+  upgrade doesn't invalidate the snapshot store on disk."""
+  back = deserialize_from_wire("json", '{"x": 1, "y": [2, 3]}')
+  assert back == {"x": 1, "y": [2, 3]}
+
+
+def test_unresolvable_dataclass_qname_raises():
+  """Sanity: a tampered or stale snapshot referencing a class that no
+  longer exists should fail loud rather than silently dropping fields."""
+  import pytest
+  body = '{"__dataclass__": "no.such.module.Class", "fields": {"x": 1}}'
+  with pytest.raises(ValueError, match="cannot resolve dataclass"):
+    deserialize_from_wire("json", body)
