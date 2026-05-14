@@ -189,3 +189,87 @@ def test_unresolvable_dataclass_qname_raises():
   body = '{"__dataclass__": "no.such.module.Class", "fields": {"x": 1}}'
   with pytest.raises(ValueError, match="cannot resolve dataclass"):
     deserialize_from_wire("json", body)
+
+
+# ---------------------------------------------------------------------------
+# numpy.ndarray codec round-trip (`__ndarray__`-tagged JSON)
+#
+# Added so edges returning raw arrays (Phase 5's detect_particle_collisions
+# returns a (M, 2) pairs array; the pending ParticleState refactor makes
+# every per-particle field an ndarray) can be snapshotted without the
+# "ndarray not wire-serializable" warning that previously skipped capture.
+# ---------------------------------------------------------------------------
+
+import numpy as np
+
+
+def _roundtrip(value):
+  ct, body = serialize_for_wire(value)
+  assert ct == "json"
+  # Going through the JSON text channel — not just dict roundtrip — so
+  # we cover what snapshot files on disk look like.
+  return deserialize_from_wire(ct, body)
+
+
+def test_ndarray_1d_float_round_trips():
+  arr = np.array([1.5, -2.25, 3.75, 0.0], dtype=np.float64)
+  back = _roundtrip(arr)
+  assert isinstance(back, np.ndarray)
+  assert back.dtype == arr.dtype
+  assert back.shape == arr.shape
+  assert np.array_equal(back, arr)
+
+
+def test_ndarray_1d_int_round_trips():
+  arr = np.array([0, 1, 2, 3, 4], dtype=np.int64)
+  back = _roundtrip(arr)
+  assert isinstance(back, np.ndarray)
+  assert back.dtype == arr.dtype
+  assert back.shape == arr.shape
+  assert np.array_equal(back, arr)
+
+
+def test_ndarray_2d_collision_pairs_round_trip():
+  # The actual shape Phase 5's detect_particle_collisions emits: (N, 2)
+  # int array of (i, j) pairs.
+  pairs = np.array([[0, 5], [1, 7], [3, 9], [12, 14]], dtype=np.int64)
+  back = _roundtrip(pairs)
+  assert isinstance(back, np.ndarray)
+  assert back.dtype == pairs.dtype
+  assert back.shape == (4, 2)
+  assert np.array_equal(back, pairs)
+
+
+def test_ndarray_empty_round_trips():
+  # detect_particle_collisions can legitimately return zero pairs in a
+  # tick where nothing is colliding. The (0, 2) shape must survive.
+  empty = np.empty((0, 2), dtype=np.int64)
+  back = _roundtrip(empty)
+  assert isinstance(back, np.ndarray)
+  assert back.dtype == empty.dtype
+  assert back.shape == (0, 2)
+  assert np.array_equal(back, empty)
+
+
+def test_ndarray_object_dtype_strings_round_trips():
+  # Mimics what ParticleState.types becomes after the planned refactor:
+  # an object-dtype array of short string literals.
+  types = np.array(["water", "ink", "water", "water"], dtype=object)
+  back = _roundtrip(types)
+  assert isinstance(back, np.ndarray)
+  assert back.dtype == types.dtype
+  assert back.shape == types.shape
+  assert np.array_equal(back, types)
+  assert all(isinstance(x, str) for x in back.tolist())
+
+
+def test_ndarray_inside_dict_round_trips():
+  # Composition: arrays nested in containers (the shape every realistic
+  # snippet returns) must still recurse through the encoder.
+  payload = {"pairs": np.array([[1, 2], [3, 4]], dtype=np.int32),
+             "label": "tick-42"}
+  back = _roundtrip(payload)
+  assert back["label"] == "tick-42"
+  assert isinstance(back["pairs"], np.ndarray)
+  assert np.array_equal(back["pairs"], payload["pairs"])
+  assert back["pairs"].dtype == payload["pairs"].dtype

@@ -23,19 +23,25 @@ import dataclasses
 import importlib
 import json
 
+import numpy
 
-# Tag key used by the dataclass codec. Picked to be unmistakably-internal so
-# user data dicts won't collide with the deserializer's class-lookup branch.
-# Format: {"__dataclass__": "qualified.ClassName", "fields": {...}}
+
+# Tag keys used by the codec. Picked to be unmistakably-internal so user
+# data dicts won't collide with the deserializer's class-lookup branch.
+#   Format (dataclass): {"__dataclass__": "qualified.ClassName", "fields": {...}}
+#   Format (ndarray):   {"__ndarray__": true, "dtype": "...", "shape": [...], "data": [...]}
 _DC_TAG = "__dataclass__"
+_ND_TAG = "__ndarray__"
 
 
 def _dataclass_to_jsonable(value):
-  """Walk `value`, wrapping each dataclass instance in a tagged dict so the
-  whole structure is JSON-encodable. Containers (list/tuple/dict) are
-  recursed into; tuples become lists (JSON has no tuple). Other types pass
-  through; non-JSON-friendly leaves (numpy arrays, music21 streams) will
-  still raise at json.dumps time, same as before this codec landed.
+  """Walk `value`, wrapping each dataclass instance and each numpy.ndarray
+  in a tagged dict so the whole structure is JSON-encodable. Containers
+  (list/tuple/dict) are recursed into; tuples become lists (JSON has no
+  tuple). Other types pass through; non-JSON-friendly leaves (music21
+  streams, object-dtype ndarrays containing non-JSON elements, etc.) will
+  still raise at json.dumps time and the caller (snapshot capture) will
+  warn and skip — same contract as before this codec landed.
   """
   if dataclasses.is_dataclass(value) and not isinstance(value, type):
     cls = type(value)
@@ -46,6 +52,18 @@ def _dataclass_to_jsonable(value):
         for f in dataclasses.fields(value)
       },
     }
+  if isinstance(value, numpy.ndarray):
+    # tolist() rather than base64 bytes: snapshot files stay readable +
+    # diff-able in the vault's .forge/edges store, and at the particle
+    # counts we encode (sub-megabyte snapshots) the size cost is fine.
+    # tolist() preserves nested rank for multi-D arrays, so we just store
+    # shape alongside as a defensive cross-check on decode.
+    return {
+      _ND_TAG: True,
+      "dtype": str(value.dtype),
+      "shape": list(value.shape),
+      "data": value.tolist(),
+    }
   if isinstance(value, dict):
     return {k: _dataclass_to_jsonable(v) for k, v in value.items()}
   if isinstance(value, (list, tuple)):
@@ -55,9 +73,10 @@ def _dataclass_to_jsonable(value):
 
 def _jsonable_to_dataclass(value):
   """Inverse of _dataclass_to_jsonable. Rebuilds dataclass instances by
-  importing the class via its stored qualified name and calling Cls(**fields).
-  Unknown classes raise ValueError — callers (snapshot read paths) catch the
-  cycle higher up and fall back to live recomputation if needed."""
+  importing the class via its stored qualified name and calling Cls(**fields),
+  and rebuilds numpy.ndarray from the (dtype, shape, data) triple. Unknown
+  classes raise ValueError — callers (snapshot read paths) catch the cycle
+  higher up and fall back to live recomputation if needed."""
   if isinstance(value, dict):
     if _DC_TAG in value:
       qname = value[_DC_TAG]
@@ -70,6 +89,18 @@ def _jsonable_to_dataclass(value):
         k: _jsonable_to_dataclass(v) for k, v in value.get("fields", {}).items()
       }
       return cls(**kwargs)
+    if value.get(_ND_TAG) is True:
+      dtype = value.get("dtype")
+      shape = value.get("shape") or []
+      data = value.get("data")
+      arr = numpy.array(data, dtype=dtype)
+      # .reshape() is defensive: tolist()/array() preserve nesting for
+      # numeric dtypes, but an explicit reshape catches the empty-array
+      # edge case (shape=[0] with data=[]) where numpy.array(data) would
+      # default to dtype=float64 of shape (0,) regardless of the rank we
+      # encoded — and a future encoder change that flattens wouldn't
+      # silently lose rank either.
+      return arr.reshape(shape)
     return {k: _jsonable_to_dataclass(v) for k, v in value.items()}
   if isinstance(value, list):
     return [_jsonable_to_dataclass(v) for v in value]

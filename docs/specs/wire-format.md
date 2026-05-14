@@ -55,6 +55,16 @@ domain dataclasses registered through `forge/<domain>/types.py`.
 |-------------|--------|-----------|-------|
 | `music21.stream.Stream` (and subclasses) | music | MusicXML string | Rendered inline by the plugin's Verovio renderer. |
 
+### NumPy arrays
+
+| Python type | Encoded as | Notes |
+|-------------|-----------|-------|
+| `numpy.ndarray` | `{"__ndarray__": true, "dtype": "<str(arr.dtype)>", "shape": [...], "data": <arr.tolist()>}` | `data` uses `.tolist()` rather than base64 bytes so snapshot files stay readable and diff-able in `.forge/edges/`. Decoder reconstructs with `numpy.array(data, dtype=dtype).reshape(shape)` — the explicit reshape handles empty arrays (`shape: [0]` etc.) where `numpy.array([])` would otherwise default to a 1-D float64 of length 0 regardless of the encoded rank. Object-dtype arrays of JSON-serializable elements (strings, dicts) round-trip; object-dtype arrays containing non-JSON leaves fall through to the regular `json.dumps` failure and capture is warned-and-skipped as before. |
+
+Used for Phase 5's `detect_particle_collisions` `pairs` return value
+(shape `(M, 2)`), and the `ParticleState`-as-arrays refactor
+described in `tech-debt.md` once it lands.
+
 ### Binary content
 
 | Python type | Encoded as | Notes |
@@ -63,10 +73,6 @@ domain dataclasses registered through `forge/<domain>/types.py`.
 
 ## Not yet supported
 
-- `numpy.ndarray` — planned, in progress. Will encode as
-  `{"__ndarray__": true, "dtype": "...", "shape": [...], "data": [...]}`
-  with `data` derived from `arr.tolist()`. Required for the
-  `ParticleState` refactor (see `tech-debt.md`).
 - `set`, `frozenset` — no current consumer. If needed, encode as
   ordered JSON array with a tag.
 - Pandas `DataFrame`, `Series` — no current consumer. Likely a
