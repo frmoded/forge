@@ -173,14 +173,26 @@ def _serialize_particles(particles) -> list[Particle]:
 router = APIRouter(prefix="/moda")
 
 
+KNOWN_SCENARIOS: frozenset[str] = frozenset({"default_diffusion", "hot_chamber_start"})
+
+
 @router.post("/init")
 def init(req: InitRequest) -> dict:
-  # scenarioId is accepted but ignored in Phase 1 — `setup` is hardcoded
-  # to default_diffusion via the snippet graph. Phase 3+ will look up
-  # the scenario by id.
-  _ = req.scenario_id
+  # Phase 6: scenarioId is threaded through to setup, which reads the
+  # named data snippet (water_count / ink_count / width / height /
+  # temperature) and assembles the initial ParticleState. Validate
+  # against the known set so a typo returns 400 instead of dying in
+  # snippet resolution.
+  if req.scenario_id not in KNOWN_SCENARIOS:
+    raise HTTPException(
+      status_code=400,
+      detail=(
+        f"unknown scenarioId: {req.scenario_id!r}; "
+        f"known: {sorted(KNOWN_SCENARIOS)}"
+      ),
+    )
 
-  particle_state = _run_snippet("setup")
+  particle_state = _run_snippet("setup", args=(req.scenario_id,))
   session_id = uuid4().hex
   SESSIONS[session_id] = particle_state
 
@@ -205,11 +217,11 @@ def compute(req: ComputeRequest) -> dict:
   if particle_state is None:
     raise HTTPException(status_code=404, detail=f"unknown sessionId: {req.session_id!r}")
 
-  # Phase 2: advance one tick by invoking `go(state, dt)`. Temperature is
-  # accepted on the wire but not yet consumed — Phase 3+ will route it
-  # back into the simulation. `dt` flows in directly.
+  # Phase 6: temperature now actually does something. `go` reads it on
+  # entry and feeds it to set_water_speed_from_temperature before the
+  # rest of the per-tick pipeline. `dt` and `state` flow in unchanged.
   start = time.perf_counter()
-  new_state = _run_snippet("go", args=(particle_state, req.dt))
+  new_state = _run_snippet("go", args=(particle_state, req.dt, req.temperature))
   elapsed_ms = (time.perf_counter() - start) * 1000
   logger.info("moda /compute: elapsed_ms=%.1f", elapsed_ms)
 
