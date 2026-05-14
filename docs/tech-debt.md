@@ -49,7 +49,22 @@ permanent backend dep?", not "this vault needs it."
 
 ## ParticleState representation — list[dataclass] vs. numpy arrays
 
-As of Phase 3 (forge-moda), `ParticleState.particles` is a `list[Particle]`
+**Resolved in Phase 7.** `ParticleState` now stores per-particle fields
+as parallel numpy arrays (`ids`, `types`, `xs`, `ys`, `headings`,
+`speeds`, `masses`) and the `Particle` dataclass is materialized
+row-by-row only at the /moda/compute wire boundary. The seven affected
+leaves were regenerated against an updated moda prompt fragment; all
+of them operate on the arrays directly with no stack/unstack pass.
+The refactor depended on the wire codec gaining `numpy.ndarray`
+support, which landed in the commit immediately before this one.
+
+Perf at the previously-tight N=900 dropped avg from 33.3 ms to 19.0 ms
+(p95 47.1 → 19.6, over-budget frames 15.7% → 0.7%). The history below
+is preserved for the design context it captured.
+
+---
+
+As of Phase 3 (forge-moda), `ParticleState.particles` was a `list[Particle]`
 where each `Particle` is a dataclass. Every leaf snippet that does
 vectorized math repeats the same dance:
 

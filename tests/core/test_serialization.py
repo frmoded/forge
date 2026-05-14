@@ -128,8 +128,39 @@ from forge.core.serialization import serialize_for_wire, deserialize_from_wire
 from forge.moda.types import Particle, ParticleState
 
 
-def _state(particles, tick=0, w=800.0, h=600.0):
-  return ParticleState(tick=tick, particles=particles, width=w, height=h)
+import numpy as np
+
+
+def _state(n=3, tick=0, w=800.0, h=600.0, ink=0):
+  """Build a Phase-7-shape ParticleState with `n` water rows followed by
+  `ink` ink rows. Per-particle fields are parallel numpy arrays; the
+  index identifies one row across them."""
+  total = n + ink
+  ids = np.arange(total, dtype=np.int64)
+  types = np.array(["water"] * n + ["ink"] * ink, dtype=object)
+  xs = np.arange(total, dtype=np.float64)
+  ys = np.arange(total, dtype=np.float64) * 2.0
+  headings = np.full(total, 0.5, dtype=np.float64)
+  speeds = np.full(total, 10.0, dtype=np.float64)
+  masses = np.array(["medium"] * total, dtype=object)
+  return ParticleState(
+    tick=tick, ids=ids, types=types, xs=xs, ys=ys,
+    headings=headings, speeds=speeds, masses=masses,
+    width=w, height=h,
+  )
+
+
+def _assert_state_equal(a, b):
+  """ParticleState equality on the arrays-first shape — the default
+  __eq__ would compare arrays element-wise and raise ValueError on
+  truthiness, so unpack the fields and compare each one."""
+  assert a.tick == b.tick
+  assert a.width == b.width
+  assert a.height == b.height
+  for f in ("ids", "types", "xs", "ys", "headings", "speeds", "masses"):
+    assert np.array_equal(getattr(a, f), getattr(b, f)), f
+    assert getattr(a, f).dtype == getattr(b, f).dtype, f
+    assert getattr(a, f).shape == getattr(b, f).shape, f
 
 
 def test_single_dataclass_round_trips():
@@ -142,28 +173,29 @@ def test_single_dataclass_round_trips():
   assert back == p
 
 
-def test_nested_list_of_dataclasses_round_trips():
-  ps = _state([Particle(id=i, type="water", x=float(i), y=float(i * 2),
-                        heading=0.5, speed=10.0, mass="medium")
-               for i in range(3)],
-              tick=7)
+def test_particle_state_with_arrays_round_trips():
+  """Phase 7: ParticleState now stores its per-particle fields as parallel
+  numpy arrays. The dataclass codec recurses into each field; the ndarray
+  codec then encodes each array as a __ndarray__-tagged dict. Both halves
+  must reassemble back to the original arrays-first shape."""
+  ps = _state(n=3, tick=7)
   ct, body = serialize_for_wire(ps)
   back = deserialize_from_wire(ct, body)
   assert isinstance(back, ParticleState)
-  assert back.tick == 7
-  assert len(back.particles) == 3
-  assert all(isinstance(p, Particle) for p in back.particles)
-  assert back == ps
+  _assert_state_equal(back, ps)
 
 
-def test_dict_containing_dataclass_round_trips():
-  payload = {"meta": "hi", "frame": _state([Particle(
-      id=0, type="ink", x=1.0, y=2.0, heading=0.0, speed=5.0, mass="light")])}
+def test_dict_containing_particle_state_round_trips():
+  payload = {"meta": "hi", "frame": _state(n=1, ink=2, tick=42, w=400, h=300)}
   ct, body = serialize_for_wire(payload)
   back = deserialize_from_wire(ct, body)
   assert back["meta"] == "hi"
   assert isinstance(back["frame"], ParticleState)
-  assert back["frame"].particles[0].mass == "light"
+  # Field-level checks: the ink rows are at indices 1, 2 in the test state
+  assert back["frame"].types[0] == "water"
+  assert back["frame"].types[1] == "ink"
+  assert back["frame"].masses[1] == "medium"
+  _assert_state_equal(back["frame"], payload["frame"])
 
 
 def test_plain_json_values_pass_through_unchanged():

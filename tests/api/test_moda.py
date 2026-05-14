@@ -26,8 +26,13 @@ description: test scenario config
 """
 
 
+# Phase-7 minimal test setup: builds the new arrays-first ParticleState
+# shape directly. The signature takes scenario_id (which /moda/init
+# threads through from the wire's scenarioId), but the test vault's
+# only data snippet is `config`, so the id is ignored here.
 _SETUP_MD = """---
 type: action
+inputs: [scenario_id]
 description: minimal test setup
 ---
 
@@ -38,23 +43,60 @@ Read the [[config]] scenario and build the initial state.
 # Python
 
 ```python
-def compute(context):
+def compute(context, scenario_id):
     cfg = context.compute("config")
-    particles = [
-        Particle(id=i, type='water', x=float(i * 10), y=float(i * 10),
-                 heading=0.0, speed=10.0, mass='medium')
-        for i in range(cfg["count"])
-    ]
-    return ParticleState(tick=0, particles=particles,
-                         width=float(cfg["width"]), height=float(cfg["height"]))
+    n = cfg["count"]
+    ids = numpy.arange(n, dtype=numpy.int64)
+    types = numpy.full(n, 'water', dtype=object)
+    xs = numpy.arange(n, dtype=numpy.float64) * 10.0
+    ys = numpy.arange(n, dtype=numpy.float64) * 10.0
+    headings = numpy.zeros(n, dtype=numpy.float64)
+    speeds = numpy.full(n, 10.0, dtype=numpy.float64)
+    masses = numpy.full(n, 'medium', dtype=object)
+    return ParticleState(
+        tick=0,
+        ids=ids, types=types, xs=xs, ys=ys,
+        headings=headings, speeds=speeds, masses=masses,
+        width=float(cfg["width"]), height=float(cfg["height"]),
+    )
 ```
 """
 
+# Minimal test on_click: /moda/click runs the on_click snippet (Phase 4+),
+# so the test vault needs one. This one is a no-op that returns the state
+# unchanged — the test only asserts the wire ack, not any state mutation.
+_ON_CLICK_MD = """---
+type: action
+inputs:
+  - state
+  - x
+  - y
+description: minimal test on_click — no-op
+---
+
+# English
+
+Return `state` unchanged.
+
+# Python
+
+```python
+def compute(context, state, x, y):
+    return state
+```
+"""
+
+
+# Phase-7 minimal test go: accepts the (state, dt, temperature) signature
+# /moda/compute now produces. The temperature parameter is accepted but
+# ignored — this test is about the tick-advance + wire-shape contract,
+# not the temperature coupling that the production go encapsulates.
 _GO_MD = """---
 type: action
 inputs:
   - state
   - dt
+  - temperature
 description: advance one tick by shifting x by 1
 ---
 
@@ -65,14 +107,20 @@ Shift each particle's x by 1.
 # Python
 
 ```python
-def compute(context, state, dt):
-    moved = [
-        Particle(id=p.id, type=p.type, x=p.x + 1.0, y=p.y,
-                 heading=p.heading, speed=p.speed, mass=p.mass)
-        for p in state.particles
-    ]
-    return ParticleState(tick=state.tick + 1, particles=moved,
-                         width=state.width, height=state.height)
+def compute(context, state, dt, temperature):
+    new_xs = state.xs + 1.0
+    return ParticleState(
+        tick=state.tick + 1,
+        ids=state.ids,
+        types=state.types,
+        xs=new_xs,
+        ys=state.ys,
+        headings=state.headings,
+        speeds=state.speeds,
+        masses=state.masses,
+        width=state.width,
+        height=state.height,
+    )
 ```
 """
 
@@ -84,6 +132,7 @@ def moda_vault(tmp_path):
   (tmp_path / "config.md").write_text(_CONFIG_MD)
   (tmp_path / "setup.md").write_text(_SETUP_MD)
   (tmp_path / "go.md").write_text(_GO_MD)
+  (tmp_path / "on_click.md").write_text(_ON_CLICK_MD)
   return str(tmp_path)
 
 

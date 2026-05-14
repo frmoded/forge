@@ -162,11 +162,29 @@ def _run_snippet(snippet_id: str, args=(), inputs=None):
   return result
 
 
-def _serialize_particles(particles) -> list[Particle]:
-  """Drop internal `heading` and `speed` to produce the wire shape."""
+def _serialize_particles(particle_state) -> list[Particle]:
+  """Materialize one wire-shape Particle per row of `particle_state`'s arrays.
+
+  Phase 7: ParticleState now stores per-particle fields as parallel numpy
+  arrays rather than a list[Particle]. This is the single place we cross
+  the array → per-row-dataclass boundary on the server — the rest of the
+  per-tick pipeline never iterates particles. `heading` and `speed`
+  remain internal-only and are intentionally absent from the wire view.
+  """
+  ids = particle_state.ids
+  types = particle_state.types
+  xs = particle_state.xs
+  ys = particle_state.ys
+  masses = particle_state.masses
   return [
-    Particle(id=p.id, type=p.type, x=p.x, y=p.y, mass=p.mass)
-    for p in particles
+    Particle(
+      id=int(ids[i]),
+      type=str(types[i]),
+      x=float(xs[i]),
+      y=float(ys[i]),
+      mass=str(masses[i]),
+    )
+    for i in range(int(ids.shape[0]))
   ]
 
 
@@ -200,7 +218,7 @@ def init(req: InitRequest) -> dict:
     session_id=session_id,
     state=SimState(
       tick=particle_state.tick,
-      particles=_serialize_particles(particle_state.particles),
+      particles=_serialize_particles(particle_state),
     ),
     config=Config(
       width=int(particle_state.width),
@@ -229,7 +247,7 @@ def compute(req: ComputeRequest) -> dict:
   return ComputeResponse(
     state=SimState(
       tick=new_state.tick,
-      particles=_serialize_particles(new_state.particles),
+      particles=_serialize_particles(new_state),
     ),
   ).model_dump(by_alias=True)
 
