@@ -128,6 +128,60 @@ the composition-helper layer):
   Without the chord.Chord (or notes/Rests with actual pitches), playback
   is silent for that measure regardless of the instrument set.
 
+- harmony.ChordSymbol takes ABSOLUTE chord-symbol notation, NOT
+  Roman-numeral analysis tokens. Its `figure` attribute (or the
+  string passed to the constructor) expects a root LETTER (A–G),
+  optional accidental, optional quality suffix (`m`, `dim`, `aug`,
+  `7`, `maj7`, `m7`, `sus4`, ...), and optional slash bass:
+    "C", "G7", "Dm/F", "F#dim", "Bb", "AmM7"
+  Passing a Roman numeral instead — `"I"`, `"IV"`, `"V"`, `"ii7"` —
+  raises `"Chord X does not begin with a valid root note."` because
+  the parser checks position 0 for {A,B,C,D,E,F,G} and the Roman
+  tokens start with `I`, `V`, etc.
+
+  Roman numerals belong to `music21.roman`; absolute chord symbols
+  belong to `music21.harmony`. Don't pass one to the other.
+
+  When a snippet's INPUT is a Roman numeral and the goal is a
+  chord-symbol label above the staff, there are two acceptable
+  patterns. Pick whichever the English actually asks for:
+
+  (a) Drop the chord-symbol label entirely. Insert only the sounding
+      chord whose pitches you get from RomanNumeral; the rendered
+      score still shows the harmony via the noteheads, just without
+      a textual label above the bar. Smallest correct fix when the
+      ChordSymbol adds nothing engraved that the Chord doesn't:
+
+        rn = roman.RomanNumeral(numeral, k)
+        m.insert(0, chord.Chord(list(rn.pitches), quarterLength=bar_ql))
+
+  (b) Convert Roman → absolute chord-symbol BEFORE assigning to
+      `cs.figure`. The root letter comes from `rn.root().name`; the
+      quality suffix is derived from `rn.quality` (or built from the
+      Roman's intervals if you need sevenths / alterations). Minimal
+      idiom for triads — "I" in E major becomes "E", "ii" becomes
+      "F#m", "V" becomes "B":
+
+        rn = roman.RomanNumeral(numeral, k)
+        root_name = rn.root().name
+        suffix = {"major": "", "minor": "m",
+                  "diminished": "dim", "augmented": "aug"}[rn.quality]
+        cs = harmony.ChordSymbol(root_name + suffix)
+        cs.key = k
+        m.insert(0, cs)
+        m.insert(0, chord.Chord(list(rn.pitches), quarterLength=bar_ql))
+
+      For sevenths and richer qualities, extend the suffix map
+      (`"dominant-seventh"` → `"7"`, `"major-seventh"` → `"maj7"`,
+      `"minor-seventh"` → `"m7"`, etc.) or build the figure string
+      from `rn.figure`'s components. Verify the resulting string
+      parses by passing it to `harmony.ChordSymbol(...)` rather than
+      assigning to `cs.figure` after construction.
+
+  In either pattern, do NOT round-trip through
+  `cs.figure = numeral` — assigning a Roman to `figure` is the
+  exact API misuse this rule exists to prevent.
+
 - When placing a chord symbol and a chord at the start of a Measure,
   prefer m.insert(0, cs) and m.insert(0, c) over append() so the offset
   is explicit.
