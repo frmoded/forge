@@ -135,14 +135,51 @@ exec npm run dev
 EOF
 chmod +x "${HOME}/start-forge-client.sh"
 
+cat > "${HOME}/update-forge.sh" <<'EOF'
+#!/usr/bin/env bash
+# update-forge.sh — pull latest backend + client from GitHub and reinstall deps.
+# Run this when you want to move to head. Safe to re-run; no-ops if already up to date.
+# Stop any running uvicorn / vite servers before running.
+#
+# Usage: bash ~/update-forge.sh
+
+set -euo pipefail
+
+echo "=== Updating Forge backend ==="
+cd ~/projects/forge
+git pull --ff-only
+# shellcheck disable=SC1091
+source .venv/bin/activate
+pip install --quiet --upgrade pip
+pip install --quiet -e .
+deactivate
+echo "Backend up to date."
+
+echo
+echo "=== Updating Forge client ==="
+cd ~/projects/forge-moda-client
+git pull --ff-only
+cd forge-moda-web
+npm install --silent
+echo "Client up to date."
+
+echo
+echo "=== Done ==="
+echo "Restart the start-forge scripts to pick up the new versions."
+EOF
+chmod +x "${HOME}/update-forge.sh"
+
 # --- Done ---
 cat <<'EOF'
 
 === Setup complete ===
 
-Two helper scripts written to your home directory:
+Three helper scripts written to your home directory:
   ~/start-forge-backend.sh   — starts uvicorn (needs API key + vault path)
   ~/start-forge-client.sh    — starts the Vite dev server
+  ~/update-forge.sh          — pulls latest backend + client from GitHub
+                                and reinstalls deps. Run before starting
+                                if you want to move to head.
 
 Next steps (manual, one-time):
 
@@ -181,5 +218,9 @@ Daily startup after the one-time setup above:
   Terminal 1:  export ANTHROPIC_API_KEY='...' && export FORGE_MODA_VAULT_PATH='...' && bash ~/start-forge-backend.sh
   Terminal 2:  bash ~/start-forge-client.sh
   Obsidian:    open the vault and use the plugin
+
+To pull the latest backend + client from GitHub (do this when you want
+to move to head; stop the start-forge servers first):
+  bash ~/update-forge.sh
 
 EOF
