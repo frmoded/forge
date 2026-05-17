@@ -102,6 +102,14 @@ cat > "${HOME}/start-forge-backend.sh" <<'EOF'
 
 set -euo pipefail
 
+# Make sure brew-installed binaries are on PATH (non-interactive bash
+# doesn't inherit the user's shell PATH).
+if [ -x /opt/homebrew/bin/brew ]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   echo "ERROR: ANTHROPIC_API_KEY not set."
   echo "Run: export ANTHROPIC_API_KEY='your-shared-key'"
@@ -130,6 +138,16 @@ cat > "${HOME}/start-forge-client.sh" <<'EOF'
 #!/usr/bin/env bash
 # start-forge-client.sh — start the Vite dev server for forge-moda-client.
 # Usage: bash ~/start-forge-client.sh
+
+set -euo pipefail
+
+# Make sure brew-installed binaries (npm) are on PATH.
+if [ -x /opt/homebrew/bin/brew ]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 cd ~/projects/forge-moda-client/forge-moda-web
 exec npm run dev
 EOF
@@ -144,6 +162,13 @@ cat > "${HOME}/update-forge.sh" <<'EOF'
 # Usage: bash ~/update-forge.sh
 
 set -euo pipefail
+
+# Make sure brew-installed binaries (npm) are on PATH.
+if [ -x /opt/homebrew/bin/brew ]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+fi
 
 echo "=== Updating Forge backend ==="
 cd ~/projects/forge
