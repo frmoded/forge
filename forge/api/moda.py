@@ -73,7 +73,7 @@ class Config(_CamelModel):
 
 
 class InitRequest(_CamelModel):
-  scenario_id: str = Field(alias="scenarioId")
+  pass
 
 
 class InitResponse(_CamelModel):
@@ -191,26 +191,17 @@ def _serialize_particles(particle_state) -> list[Particle]:
 router = APIRouter(prefix="/moda")
 
 
-KNOWN_SCENARIOS: frozenset[str] = frozenset({"default_diffusion", "hot_chamber_start"})
-
-
 @router.post("/init")
 def init(req: InitRequest) -> dict:
-  # Phase 6: scenarioId is threaded through to setup, which reads the
-  # named data snippet (water_count / ink_count / width / height /
-  # temperature) and assembles the initial ParticleState. Validate
-  # against the known set so a typo returns 400 instead of dying in
-  # snippet resolution.
-  if req.scenario_id not in KNOWN_SCENARIOS:
-    raise HTTPException(
-      status_code=400,
-      detail=(
-        f"unknown scenarioId: {req.scenario_id!r}; "
-        f"known: {sorted(KNOWN_SCENARIOS)}"
-      ),
-    )
+  # Phase 7.5 — scenarios removed. setup is no-args and uses hardcoded
+  # defaults (500 water particles, 800x600 chamber, medium temperature).
+  # The req body is kept as an empty Pydantic model so the endpoint
+  # still accepts {} on the wire without 422-ing; if/when scenarios
+  # come back via a different abstraction (manifests, student-saved
+  # state, ...), the field set goes back in here.
+  del req
 
-  particle_state = _run_snippet("setup", args=(req.scenario_id,))
+  particle_state = _run_snippet("setup")
   session_id = uuid4().hex
   SESSIONS[session_id] = particle_state
 

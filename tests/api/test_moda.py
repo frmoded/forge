@@ -26,13 +26,13 @@ description: test scenario config
 """
 
 
-# Phase-7 minimal test setup: builds the new arrays-first ParticleState
-# shape directly. The signature takes scenario_id (which /moda/init
-# threads through from the wire's scenarioId), but the test vault's
-# only data snippet is `config`, so the id is ignored here.
+# Post-scenario-cleanup minimal test setup: builds the new arrays-first
+# ParticleState shape directly. /moda/init no longer threads a scenarioId,
+# so the setup snippet takes only `context`. The test vault's only data
+# snippet remains `config` — the setup just reads it unconditionally.
 _SETUP_MD = """---
 type: action
-inputs: [scenario_id]
+inputs: []
 description: minimal test setup
 ---
 
@@ -43,7 +43,7 @@ Read the [[config]] scenario and build the initial state.
 # Python
 
 ```python
-def compute(context, scenario_id):
+def compute(context):
     cfg = context.compute("config")
     n = cfg["count"]
     ids = numpy.arange(n, dtype=numpy.int64)
@@ -159,7 +159,7 @@ def client():
 # ---------------------------------------------------------------------------
 
 def test_init_returns_session_state_and_config(client):
-  resp = client.post("/moda/init", json={"scenarioId": "default_diffusion"})
+  resp = client.post("/moda/init", json={})
   assert resp.status_code == 200
   data = resp.json()
   assert isinstance(data["sessionId"], str) and len(data["sessionId"]) == 32
@@ -173,7 +173,7 @@ def test_init_returns_session_state_and_config(client):
 
 
 def test_init_wire_particle_strips_internal_fields(client):
-  resp = client.post("/moda/init", json={"scenarioId": "default_diffusion"})
+  resp = client.post("/moda/init", json={})
   p = resp.json()["state"]["particles"][0]
   # The wire shape carries only the public fields. heading/speed are
   # internal to the simulation and never leave the backend.
@@ -187,7 +187,7 @@ def test_init_captures_edges_under_qualified_caller_id(client, moda_vault):
   only edge in this minimal vault, but that's enough to validate the
   path format.
   """
-  client.post("/moda/init", json={"scenarioId": "default_diffusion"})
+  client.post("/moda/init", json={})
 
   edges_root = os.path.join(moda_vault, ".forge", "edges")
   assert os.path.isdir(edges_root), \
@@ -207,7 +207,7 @@ def test_init_captures_edges_under_qualified_caller_id(client, moda_vault):
 # ---------------------------------------------------------------------------
 
 def test_compute_advances_tick_and_updates_state(client):
-  init = client.post("/moda/init", json={"scenarioId": "default_diffusion"}).json()
+  init = client.post("/moda/init", json={}).json()
   sid = init["sessionId"]
   x0 = init["state"]["particles"][0]["x"]
 
@@ -243,7 +243,7 @@ def test_compute_unknown_session_returns_404(client):
 # ---------------------------------------------------------------------------
 
 def test_click_acks_for_known_session(client):
-  init = client.post("/moda/init", json={"scenarioId": "default_diffusion"}).json()
+  init = client.post("/moda/init", json={}).json()
   resp = client.post(
     "/moda/click",
     json={"sessionId": init["sessionId"], "x": 50.0, "y": 50.0},
