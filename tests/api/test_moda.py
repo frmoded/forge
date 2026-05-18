@@ -26,24 +26,27 @@ description: test scenario config
 """
 
 
-# Post-scenario-cleanup minimal test setup: builds the new arrays-first
-# ParticleState shape directly. /moda/init no longer threads a scenarioId,
-# so the setup snippet takes only `context`. The test vault's only data
-# snippet remains `config` — the setup just reads it unconditionally.
+# 25-block-refactor minimal test setup: setup is the state-ORIGIN block
+# and the backend calls it as `_run_snippet("setup", args=("medium",))`,
+# so it takes `temperature` (ignored here — this test asserts particle
+# count + config, not the temperature ladder). No `state` param: setup
+# builds the initial state itself. Reads the test vault's `config`.
 _SETUP_MD = """---
 type: action
-inputs: []
+inputs: [temperature]
 description: minimal test setup
 ---
 
 # English
+
+Inputs: `temperature`
 
 Read the [[config]] scenario and build the initial state.
 
 # Python
 
 ```python
-def compute(context):
+def compute(context, temperature):
     cfg = context.compute("config")
     n = cfg["count"]
     ids = numpy.arange(n, dtype=numpy.int64)
@@ -62,16 +65,17 @@ def compute(context):
 ```
 """
 
-# Minimal test on_click: /moda/click runs the on_click snippet (Phase 4+),
-# so the test vault needs one. This one is a no-op that returns the state
-# unchanged — the test only asserts the wire ack, not any state mutation.
+# Minimal test on_mouse_click: /moda/click runs the `on_mouse_click`
+# snippet (renamed from `on_click` in the 25-block refactor), so the
+# test vault needs one. No-op returning state unchanged — the test only
+# asserts the wire ack, not any state mutation.
 _ON_CLICK_MD = """---
 type: action
 inputs:
   - state
   - x
   - y
-description: minimal test on_click — no-op
+description: minimal test on_mouse_click — no-op
 ---
 
 # English
@@ -132,7 +136,7 @@ def moda_vault(tmp_path):
   (tmp_path / "config.md").write_text(_CONFIG_MD)
   (tmp_path / "setup.md").write_text(_SETUP_MD)
   (tmp_path / "go.md").write_text(_GO_MD)
-  (tmp_path / "on_click.md").write_text(_ON_CLICK_MD)
+  (tmp_path / "on_mouse_click.md").write_text(_ON_CLICK_MD)
   return str(tmp_path)
 
 

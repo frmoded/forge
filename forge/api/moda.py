@@ -193,15 +193,16 @@ router = APIRouter(prefix="/moda")
 
 @router.post("/init")
 def init(req: InitRequest) -> dict:
-  # Phase 7.5 — scenarios removed. setup is no-args and uses hardcoded
-  # defaults (500 water particles, 800x600 chamber, medium temperature).
-  # The req body is kept as an empty Pydantic model so the endpoint
-  # still accepts {} on the wire without 422-ing; if/when scenarios
-  # come back via a different abstraction (manifests, student-saved
-  # state, ...), the field set goes back in here.
+  # 25-block refactor — `setup` is the state-origin block and takes an
+  # initial `temperature` (block 1: create water -> set_water_speed
+  # with temperature -> set_water_mass). The wire carries no
+  # temperature on /moda/init, so hardcode "medium" here; the slider's
+  # value takes over on the first /moda/compute. The req body stays an
+  # empty Pydantic model so the endpoint still accepts {} without
+  # 422-ing.
   del req
 
-  particle_state = _run_snippet("setup")
+  particle_state = _run_snippet("setup", args=("medium",))
   session_id = uuid4().hex
   SESSIONS[session_id] = particle_state
 
@@ -249,11 +250,12 @@ def click(req: ClickRequest) -> dict:
   if particle_state is None:
     raise HTTPException(status_code=404, detail=f"unknown sessionId: {req.session_id!r}")
 
-  # Phase 4: drop ink particles at the click position via the on_click
-  # root snippet. The wire response stays {ack: true}; the new state
-  # surfaces on the next /compute by the Phase 0 design decision.
+  # 25-block refactor: the click event is block 5 `on_mouse_click`
+  # (renamed from `on_click`) — create_ink_particles -> set_ink_speed
+  # -> set_ink_mass. The wire response stays {ack: true}; the new
+  # state surfaces on the next /compute by the Phase 0 design decision.
   start = time.perf_counter()
-  new_state = _run_snippet("on_click", args=(particle_state, req.x, req.y))
+  new_state = _run_snippet("on_mouse_click", args=(particle_state, req.x, req.y))
   elapsed_ms = (time.perf_counter() - start) * 1000
   logger.info("moda /click: elapsed_ms=%.1f", elapsed_ms)
 
