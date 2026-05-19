@@ -15,6 +15,33 @@ from forge.core.dependencies import extract_dependencies, apply_dependencies_to_
 from forge.core.serialization import serialize_result, SUPPORTED_CONTENT_TYPES
 from forge.core.exceptions import SnippetResolutionError
 from forge.core.llm import generate_snippet_code, canonicalize_python
+from forge.core.manifest import read_manifest
+
+_log = logging.getLogger(__name__)
+
+
+def _read_vault_domains(vault_path):
+  """Active domain scope for a vault (constitution B9 / domain-scoping).
+
+  Returns the manifest's `domains` list, or None if the field is
+  absent / the manifest can't be read — None means "all registered
+  domains" (back-compat for vaults authored before the field). A
+  one-line warning is logged on the back-compat path so authors know
+  to declare `domains` in forge.toml.
+  """
+  try:
+    domains = read_manifest(vault_path).domains
+  except Exception as e:  # missing/malformed forge.toml — stay permissive
+    _log.warning(
+      "forge.toml unreadable for %s (%s); treating as all-domains "
+      "(declare `domains = [...]` to scope)", vault_path, e)
+    return None
+  if domains is None:
+    _log.warning(
+      "vault %s declares no `domains` in forge.toml; treating as "
+      "all-domains (back-compat — declare `domains = [...]` to scope)",
+      vault_path)
+  return domains
 from forge.builtins.loader import load_builtin_vault
 from forge.api.moda import router as moda_router
 
@@ -68,6 +95,7 @@ class VaultSessionManager:
     self._states[vault_path] = {
       "registry": registry,
       "resolver": GraphResolver(registry),
+      "domains": _read_vault_domains(vault_path),
     }
 
   def get(self, vault_path):
@@ -173,6 +201,7 @@ def compute(req: ComputeRequest, manager: VaultSessionManager = Depends(get_sess
         registry=state["registry"],
         trusted=trusted,
         snippet_id=snippet["snippet_id"],
+        domains=state.get("domains"),
       )
     except SnippetExecError as e:
       raise HTTPException(status_code=422, detail={"error": str(e), "stdout": e.stdout})
@@ -187,7 +216,10 @@ def generate(req: GenerateRequest, manager: VaultSessionManager = Depends(get_se
   if state is None:
     raise HTTPException(status_code=400, detail="vault not connected — call /connect first")
   try:
-    generated = generate_snippet_code(req.snippet_id, state["registry"], req.recursive)
+    generated = generate_snippet_code(
+      req.snippet_id, state["registry"], req.recursive,
+      active_domains=state.get("domains"),
+    )
   except KeyError as e:
     raise HTTPException(status_code=404, detail=str(e))
   except RuntimeError as e:

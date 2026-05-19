@@ -207,4 +207,4 @@ History-dependent snippets (constitution C8)
   state; the helper is built in."""
 
 
-register_fragment(MODA_PROMPT_FRAGMENT)
+register_fragment("moda", MODA_PROMPT_FRAGMENT)

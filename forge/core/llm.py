@@ -21,14 +21,20 @@ _client = None
 _GENERATION_CACHE: dict[str, str] = {}
 
 
-def generate_snippet_code(snippet_id: str, registry: SnippetRegistry, recursive: bool = False) -> dict[str, str]:
-  """Return {snippet_id: generated_code} for snippet and optionally its dependencies."""
+def generate_snippet_code(snippet_id: str, registry: SnippetRegistry, recursive: bool = False, active_domains=None) -> dict[str, str]:
+  """Return {snippet_id: generated_code} for snippet and optionally its dependencies.
+
+  active_domains (constitution B9): which domains' /generate prompt
+  fragments to include. None = all (back-compat), [] = core-only,
+  [...] = those. Plumbed from the active vault's forge.toml.
+  """
   results: dict[str, str] = {}
-  _generate(snippet_id, registry, recursive, results, visited=set())
+  _generate(snippet_id, registry, recursive, results, visited=set(),
+            active_domains=active_domains)
   return results
 
 
-def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, results: dict[str, str], visited: set[str]) -> None:
+def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, results: dict[str, str], visited: set[str], active_domains=None) -> None:
   if snippet_id in visited:
     return
   visited.add(snippet_id)
@@ -64,7 +70,8 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
 
   if recursive:
     for dep_id in deps:
-      _generate(dep_id, registry, recursive, results, visited)
+      _generate(dep_id, registry, recursive, results, visited,
+                active_domains=active_domains)
 
   import logging
   import time
@@ -72,7 +79,13 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
   start = time.perf_counter()
 
   prompt = _build_prompt(snippet_id, meta, body, deps, registry if recursive else None)
-  cache_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+  # Fold the active-domain scope into the cache key: the system prompt
+  # now varies by domain (B9), so the same user prompt under different
+  # domain scopes must not share a cached generation.
+  _dom_key = "*" if active_domains is None else ",".join(sorted(active_domains))
+  cache_key = hashlib.sha256(
+    (prompt + "\x00domains=" + _dom_key).encode("utf-8")
+  ).hexdigest()
 
   # Diagnostic short-hashes to help spot what changed between runs. eng/py
   # show whether the user's input/output drifted; key reflects the full prompt.
@@ -90,7 +103,7 @@ def _generate(snippet_id: str, registry: SnippetRegistry, recursive: bool, resul
     results[snippet_id] = cached
     return
 
-  code = _call_llm(snippet_id, prompt)
+  code = _call_llm(snippet_id, prompt, active_domains=active_domains)
   _GENERATION_CACHE[cache_key] = code
   results[snippet_id] = code
   elapsed_ms = (time.perf_counter() - start) * 1000
@@ -209,12 +222,12 @@ def _build_prompt(snippet_id, meta, body, deps, registry):
   return "\n".join(lines)
 
 
-def _call_llm(snippet_id, prompt):
+def _call_llm(snippet_id, prompt, active_domains=None):
   client = _get_client()
   message = client.messages.create(
     model="claude-sonnet-4-6",
     max_tokens=8192,
-    system=build_system_prompt(),
+    system=build_system_prompt(active_domains),
     messages=[{"role": "user", "content": prompt}],
   )
   if message.stop_reason == "max_tokens":

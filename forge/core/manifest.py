@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 import tomli_w
 from packaging.version import Version, InvalidVersion
 from forge.installer.exceptions import ValidationError
@@ -27,6 +27,12 @@ class Manifest:
   version: str
   description: str
   dependencies: List[Dependency] = field(default_factory=list)
+  # Domain scoping (constitution B9). None = field absent in forge.toml
+  # → interpret as "all registered domains" (back-compat for vaults
+  # authored before the field existed; load-time warning). [] = explicit
+  # opt-out (core-only: base globals + base prompt only). ["moda", ...] =
+  # exactly those domains' injected globals + prompt fragments.
+  domains: Optional[List[str]] = None
 
 
 def read_manifest(vault_dir: Path) -> Manifest:
@@ -78,11 +84,21 @@ def _from_dict(raw: dict) -> Manifest:
       raise ValidationError(f"dependencies[{i}] missing 'name' or 'version'")
     deps.append(Dependency(name=entry["name"], version=entry["version"]))
 
+  # `domains`: absent → None ("all", back-compat); present → must be a
+  # list of strings (possibly empty, meaning core-only).
+  domains_raw = raw.get("domains", None)
+  if domains_raw is not None:
+    if not isinstance(domains_raw, list) or not all(
+      isinstance(d, str) for d in domains_raw
+    ):
+      raise ValidationError("'domains' must be a list of strings")
+
   m = Manifest(
     name=raw["name"],
     version=raw["version"],
     description=raw["description"],
     dependencies=deps,
+    domains=domains_raw,
   )
   _validate(m)
   return m
@@ -96,6 +112,8 @@ def _to_dict(manifest: Manifest) -> dict:
   }
   if manifest.dependencies:
     out["dependencies"] = [{"name": d.name, "version": d.version} for d in manifest.dependencies]
+  if manifest.domains is not None:
+    out["domains"] = list(manifest.domains)
   return out
 
 

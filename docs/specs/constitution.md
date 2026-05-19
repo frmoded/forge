@@ -166,24 +166,43 @@ English from current Python via a one-shot LLM call (the inverse
 direction of B5). Round-trip regeneration is not automatic; mode-flips
 and sync are explicit user gestures, never side effects of edits.
 
-**B9.** *Snippet execution namespace.* The runtime sandbox blocks
-`import` statements; snippets cannot pull in modules at compute time.
-Instead, the engine pre-injects a fixed set of names as globals into
-each snippet's execution namespace. The base set includes `random`,
-`math`, and `numpy`. Domain layers extend the injected set by
-registering additional names through the engine's domain hooks (e.g.,
-music21 modules and helpers for music; `Particle` and `ParticleState`
-dataclasses for moda). The `/generate` system prompt and its
-domain-specific fragments document which names are available; the LLM
-is instructed to use them directly without writing import statements.
+**B9.** *Snippet execution namespace and declared domains.* The
+runtime sandbox blocks `import` statements; snippets cannot pull in
+modules at compute time. Instead, the engine pre-injects a fixed set
+of names as globals into each snippet's execution namespace. The base
+set — always injected regardless of domain — includes `random`,
+`math`, and `numpy`. Domain layers register additional names and
+`/generate` prompt fragments under a domain key (e.g. `music`:
+music21 modules + composition helpers; `moda`: `Particle` /
+`ParticleState`).
 
-A consequence: snippets that reference domain-injected names are
-implicitly version-coupled to an engine that provides them. This
-coupling is part of the platform contract but is not currently
-expressed in vault manifests — a vault that uses `Particle` will fail
-on an engine that doesn't inject it. Worth surfacing in
-`forge.toml` (as a declared engine-feature dependency) once more than
-one engine version is in circulation.
+A vault **declares the engine domains it relies on** via
+`domains = ["..."]` in `forge.toml`. The engine injects a domain's
+globals, and includes its `/generate` prompt fragment, **only for
+vaults that declare that domain**:
+
+- field present with values → exactly those domains' globals +
+  fragments;
+- field present but empty (`domains = []`) → core-only: just the
+  base globals and the base prompt, no domain extensions;
+- field absent → **all registered domains** (back-compat for vaults
+  authored before the field; the engine logs a one-line load-time
+  warning encouraging an explicit declaration).
+
+The declared dependency is the contract: a vault that uses a
+domain-injected name (e.g. `Particle`) without declaring the
+corresponding domain fails at compute time with a `NameError`, and
+its `/generate` prompt will not carry that domain's guidance. The
+implicit version-coupling this clause previously only flagged is now
+explicit and declared.
+
+Cross-vault calls are **permissive** in v1: a `context.compute` into
+another vault is not blocked at resolve time even if the calling
+vault doesn't declare that callee's domain. The active vault's
+declared domains govern the whole execution including nested calls;
+per-callee-vault re-scoping is a recoverable future refinement, not a
+v1 guarantee. `forge-core`'s built-in vault is domain-neutral and
+available regardless of declared domains.
 
 ## Data snippets
 

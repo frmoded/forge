@@ -50,6 +50,35 @@ try:
 except ImportError:
   _FORGE_MODA_NAMES = {}
 
+# Domain-scoped global injection (constitution B9 / domain-scoping).
+# Each domain's pre-injected names register under its domain key,
+# mirroring the prompt-fragment registry. The base names (random,
+# math, numpy) are always injected regardless of declared domains;
+# only these domain bundles are gated.
+_DOMAIN_GLOBALS = {
+  "music": {**_MUSIC21_NAMES, **_FORGE_MUSIC_LIB_NAMES},
+  "moda": _FORGE_MODA_NAMES,
+}
+
+
+def _domain_globals_for(domains):
+  """Return the merged domain-global dict for the active domains.
+
+  domains is None  -> all registered domains (back-compat: vault did
+                       not declare `domains` in forge.toml).
+  domains is []    -> {} (core-only: just the base names).
+  domains is [...] -> only those domains' bundles.
+  """
+  if domains is None:
+    selected = _DOMAIN_GLOBALS.values()
+  else:
+    allow = set(domains)
+    selected = (v for k, v in _DOMAIN_GLOBALS.items() if k in allow)
+  merged = {}
+  for bundle in selected:
+    merged.update(bundle)
+  return merged
+
 _PYTHON_HEADING = re.compile(r'^#{1,6}\s+python\s*$', re.IGNORECASE)
 
 _NO_FROZEN_SNAPSHOT = object()
@@ -65,7 +94,8 @@ class ForgeContext:
   """Passed as the `context` argument to run(context). Carries session state and
   allows snippets to call other snippets."""
 
-  def __init__(self, resolver, inputs, vault_path=None, registry=None, caller_id=None):
+  def __init__(self, resolver, inputs, vault_path=None, registry=None,
+               caller_id=None, domains=None):
     self._resolver = resolver
     self._inputs = inputs
     self.vault_path = vault_path
@@ -74,6 +104,12 @@ class ForgeContext:
     # any edges captured by context.compute calls from this scope. None at the
     # top level (no enclosing snippet — no edges to capture).
     self._caller_id = caller_id
+    # Active domain scope (constitution B9). The request's vault domains
+    # govern the whole execution, including nested context.compute calls
+    # (v1 permissive: cross-vault calls are not blocked at resolve time;
+    # per-callee-vault re-scoping is a documented follow-up). None = all
+    # domains (back-compat), [] = core-only, [...] = those domains.
+    self._domains = domains
 
   def get(self, key, default=None):
     return self._inputs.get(key, default)
@@ -108,6 +144,7 @@ class ForgeContext:
         registry=self.registry,
         trusted=nested_trusted,
         snippet_id=snippet["snippet_id"],
+        domains=self._domains,
       )
       if nested_stdout:
         sys.stdout.write(nested_stdout)
@@ -400,15 +437,18 @@ def extract_python(body):
   return "\n".join(code_lines).strip() or None
 
 
-def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None):
+def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None, domains=None):
   buf = io.StringIO()
   context = ForgeContext(resolver, inputs, vault_path=vault_path,
-                         registry=registry, caller_id=snippet_id)
+                         registry=registry, caller_id=snippet_id,
+                         domains=domains)
   # Per constitution B2, snippets get full Python power. The `trusted`
   # parameter is preserved for future use (e.g., distinguishing builtin from
   # vault snippets in some other capacity) but no longer controls builtins
   # exposure.
   del trusted
+  # Base names are always injected; domain bundles (music21/helpers,
+  # moda types) are gated by the vault's declared `domains` (B9).
   local_ns = {
     **inputs,
     "inputs": inputs,
@@ -416,9 +456,7 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
     "random": random,
     "math": math,
     "numpy": numpy,
-    **_MUSIC21_NAMES,
-    **_FORGE_MUSIC_LIB_NAMES,
-    **_FORGE_MODA_NAMES,
+    **_domain_globals_for(domains),
   }
   old_stdout = sys.stdout
   sys.stdout = buf

@@ -311,4 +311,4 @@ the composition-helper layer):
   use plain text ("the song", "the chorus") without the `[[]]`."""
 
 
-register_fragment(MUSIC_PROMPT_FRAGMENT)
+register_fragment("music", MUSIC_PROMPT_FRAGMENT)

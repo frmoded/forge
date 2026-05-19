@@ -5,16 +5,16 @@ final assembled prompt. Domain-specific guidance (music, future arch / moda /
 …) lives in per-domain modules that call register_fragment(...) at import
 time.
 
-For v1, every registered fragment is included unconditionally. Future scope-
-aware filtering (e.g., only include music when a music vault is in scope) is
-a non-breaking extension of build_system_prompt.
+Fragments are keyed by domain name. build_system_prompt(active_domains)
+filters which domains' fragments are included (constitution B9 /
+domain-scoping): None = all (back-compat for vaults that don't declare
+`domains` in forge.toml), [] = none (core-only), [...] = exactly those.
 
 Future expansions:
   forge.arch.llm_prompt   # IFC / building output guidance, when that lands
-  forge.moda.llm_prompt   # whatever modal-domain ends up meaning
 """
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 BASE_SYSTEM_PROMPT = """You are a code generator for the Forge snippet system.
 
@@ -52,32 +52,50 @@ Data snippet return contract:
 Output ONLY valid Python code. No markdown fences, no explanation, no comments."""
 
 
-_fragments: List[str] = []
+# domain name -> fragment text. Insertion order preserved (py3.7+ dict)
+# so the assembled prompt is stable across runs.
+_fragments: Dict[str, str] = {}
 
 
-def register_fragment(fragment: str) -> None:
-  """Register a domain-specific block to be appended to the system prompt.
+def register_fragment(domain: str, fragment: str) -> None:
+  """Register a domain-specific prompt block under `domain`.
 
-  Idempotent: a fragment registered twice is included once. Domain modules
-  call this at import time.
+  Domain modules call this at import time, e.g.
+  register_fragment("moda", MODA_PROMPT_FRAGMENT). Idempotent per
+  domain: re-registering the same domain replaces its text (a module
+  re-import on uvicorn --reload is a no-op rather than a duplicate).
   """
-  cleaned = fragment.strip()
-  if cleaned and cleaned not in _fragments:
-    _fragments.append(cleaned)
+  cleaned = (fragment or "").strip()
+  if domain and cleaned:
+    _fragments[domain] = cleaned
 
 
 def build_system_prompt(active_domains: Optional[List[str]] = None) -> str:
-  """Assemble the final system prompt as base + every registered fragment.
+  """Assemble the system prompt: base + the active domains' fragments.
 
-  `active_domains` is reserved for future scope-aware filtering and ignored
-  for v1.
+  active_domains:
+    None  -> include ALL registered fragments (back-compat: vault did
+             not declare `domains` in forge.toml).
+    []    -> include NO domain fragments (core-only mode).
+    [...] -> include only fragments whose domain is in the list, in
+             registration order.
   """
-  del active_domains  # not used yet
   parts = [BASE_SYSTEM_PROMPT.rstrip()]
-  parts.extend(_fragments)
+  if active_domains is None:
+    parts.extend(_fragments.values())
+  else:
+    allow = set(active_domains)
+    parts.extend(
+      text for dom, text in _fragments.items() if dom in allow
+    )
   return "\n\n".join(parts) + "\n"
 
 
 def registered_fragments() -> List[str]:
-  """Read-only view, useful for tests."""
-  return list(_fragments)
+  """Read-only list of fragment texts (registration order). For tests."""
+  return list(_fragments.values())
+
+
+def registered_domains() -> List[str]:
+  """Read-only list of registered domain names. For tests / diagnostics."""
+  return list(_fragments.keys())

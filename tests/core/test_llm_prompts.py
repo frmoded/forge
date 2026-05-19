@@ -58,12 +58,38 @@ def test_assembled_prompt_contains_base_and_music():
   assert "MusicXML" in prompt or "music21.stream.Stream" in prompt
 
 
-def test_register_fragment_is_idempotent():
+def test_register_fragment_is_per_domain_idempotent():
+  """register_fragment(domain, text) keys by domain: registering the
+  same domain twice (a uvicorn --reload re-import, or a text tweak)
+  replaces rather than appends — count stays stable per domain."""
   before = len(registered_fragments())
-  register_fragment("Test fragment for idempotency.")
-  register_fragment("Test fragment for idempotency.")
+  register_fragment("test-domain", "Fragment v1.")
+  mid = len(registered_fragments())
+  register_fragment("test-domain", "Fragment v2 (replaces v1).")
   after = len(registered_fragments())
-  assert after - before == 1
+  assert mid - before == 1
+  assert after - before == 1  # second call replaced, didn't add
+
+
+def test_build_system_prompt_filters_by_active_domains():
+  import forge.core.llm  # noqa: F401  (ensure music + moda registered)
+  # None -> all domain fragments present
+  all_prompt = build_system_prompt(None)
+  assert "music21" in all_prompt
+  assert "ParticleState" in all_prompt
+  # [] -> base only, no domain fragments
+  base_only = build_system_prompt([])
+  assert "code generator for the Forge snippet system" in base_only
+  assert "music21" not in base_only
+  assert "ParticleState" not in base_only
+  # ["moda"] -> moda yes, music no
+  moda_only = build_system_prompt(["moda"])
+  assert "ParticleState" in moda_only
+  assert "music21" not in moda_only
+  # ["music"] -> music yes, moda no
+  music_only = build_system_prompt(["music"])
+  assert "music21" in music_only
+  assert "ParticleState" not in music_only
 
 
 def test_assembled_prompt_is_non_empty():
