@@ -138,6 +138,80 @@ class ForgeContext:
     body = _strip_code_fence(snap["body"])
     return deserialize_from_wire(content_type, body)
 
+  def read_snapshot(self):
+    """Read the most recent snapshot THIS snippet produced. Returns the
+    deserialized value, or None if there is none.
+
+    Self-only — no callee_id argument (deferred per forge-core until a
+    non-moda use case justifies it).
+
+    Semantics (constitution C8 + the option-(A) limitation). Forge
+    captures snapshots per *edge* (caller -> callee), keyed by the
+    callee. Entry-point snippets such as moda `go` are never a callee
+    — nothing calls `context.compute("go")` — so a "snapshot of go as
+    seen by a caller" is never written. What IS persisted is go's own
+    *outbound* edge directory `.forge/edges/<self_id>/`, holding one
+    snapshot per snippet `go` called. This returns the latest of
+    those. For a pass-through snippet whose return value equals its
+    terminal callee's return (moda `go`), that is exactly "go's last
+    output". For a snippet that post-processes state before returning,
+    it would be the last sub-call's output and would lag the true
+    return by that post-processing — a known, bounded limitation the
+    snippet's English facet MUST declare (C8).
+
+    Independent of freeze (F1-F9): reads the stored snapshot whatever
+    the edge state.
+
+    `captured_at` has 1-second resolution, so several snapshots written
+    inside one invocation tie. Ties break by file mtime (last write
+    wins) so the terminal callee — written last in the pipeline,
+    i.e. the pass-through snippet's return — is the one returned.
+    """
+    if self._caller_id is None or self.vault_path is None:
+      return None
+    import os
+    from forge.core.snippet_registry import parse_frontmatter
+    from forge.core.serialization import deserialize_from_wire
+
+    root = os.path.join(self.vault_path, ".forge", "edges", self._caller_id)
+    if not os.path.isdir(root):
+      return None
+
+    # Collect every parseable snapshot under this snippet's outbound
+    # directory, then deserialize from newest down until one succeeds.
+    # Malformed files are skipped per the best-effort snapshot contract.
+    candidates = []  # (captured_at, mtime, content_type, body)
+    for dirpath, _dirs, files in os.walk(root):
+      for fn in files:
+        if not fn.endswith(".md"):
+          continue
+        path = os.path.join(dirpath, fn)
+        try:
+          with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+          meta, body = parse_frontmatter(content)
+          if meta.get("type") != "snapshot":
+            continue
+          content_type = meta.get("content_type")
+          if not content_type:
+            continue
+          candidates.append((
+            meta.get("captured_at") or "",
+            os.path.getmtime(path),
+            content_type,
+            body,
+          ))
+        except Exception:
+          continue  # unreadable / malformed frontmatter — skip
+
+    candidates.sort(key=lambda c: (c[0], c[1]))
+    for _captured_at, _mtime, content_type, body in reversed(candidates):
+      try:
+        return deserialize_from_wire(content_type, _strip_code_fence(body))
+      except Exception:
+        continue  # malformed body — fall through to the next-newest
+    return None
+
   def _capture_edge(self, callee_snippet, value):
     """Write a snapshot for the (caller, callee) edge per A7. Skipped when:
     - There's no enclosing snippet (top-level /compute — no edge exists).

@@ -175,7 +175,36 @@ Hard rules
   dispatch: they `context.compute(...)` peer blocks and thread the
   returned `ParticleState`. They contain no per-particle math
   themselves; the action/property blocks they call own the masks and
-  the numpy work."""
+  the numpy work.
+
+History-dependent snippets (constitution C8)
+- Only when the English facet explicitly declares history-dependency
+  (it mentions `context.read_snapshot()`, "prior snapshot",
+  "accumulate across invocations", or a C8 opt-out). Most blocks are
+  NOT history-dependent — leave them pure.
+- For such a snippet the Python facet must:
+  (a) accept the accumulated input with a default, e.g.
+      `def compute(context, state=None, dt=1/30, temperature="medium")`;
+  (b) when `state` is missing — treat `None` AND `""` as missing,
+      since the compute UI may pass an empty string for an omitted
+      optional input — first try `state = context.read_snapshot()`;
+  (c) if that returns `None`, fall back to a sensible initial state,
+      usually a `sample_state` data snippet via
+      `context.compute("sample_state")`;
+  (d) then run the normal per-tick body and return.
+- Mirror the English's resolution order exactly. Explicit input wins
+  over snapshot wins over sample fallback. Example shape:
+      def compute(context, state=None, dt=1/30, temperature="medium"):
+          if state is None or state == "":
+              state = context.read_snapshot()
+              if state is None:
+                  state = context.compute("sample_state")
+          state = context.compute("ask_all_particles", state=state, dt=dt)
+          state = context.compute("ask_water_particles", state=state, temperature=temperature)
+          return state
+- `context.read_snapshot()` takes no arguments (self-only) and is
+  independent of freeze. Do NOT invent a snippet to fetch prior
+  state; the helper is built in."""
 
 
 register_fragment(MODA_PROMPT_FRAGMENT)

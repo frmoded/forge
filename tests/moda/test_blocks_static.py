@@ -29,7 +29,10 @@ SPEC = {
     "set_ink_speed": ([], {"speed_for_temperature"}, True),
     "set_ink_mass": ([], set(), True),
     # go chain
-    "go": (["dt", "temperature"], {"ask_all_particles", "ask_water_particles"}, False),
+    # go is now history-dependent (C8): optional state/dt/temperature,
+    # and it falls back through context.read_snapshot() →
+    # context.compute("sample_state"), so sample_state joins its peers.
+    "go": (["dt", "temperature"], {"sample_state", "ask_all_particles", "ask_water_particles"}, False),
     "ask_all_particles": (["dt"], {"move", "if_wall_then_bounce", "interact"}, False),
     "move": (["dt"], set(), True),
     "interact": ([], {"if_particle_then_bounce"}, True),

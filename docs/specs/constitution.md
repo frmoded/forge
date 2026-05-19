@@ -375,6 +375,33 @@ codec (see [`wire-format.md`](./wire-format.md)) rather than reshape
 the return value to fit. Domain return types are first-class once
 their wire encoding lands.
 
+**C8.** Snippets that depend on execution history — by reading their
+own prior snapshots, accumulating state across invocations, or any
+mechanism beyond their declared inputs — opt out of the
+reproducibility and purity discipline of C1. This is intentional and
+valuable for exploratory or iterative work (simulation steppers,
+conversational state, iterative refinement) but means the snippet is
+no longer a pure function: repeated calls with identical inputs may
+return different values because history is part of the computation.
+Use deliberately. Document the history-dependency in the English
+facet so future readers — and the LLM during regeneration — know
+the snippet's output depends on more than its declared inputs.
+
+The concrete runtime mechanism is `context.read_snapshot()`: it
+returns the latest snapshot this snippet itself produced (a scan of
+the snippet's own outbound edge directory,
+`<vault>/.forge/edges/<self_id>/`), or `None` if none exists. It is
+a read-only runtime helper and is **independent of edge freezing
+(F1–F9)** — it returns the stored snapshot whatever the edge state,
+and never writes. Self-only by deliberate scope: it takes no
+callee argument (reading *other* snippets' snapshots is deferred
+until a non-moda use case justifies it). Because Forge captures
+snapshots per *edge* keyed by the callee, an entry-point snippet
+(never a callee) reads its *outbound* captures; for a pass-through
+snippet whose return equals its terminal callee's return this is
+exactly "my last output", and a snippet that post-processes before
+returning must account for the one-tick lag in its English facet.
+
 ## Current implementation choices
 
 **I1.** Python is the realization language for action snippets.
