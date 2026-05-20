@@ -71,6 +71,32 @@ this order; qualified references (`vault/snippet`) dispatch directly.
 **A5.** Vaults are distributed via per-vault GitHub repositories, with
 tagged tarballs and SHA-256 integrity verification at install time.
 
+**A5.1.** *Library-vault subdirectory convention.* When the installer
+fetches a library vault into a user's vault, it places it at
+`<user-vault>/<library-name>/` — the subdirectory name matches the
+library's manifest `name`. The engine treats any top-level
+subdirectory of a vault that contains its own `forge.toml` as a
+library vault, indexes its snippets under the library's namespace,
+and walks them in the parent vault's declared `dependencies` order
+when resolving bare references (per A4). This is a fixed convention,
+not user-configurable: renaming the subdirectory breaks resolution
+because the engine looks up the library by directory name + manifest.
+Shadow files (a same-bare-id snippet at the user-vault root) override
+the library version by A4 order; deleting the shadow restores the
+library version with no copy needed.
+
+**A5.2.** *Role tagging on library snippets.* Library snippets carry
+an optional `role: root | leaf` frontmatter field that the installer
+consumes at install-time, not at view-time or compute-time. `root`
+marks a snippet that the installer should copy to the user-vault root
+as the user's editable entry point (e.g. `setup`, `go`, an event
+handler); `leaf` marks a library-internal snippet that stays in the
+subdirectory and only becomes user-editable if the user explicitly
+customizes it (creating a shadow). Snippets without a role field
+default to library-internal behavior (no auto-copy). The engine does
+not consult `role` for resolution — A4 alone determines which copy
+wins. `role` is purely an installer affordance.
+
 **A6.** The plugin renders structured output values by their tagged
 shape (`{type, content}`). Current formats: `musicxml` (rendered via
 Verovio inline). Future formats added as needed.
