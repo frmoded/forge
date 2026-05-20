@@ -187,6 +187,12 @@ Threaded-data carve-out (pairs-threading pattern)
   treat it as a BLACK-BOX input: never recompute it, never fetch it
   via context.compute, never re-derive its predicate. Pass it
   through to downstream calls unchanged.
+- Empty-pairs check: the canonical empty-check on an (M, 2) numpy
+  array is `pairs.shape[0] == 0`. Do NOT use `len(pairs[0]) == 0` —
+  that indexes the first row, which raises IndexError when the array
+  has zero rows. Do NOT use `len(pairs) == 0` either — `len` on a 2-D
+  ndarray returns the first-axis size which works, but `shape[0]` is
+  the idiomatic numpy check we standardize on.
 - The English body of such a snippet will be intentionally minimal
   (one conditional or one action) — the shape and provenance of the
   threaded array live in `generation_notes` or in the upstream
