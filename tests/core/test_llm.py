@@ -31,6 +31,35 @@ def test_build_prompt_omits_generation_notes_when_absent():
   assert "Generation notes" not in prompt
 
 
+# Canonicalize system-prompt composition — the /canonicalize endpoint
+# threads active_domains so the domain's English style overrides the
+# default narrative-prose voice.
+from forge.core.llm import _build_canonicalize_system_prompt, _CANONICALIZE_SYSTEM_PROMPT
+
+
+def test_canonicalize_prompt_no_domains_uses_base():
+  assert _build_canonicalize_system_prompt(None) is _CANONICALIZE_SYSTEM_PROMPT
+  assert _build_canonicalize_system_prompt([]) is _CANONICALIZE_SYSTEM_PROMPT
+
+
+def test_canonicalize_prompt_moda_appends_procedural_style_override():
+  out = _build_canonicalize_system_prompt(["moda"])
+  assert out.startswith(_CANONICALIZE_SYSTEM_PROMPT)
+  # Moda override teaches the procedural-line shape.
+  assert "Moda block-style override" in out
+  assert "procedural-line style" in out
+  assert "Inputs:" in out
+  assert "[[wikilinks]]" in out         # body should NOT have them
+  assert "generation_notes" in out      # directives belong there, not in body
+
+
+def test_canonicalize_prompt_unknown_domain_silently_ignored():
+  # Domain we don't have a canonicalize override for falls through
+  # to the base voice rather than raising.
+  out = _build_canonicalize_system_prompt(["future-domain-no-override"])
+  assert out is _CANONICALIZE_SYSTEM_PROMPT
+
+
 def test_find_deps_picks_up_real_wikilinks():
   body = "See also [[chorus]] and [[song]]."
   assert _find_deps(body) == ["chorus", "song"]

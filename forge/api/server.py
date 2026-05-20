@@ -245,7 +245,10 @@ def canonicalize(req: CanonicalizeRequest, manager: VaultSessionManager = Depend
   if state is None:
     raise HTTPException(status_code=400, detail="vault not connected — call /connect first")
   try:
-    english = canonicalize_python(req.snippet_id, state["registry"])
+    english = canonicalize_python(
+      req.snippet_id, state["registry"],
+      active_domains=state.get("domains"),
+    )
   except KeyError as e:
     raise HTTPException(status_code=404, detail=str(e))
   except ValueError as e:

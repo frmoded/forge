@@ -139,10 +139,67 @@ Style:
 Output ONLY the English text. No surrounding fences, no commentary."""
 
 
-def canonicalize_python(snippet_id: str, registry: SnippetRegistry) -> str:
+# Domain-specific canonicalize voices. Composed onto the base system
+# prompt when the vault's declared domains include the matching key.
+# Each entry OVERRIDES the base "narrative prose" style — moda's
+# Unit-1 block style is procedural-line, not paragraph-of-prose.
+_CANONICALIZE_DOMAIN_OVERRIDES: dict[str, str] = {
+  "moda": (
+    "Moda block-style override (forge-moda Unit-1):\n"
+    "When canonicalizing a moda block snippet, write the English in "
+    "the procedural-line style — NOT the default narrative prose.\n"
+    "Shape:\n"
+    "1. First line: `Inputs: <comma-separated non-ambient inputs>` "
+    "or `Inputs: None`. Do NOT declare `state` in the Inputs line "
+    "even when the Python facet takes `state` explicitly — `state` "
+    "is implicit on the English side.\n"
+    "2. Blank line.\n"
+    "3. One procedural line per `context.compute(...)` call in the "
+    "Python, in order. Format each as `Call <snippet> with <args>.` "
+    "(`with` clause only when there are non-state args), or "
+    "`If <cond>: call <snippet>.`, or `Set the current particle's "
+    "<prop> to <value>.` for action blocks. NO `Steps:` header, NO "
+    "numbered list, NO `[[wikilinks]]` in the body (the # Dependencies "
+    "block carries the dep graph), NO backticks around bare "
+    "identifiers in the procedural lines.\n"
+    "4. Optional trailing prose: short paragraphs documenting "
+    "behavior (origin role, history-dependence, mask scope, "
+    "rationale). Strip implementation directives, type/shape "
+    "annotations, and 'do not X' clauses — those belong in the "
+    "frontmatter's `generation_notes`, not the English body.\n"
+    "When in doubt, look at the existing forge-moda snippets' English "
+    "facets as the canonical shape (e.g. setup, on_mouse_click, "
+    "go, ask_water_particles)."
+  ),
+}
+
+
+def _build_canonicalize_system_prompt(active_domains) -> str:
+  """Compose the canonicalize system prompt with any domain overrides
+  the vault has declared. None = no overrides (back-compat), [] =
+  none active, [...] = compose listed-domain overrides in declaration
+  order. Domains we don't recognize are ignored silently."""
+  if not active_domains:
+    return _CANONICALIZE_SYSTEM_PROMPT
+  overrides = [
+    _CANONICALIZE_DOMAIN_OVERRIDES[d]
+    for d in active_domains
+    if d in _CANONICALIZE_DOMAIN_OVERRIDES
+  ]
+  if not overrides:
+    return _CANONICALIZE_SYSTEM_PROMPT
+  return _CANONICALIZE_SYSTEM_PROMPT + "\n\n" + "\n\n".join(overrides)
+
+
+def canonicalize_python(snippet_id: str, registry: SnippetRegistry, active_domains=None) -> str:
   """Reverse direction: given a snippet's current python facet, ask the LLM
   for a canonical English description. Returned text is plain prose, ready
-  to be written into the snippet's `# English` section by the caller."""
+  to be written into the snippet's `# English` section by the caller.
+
+  active_domains threads in the vault's declared domain scope so the
+  canonicalize voice matches the domain's English convention (e.g. moda's
+  procedural-line style) — without it, /canonicalize produces narrative
+  prose that contradicts the domain's authoring discipline."""
   snippet = registry.get(snippet_id)
   if snippet is None:
     raise KeyError(f"snippet '{snippet_id}' not found")
@@ -178,10 +235,11 @@ def canonicalize_python(snippet_id: str, registry: SnippetRegistry) -> str:
   log = logging.getLogger(__name__)
   start = time.perf_counter()
   client = _get_client()
+  system_prompt = _build_canonicalize_system_prompt(active_domains)
   message = client.messages.create(
     model="claude-sonnet-4-6",
     max_tokens=2048,
-    system=_CANONICALIZE_SYSTEM_PROMPT,
+    system=system_prompt,
     messages=[{"role": "user", "content": prompt}],
   )
   elapsed_ms = (time.perf_counter() - start) * 1000
