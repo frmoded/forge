@@ -181,6 +181,59 @@ Worked examples
       state = context.compute("if_temp_zero_set_speed", state=state, temperature=temperature)
       return state
 
+Threaded-data carve-out (pairs-threading pattern)
+- When a snippet declares a non-state input that holds data already
+  computed by an upstream peer (e.g. `pairs`, `mask`, `indices`),
+  treat it as a BLACK-BOX input: never recompute it, never fetch it
+  via context.compute, never re-derive its predicate. Pass it
+  through to downstream calls unchanged.
+- The English body of such a snippet will be intentionally minimal
+  (one conditional or one action) — the shape and provenance of the
+  threaded array live in `generation_notes` or in the upstream
+  snippet's frontmatter, not in this snippet's English.
+- Worked example for the control block in the pairs-threading chain:
+    English (if_particle_then_bounce):
+      Inputs: None
+
+      If the current particle is colliding with the other particle:
+      Call bounce_off_particle.
+    Frontmatter inputs declares `pairs`; the generated signature
+    carries it. The body says nothing about (M,2) shape or the
+    collision predicate — that's already done upstream.
+    Generated Python:
+      def compute(context, state, pairs):
+          if pairs.shape[0] == 0:
+              return state
+          return context.compute("bounce_off_particle", state=state, pairs=pairs)
+- Worked example for the action block in the same chain:
+    English (bounce_off_particle):
+      Inputs: None
+
+      Swap headings between the current particle and the other particle.
+
+      Speed is unchanged, so kinetic energy is conserved exactly.
+    Frontmatter inputs declares `pairs`; generation_notes describes
+    the shape and the pre-swap snapshot requirement. The body's
+    physics rationale stays — that's human-readable, not
+    machine-targeted.
+    Generated Python:
+      def compute(context, state, pairs):
+          if pairs.shape[0] == 0:
+              return state
+          i = pairs[:, 0]
+          j = pairs[:, 1]
+          headings = state.headings.copy()
+          # Snapshot first, then assign — both sides read pre-swap.
+          hi = state.headings[i]
+          hj = state.headings[j]
+          headings[i] = hj
+          headings[j] = hi
+          return ParticleState(
+              tick=state.tick, ids=state.ids, types=state.types,
+              xs=state.xs, ys=state.ys, headings=headings,
+              speeds=state.speeds, masses=state.masses,
+              width=state.width, height=state.height)
+
 Hard rules
 - NO Python `for` loops over particles or pairs. Use numpy
   broadcasting and fancy indexing. Even at N=200 the vectorization

@@ -199,6 +199,15 @@ def _build_prompt(snippet_id, meta, body, deps, registry):
   description = meta.get("description", "").strip()
   inputs = meta.get("inputs") or []
   english = extract_section(body, "english") or ""
+  # generation_notes is an author-supplied frontmatter field that
+  # carries machine-targeted authoring hints (shapes, dispatch
+  # contracts, "do not recompute X" directives) that don't belong in
+  # the human-readable English body but the LLM still needs. The
+  # plugin/runtime ignores this field; /generate is the only consumer.
+  # See constitution B5 (frontmatter is part of the snippet's spec)
+  # and the moda-domain prompt fragment for guidance on when to use
+  # this vs. the fragment itself.
+  generation_notes = (meta.get("generation_notes") or "").strip()
 
   lines = [f'Generate Python code for the Forge snippet "{snippet_id}".']
   if description:
@@ -207,6 +216,8 @@ def _build_prompt(snippet_id, meta, body, deps, registry):
     lines.append(f"Inputs: {', '.join(str(i) for i in inputs)}")
   if english:
     lines.append(f"Behavior: {english}")
+  if generation_notes:
+    lines.append(f"Generation notes (machine-targeted authoring hints, not part of the English facet): {generation_notes}")
   if deps and registry:
     dep_lines = []
     for dep_id in deps:

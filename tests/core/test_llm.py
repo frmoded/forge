@@ -1,5 +1,34 @@
 """Tests for forge.core.llm helpers that don't need an actual LLM call."""
-from forge.core.llm import _find_deps
+from forge.core.llm import _find_deps, _build_prompt
+
+
+def test_build_prompt_includes_description_inputs_english():
+  meta = {"description": "Hello.", "inputs": ["x"]}
+  body = "# English\nReturn x.\n# Python\n"
+  prompt = _build_prompt("hello", meta, body, deps=[], registry=None)
+  assert "Description: Hello." in prompt
+  assert "Inputs: x" in prompt
+  assert "Behavior:" in prompt and "Return x." in prompt
+
+
+def test_build_prompt_passes_generation_notes_when_present():
+  meta = {
+    "description": "Block 15.",
+    "inputs": ["pairs"],
+    "generation_notes": "Pure dispatch. Do not recompute the predicate.",
+  }
+  body = "# English\nIf colliding: call bounce_off_particle.\n# Python\n"
+  prompt = _build_prompt("if_particle_then_bounce", meta, body,
+                         deps=[], registry=None)
+  assert "Generation notes" in prompt
+  assert "Do not recompute the predicate." in prompt
+
+
+def test_build_prompt_omits_generation_notes_when_absent():
+  meta = {"description": "Plain.", "inputs": []}
+  body = "# English\nDo a thing.\n"
+  prompt = _build_prompt("plain", meta, body, deps=[], registry=None)
+  assert "Generation notes" not in prompt
 
 
 def test_find_deps_picks_up_real_wikilinks():
