@@ -74,10 +74,17 @@ Composition rules
   `state.tick` through unchanged.
 
 Implicit-state convention (forge-moda Unit-1 block style)
-- The English facet is written in procedural per-particle style and
-  does NOT declare `state` in its `Inputs:` block. `Inputs:` lists
-  only non-ambient parameters (`temperature`, `dt`, `x`, `y`) or says
-  `Inputs: None`.
+- The English facet is written as plain procedural prose: an
+  `Inputs:` line, a blank, then unnumbered `Call <name> [with <args>]`
+  / `Set …` / `If …:` lines, one per row. No `Steps:` header, no
+  numbered list. Identifier backticks and `[[wikilinks]]` are dropped
+  — the Python facet and the auto-synced `# Dependencies` section
+  carry the graph. Trailing prose that documents behavior (origin
+  role, history-dependence, mask scope) stays; lines whose sole job
+  is reminding the reader about state-threading mechanics are gone.
+- `Inputs:` declares ONLY non-ambient parameters (`temperature`,
+  `dt`, `x`, `y`) or says `Inputs: None`. `state` is implicit on
+  the English side.
 - The generated Python facet ALWAYS takes `state` as the first
   argument after `context` — `def compute(context, state, ...)` —
   followed by exactly the non-ambient inputs the English declares, in
@@ -88,6 +95,13 @@ Implicit-state convention (forge-moda Unit-1 block style)
   `ParticleState` (zero-length arrays of the right dtypes, tick=0,
   the chamber's width/height) and threads THAT into its
   create/set calls. Every other block takes `state`.
+- Body lines translate to Python one-to-one:
+    Call create_ink_particles with x and y. -> state = context.compute("create_ink_particles", state=state, x=x, y=y)
+    Call set_ink_speed.                     -> state = context.compute("set_ink_speed", state=state)
+    Set the current particle's <prop>…      -> derive mask, copy field array, assign, return new ParticleState (see vectorized section below)
+  Each intra-snippet `Call …` line becomes one
+  `context.compute(...)` whose result is reassigned to `state`. The
+  final `return state` is required.
 - A block that threads an internally-computed array to a peer (the
   collision-pair array between `interact` -> `if_particle_then_bounce`
   -> `bounce_off_particle`) declares that array in its `inputs:`
@@ -133,8 +147,10 @@ Worked examples
 
   # Block 19 — set_speed_high. English (inside the water scope):
   #   Inputs: None
-  #   Steps: Set the current water particle's speed to the high speed
-  #          constant.
+  #
+  #   Set the current water particle's speed to the high speed
+  #   constant, obtained via speed_for_temperature with
+  #   temperature='high'.
   def compute(context, state):
       high = context.compute("speed_for_temperature", temperature='high')
       is_water = state.types == 'water'
@@ -148,9 +164,12 @@ Worked examples
 
   # Block 17 — ask_water_particles. English:
   #   Inputs: temperature
-  #   Steps: For each water particle in state: call
-  #          if_temp_high_set_speed / _medium / _low / _zero with
-  #          temperature.
+  #
+  #   For each water particle in state:
+  #   Call if_temp_high_set_speed with temperature.
+  #   Call if_temp_medium_set_speed with temperature.
+  #   Call if_temp_low_set_speed with temperature.
+  #   Call if_temp_zero_set_speed with temperature.
   # No loop: each callee is invoked once with the whole state and
   # threads the state forward. Each if_temp_* block no-ops unless its
   # temperature branch matches, and the set_speed_* it calls applies
