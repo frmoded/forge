@@ -421,6 +421,20 @@ snippet whose return equals its terminal callee's return this is
 exactly "my last output", and a snippet that post-processes before
 returning must account for the one-tick lag in its English facet.
 
+**C9.** *Vault-driven authoring affordances.* Vaults may ship data
+snippets (conventionally prefixed `_*.md` at the vault root or in
+installed domain subdirectories) that the plugin reads to surface
+domain-specific UI affordances. The plugin's UI shells — sidebar
+palettes, menus, modals — are domain-neutral; the content of these
+data snippets defines what's available. Examples: `_chips.md` defines
+a click-to-insert palette of procedural verbs surfaced in a sidebar
+chip pane; future conventions (`_templates.md`, `_examples.md`) may
+define other affordances. Authors shape the UI by editing markdown,
+not plugin code. The plugin reads these files on activate and on an
+explicit refresh — it does not file-watch them — so authors get
+predictable, palette-refresh-on-demand semantics rather than reactive
+churn.
+
 ## Current implementation choices
 
 **I1.** Python is the realization language for action snippets.
