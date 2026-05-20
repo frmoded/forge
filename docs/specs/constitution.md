@@ -138,6 +138,24 @@ decisions about which snippets to call are based on what's documented
 (English) and declared (signatures), not on what the snippets actually
 compute.
 
+**B5.1.** *`generation_notes` frontmatter field.* A snippet's
+frontmatter may carry a `generation_notes` field — a free-text block
+consumed by `/generate` as additional authoring context for that
+specific snippet. The field captures machine-targeted guidance (data
+shapes the LLM should expect, idiomatic patterns specific to the
+domain, carve-out semantics, edge cases) that would clutter the English
+facet if written there. The English facet stays human-readable; the
+machine-targeted hints live in `generation_notes`.
+
+`generation_notes` is part of the snippet's authoring contract with
+the LLM, not part of its public interface. It is visible to `/generate`
+only when authoring *that* snippet's Python facet; it is not exposed
+when the snippet appears in another snippet's authoring inventory (per
+B5). Consumers of the snippet see only its name, signature, and
+English facet (or `description` for data snippets) — implementation
+hints stay implementation-side. The runtime ignores the field; the
+plugin's rendered view does not display it prominently.
+
 **B6.** The Python produced by `/generate` is then static code. It
 does not re-invoke `/generate` at runtime. Runtime LLM calls inside
 Python are allowed and explicit, distinct from the `/generate`

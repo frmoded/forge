@@ -49,6 +49,19 @@ Data snippet return contract:
   Treating the return as a single value will produce a tuple in places
   that expect bytes — write the unpacking line.
 
+`generation_notes` frontmatter field:
+- Snippets may carry a `generation_notes` field in their frontmatter — a
+  free-text block holding machine-targeted guidance (data shapes,
+  idiomatic patterns, edge cases, carve-outs) that would clutter the
+  English facet. When generating Python for a snippet whose frontmatter
+  has this field, treat it as authoritative authoring context alongside
+  the English facet. The English facet stays human-readable; the notes
+  are how the author talks specifically to you.
+- `generation_notes` from OTHER snippets is NOT visible in your
+  authoring inventory — it's implementation-side, not part of the
+  callable interface. Treat peer snippets as black boxes characterized
+  by their name, signature, and English facet only.
+
 Output ONLY valid Python code. No markdown fences, no explanation, no comments."""
 
 
