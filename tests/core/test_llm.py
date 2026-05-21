@@ -47,10 +47,20 @@ def test_canonicalize_prompt_moda_appends_procedural_style_override():
   assert out.startswith(_CANONICALIZE_SYSTEM_PROMPT)
   # Moda override teaches the procedural-line shape.
   assert "Moda block-style override" in out
-  assert "procedural-line style" in out
+  # Anchor on phrases that are reliably on a single line in the
+  # override text (which has hard wraps embedded as \n).
+  assert "procedural-\nline shape" in out or "procedural-line shape" in out
+  # Inputs line is MANDATORY in the moda voice.
   assert "Inputs:" in out
-  assert "[[wikilinks]]" in out         # body should NOT have them
-  assert "generation_notes" in out      # directives belong there, not in body
+  assert "MANDATORY" in out
+  # The state-resolution prelude becomes trailing prose, NOT a
+  # procedural line — this is the key shape correction.
+  assert "History-dependent per C8" in out
+  # No-wikilinks-in-body / no-implementation-directives constraints.
+  assert "[[wikilinks]]" in out
+  assert "generation_notes" in out
+  # Reference shape (concrete go.md example) anchors the LLM.
+  assert "Call ask_all_particles with dt" in out
 
 
 def test_canonicalize_prompt_unknown_domain_silently_ignored():
