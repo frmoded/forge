@@ -6,6 +6,7 @@ the module-level constant — the production forge-moda vault isn't a
 dependency.
 """
 import os
+from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
@@ -233,6 +234,52 @@ def test_compute_advances_tick_and_updates_state(client):
   assert r2.json()["state"]["particles"][0]["x"] == pytest.approx(x0 + 2.0)
 
 
+def test_compute_returns_stdout(client, moda_vault):
+  # Override go.md with a print-bearing version. The autouse fixture
+  # cleared the session manager already; the first /moda/init below
+  # will fresh-load and pick up this rewrite.
+  print_go = """---
+type: action
+inputs:
+  - state
+  - dt
+  - temperature
+description: print-bearing go
+---
+
+# English
+
+Print a tick marker and return state unchanged.
+
+# Python
+
+```python
+def compute(context, state, dt, temperature):
+    print("tick advancing")
+    return state
+```
+"""
+  (Path(moda_vault) / "go.md").write_text(print_go)
+
+  init = client.post("/moda/init", json={}).json()
+  sid = init["sessionId"]
+  # /moda/init invokes setup; setup in the test vault doesn't print.
+  assert init.get("stdout", "") == ""
+
+  resp = client.post(
+    "/moda/compute",
+    json={"sessionId": sid, "dt": 0.0333, "temperature": "medium"},
+  )
+  assert resp.status_code == 200
+  data = resp.json()
+  # print()'s default end="\n" produces "tick advancing\n" in the
+  # captured buffer. Assert the prefix to leave room for any
+  # engine-emitted noise that might land on the same stream.
+  assert "tick advancing" in data["stdout"]
+  # Wire shape preserved — state is still returned alongside stdout.
+  assert data["state"]["tick"] == 0  # this test-vault `go` is no-op
+
+
 def test_compute_unknown_session_returns_404(client):
   resp = client.post(
     "/moda/compute",
@@ -253,7 +300,12 @@ def test_click_acks_for_known_session(client):
     json={"sessionId": init["sessionId"], "x": 50.0, "y": 50.0},
   )
   assert resp.status_code == 200
-  assert resp.json() == {"ack": True}
+  data = resp.json()
+  # Wire shape: ack: true + stdout (empty when the snippet didn't
+  # print). Exact-equality changed when stdout was added to all
+  # /moda/* responses; assert the relevant fields explicitly.
+  assert data["ack"] is True
+  assert data["stdout"] == ""
 
 
 def test_click_unknown_session_returns_404(client):
