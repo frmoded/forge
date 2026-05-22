@@ -210,8 +210,54 @@ def compute(req: ComputeRequest, manager: VaultSessionManager = Depends(get_sess
   raise HTTPException(status_code=422, detail=f"unknown snippet type: {snippet_type}")
 
 
+def _translate_anthropic_error(exc):
+  """Map an anthropic SDK exception to the (status, detail) pair the
+  /generate and /canonicalize handlers surface to the plugin.
+
+  We split Anthropic-side failures into two buckets:
+    * **Retryable** (503): transient — overloaded, rate-limited,
+      connection/timeout, upstream 5xx. Same call again later likely
+      works.
+    * **Non-retryable** (502): authentication, billing, permission,
+      bad-request style errors. The user has to fix something
+      (API key, prompt content, etc.) before retrying.
+
+  Detail body shape:
+      {"error": "<human-readable>", "retryable": true|false,
+       "upstream_status": <int|None>, "kind": "<sdk_exception_name>"}
+
+  The plugin reads `retryable` to decide whether to show a "try
+  again in a moment" Notice (and, in a future revision, auto-retry
+  with backoff). `kind` is for diagnostics; the plugin doesn't
+  branch on it but a developer reading the console can see exactly
+  which SDK class fired.
+
+  Anthropic's `APIStatusError` carries the upstream HTTP status on
+  `.status_code`; connection / timeout errors have no upstream
+  status so the field is None.
+  """
+  from anthropic import APIError, APIStatusError
+  if not isinstance(exc, APIError):
+    return None
+  upstream_status = getattr(exc, "status_code", None)
+  retryable = (
+    upstream_status is None  # connection / timeout — always retryable
+    or upstream_status == 429  # rate-limited
+    or upstream_status >= 500  # upstream 5xx (overloaded, internal)
+  )
+  http_status = 503 if retryable else 502
+  detail = {
+    "error": f"Anthropic API: {exc}",
+    "retryable": retryable,
+    "upstream_status": upstream_status,
+    "kind": type(exc).__name__,
+  }
+  return (http_status, detail)
+
+
 @app.post("/generate")
 def generate(req: GenerateRequest, manager: VaultSessionManager = Depends(get_session_manager)):
+  from anthropic import APIError
   state = manager.get(req.vault_path)
   if state is None:
     raise HTTPException(status_code=400, detail="vault not connected — call /connect first")
@@ -222,6 +268,9 @@ def generate(req: GenerateRequest, manager: VaultSessionManager = Depends(get_se
     )
   except KeyError as e:
     raise HTTPException(status_code=404, detail=str(e))
+  except APIError as e:
+    status, detail = _translate_anthropic_error(e)
+    raise HTTPException(status_code=status, detail=detail)
   except RuntimeError as e:
     raise HTTPException(status_code=500, detail=str(e))
 
@@ -244,6 +293,7 @@ def canonicalize(req: CanonicalizeRequest, manager: VaultSessionManager = Depend
   state = manager.get(req.vault_path)
   if state is None:
     raise HTTPException(status_code=400, detail="vault not connected — call /connect first")
+  from anthropic import APIError
   try:
     english = canonicalize_python(
       req.snippet_id, state["registry"],
@@ -253,6 +303,9 @@ def canonicalize(req: CanonicalizeRequest, manager: VaultSessionManager = Depend
     raise HTTPException(status_code=404, detail=str(e))
   except ValueError as e:
     raise HTTPException(status_code=422, detail=str(e))
+  except APIError as e:
+    status, detail = _translate_anthropic_error(e)
+    raise HTTPException(status_code=status, detail=detail)
   except RuntimeError as e:
     raise HTTPException(status_code=500, detail=str(e))
   return {"snippet_id": req.snippet_id, "english": english}

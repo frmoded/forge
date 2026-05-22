@@ -51,6 +51,154 @@ def test_generate_response_shape(client, partial_vault):
   assert "detail" in resp.json()
 
 
+# --- Anthropic-error translation (no real LLM call) ---
+#
+# The /generate handler narrowly caught KeyError → 404 and
+# RuntimeError → 500; anthropic SDK exceptions (OverloadedError 529,
+# RateLimitError 429, APIConnectionError, AuthenticationError, …) fell
+# through to FastAPI's default 500 handler and surfaced to the plugin
+# as a bare "Internal Server Error" with no structured detail. The
+# new translator maps anthropic.APIError subclasses to:
+#   retryable (upstream 5xx, 429, connection/timeout) → 503
+#   non-retryable (upstream 4xx) → 502
+# both with a structured detail body the plugin can parse to decide
+# whether to retry / what Notice to render.
+
+def test_generate_overloaded_error_returns_503_retryable(
+  client, partial_vault, monkeypatch,
+):
+  """529 Overloaded — the exact case the user hit. The SDK keeps
+  OverloadedError in `anthropic._exceptions` (not the public
+  surface), so we drive the translator via the public APIStatusError
+  base class with status_code=529 — same translation logic fires."""
+  client.post("/connect", json={"vault_path": partial_vault})
+
+  def boom(*args, **kwargs):
+    raise _FakeOverloadedError()
+
+  monkeypatch.setattr(
+    "forge.api.server.generate_snippet_code", boom)
+
+  resp = client.post("/generate", json={
+    "vault_path": partial_vault,
+    "snippet_id": "hello_forge",
+  })
+  assert resp.status_code == 503
+  detail = resp.json()["detail"]
+  assert detail["retryable"] is True
+  assert detail["upstream_status"] == 529
+  assert detail["kind"] == "_FakeOverloadedError"
+  assert "Anthropic API:" in detail["error"]
+
+
+def test_generate_rate_limit_returns_503_retryable(
+  client, partial_vault, monkeypatch,
+):
+  """429 → retryable. Same logic, different upstream status."""
+  client.post("/connect", json={"vault_path": partial_vault})
+  from anthropic import RateLimitError
+
+  def boom(*args, **kwargs):
+    raise RateLimitError(
+      message="rate limited",
+      response=_FakeResponse(status_code=429),
+      body={"type": "error", "error": {"type": "rate_limit_error"}},
+    )
+
+  monkeypatch.setattr("forge.api.server.generate_snippet_code", boom)
+  resp = client.post("/generate", json={
+    "vault_path": partial_vault, "snippet_id": "hello_forge",
+  })
+  assert resp.status_code == 503
+  detail = resp.json()["detail"]
+  assert detail["retryable"] is True
+  assert detail["upstream_status"] == 429
+  assert detail["kind"] == "RateLimitError"
+
+
+def test_generate_authentication_returns_502_non_retryable(
+  client, partial_vault, monkeypatch,
+):
+  """401 / auth — bad API key. NOT retryable: user has to fix the
+  env / config before another try will work. 502 communicates
+  'upstream said no' distinct from 'upstream is sick' (503)."""
+  client.post("/connect", json={"vault_path": partial_vault})
+  from anthropic import AuthenticationError
+
+  def boom(*args, **kwargs):
+    raise AuthenticationError(
+      message="bad api key",
+      response=_FakeResponse(status_code=401),
+      body={"type": "error", "error": {"type": "authentication_error"}},
+    )
+
+  monkeypatch.setattr("forge.api.server.generate_snippet_code", boom)
+  resp = client.post("/generate", json={
+    "vault_path": partial_vault, "snippet_id": "hello_forge",
+  })
+  assert resp.status_code == 502
+  detail = resp.json()["detail"]
+  assert detail["retryable"] is False
+  assert detail["upstream_status"] == 401
+  assert detail["kind"] == "AuthenticationError"
+
+
+def test_generate_connection_error_returns_503_retryable(
+  client, partial_vault, monkeypatch,
+):
+  """Connection / timeout — no upstream status at all. Always
+  retryable. upstream_status is None so the plugin can disambiguate
+  these from real upstream HTTP failures if it wants to."""
+  client.post("/connect", json={"vault_path": partial_vault})
+  from anthropic import APIConnectionError
+
+  def boom(*args, **kwargs):
+    raise APIConnectionError(request=_FakeRequest())
+
+  monkeypatch.setattr("forge.api.server.generate_snippet_code", boom)
+  resp = client.post("/generate", json={
+    "vault_path": partial_vault, "snippet_id": "hello_forge",
+  })
+  assert resp.status_code == 503
+  detail = resp.json()["detail"]
+  assert detail["retryable"] is True
+  assert detail["upstream_status"] is None
+
+
+# Public-API-only stand-in for the OverloadedError the SDK keeps in
+# its private _exceptions module. The translator only branches on
+# isinstance(exc, APIError) + exc.status_code, so a public-subclass
+# with the right status_code reproduces the production behavior.
+from anthropic import APIError as _APIError
+
+
+class _FakeOverloadedError(_APIError):
+  def __init__(self):
+    self.message = "Overloaded"
+    self.status_code = 529
+    self.response = _FakeResponse(status_code=529)
+    self.body = {"type": "error", "error": {"type": "overloaded_error"}}
+    self.request_id = "req_test"
+
+  def __str__(self) -> str:
+    return f"Error code: {self.status_code} - {self.body}"
+
+
+# Lightweight stand-ins for httpx Response / Request. The Anthropic
+# SDK only reads `.status_code` off the response for our purposes,
+# and `.method` / `.url` off the request for error formatting.
+class _FakeResponse:
+  def __init__(self, status_code: int):
+    self.status_code = status_code
+    self.headers = {}
+    self.request = _FakeRequest()
+
+
+class _FakeRequest:
+  method = "POST"
+  url = "https://api.anthropic.com/v1/messages"
+
+
 # --- LLM tests ---
 
 @requires_llm
