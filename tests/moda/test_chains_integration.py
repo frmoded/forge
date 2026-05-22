@@ -48,17 +48,32 @@ def test_create_water_particles_appends_to_state(run_block):
 # Click chain (blocks 5–8)
 # ---------------------------------------------------------------------------
 
-def test_on_mouse_click_adds_50_ink_as_a_puff(run_block):
+def test_on_mouse_click_adds_50_ink_as_a_radial_drop(run_block):
+    """v0.4.13: ink spawns disperse radially from the click point —
+    each particle gets a small position jitter (within ±3 units of
+    the click) and its own random heading uniform in [0, 2π). The
+    previous "coherent puff" with a shared heading was pedagogically
+    misleading (ink dropped in water disperses; it doesn't migrate
+    as one cohesive body)."""
     s0 = make_state(n_water=10)
     s1 = run_block("on_mouse_click", s0, 400.0, 300.0)
     assert len(s1.ids) == 60
     ink = s1.types == "ink"
     assert ink.sum() == 50
-    # coherent puff: all ink at the click point, one shared heading
-    assert np.allclose(s1.xs[ink], 400.0)
-    assert np.allclose(s1.ys[ink], 300.0)
-    assert len(set(np.round(s1.headings[ink], 9))) == 1
-    # set_ink_speed -> medium constant; per-particle puff speed replaced
+    # Position jitter: ±3 units of the click. Not all-equal — that
+    # would mean we lost the per-particle randomness.
+    assert s1.xs[ink].min() >= 400.0 - 3.0
+    assert s1.xs[ink].max() <= 400.0 + 3.0
+    assert s1.ys[ink].min() >= 300.0 - 3.0
+    assert s1.ys[ink].max() <= 300.0 + 3.0
+    assert not np.allclose(s1.xs[ink], 400.0)  # not all identical
+    assert not np.allclose(s1.ys[ink], 300.0)
+    # Per-particle headings: many distinct values, not a single
+    # shared one. 50 uniform draws on [0, 2π) should easily yield
+    # >40 distinct values at float64 precision.
+    assert len(set(np.round(s1.headings[ink], 9))) >= 40
+    # set_ink_speed -> medium constant overwrites the per-particle
+    # spawn speed; downstream invariant preserved.
     assert sorted(set(np.round(s1.speeds[ink], 3))) == [50.0]
     assert set(s1.masses[ink].tolist()) == {"medium"}
     # water rows untouched
