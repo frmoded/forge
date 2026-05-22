@@ -108,7 +108,10 @@ def _jsonable_to_dataclass(value):
 
 # Tagged dicts coming back from serialize_result whose `type` is one of these
 # are treated as native wire formats — body becomes their `content` field.
-_NATIVE_WIRE_FORMATS = {"musicxml"}
+# moda_sim_state carries the row-oriented Particle list the iframe already
+# knows how to render; same shape as /moda/compute's response, just emitted
+# from generic /compute now too.
+_NATIVE_WIRE_FORMATS = {"musicxml", "moda_sim_state"}
 
 # Text content_types: payload is a string in the snippet body. deserialize_text
 # returns the native python value (json -> dict/list, yaml -> dict/list/etc.,
@@ -153,31 +156,69 @@ def is_binary_content_type(content_type: str) -> bool:
 def serialize_result(value, snippet=None):
   """Turn a snippet's return value into something wire-shippable.
 
-  `snippet` is the resolved snippet dict (meta/body/snippet_id/...); used by
-  format-specific serializers that want metadata like a title.
+  Dispatch order:
+  1. Already-tagged native-wire-format dicts pass through unchanged
+     (idempotency — repeated calls on the same value are no-ops).
+  2. Domain-specific recognizers (music21 score → musicxml,
+     ParticleState → moda_sim_state). Each returns a tagged
+     {type, content} dict or None.
+  3. Generic fallthrough: encode dataclasses + ndarrays via
+     _dataclass_to_jsonable so the result is JSON-able. Mirrors
+     what serialize_for_wire does on the snapshot-capture path, so
+     a value the snapshot path successfully captures also serializes
+     cleanly over the /compute HTTP response.
+
+  `snippet` is the resolved snippet dict (meta/body/snippet_id/...);
+  used by format-specific serializers that want metadata like a
+  title for the rendered MusicXML.
   """
+  # (1) Already-tagged — pass through. Lets callers (e.g.
+  # serialize_for_wire) re-feed the output without rewrapping.
+  if (isinstance(value, dict)
+      and value.get("type") in _NATIVE_WIRE_FORMATS):
+    return value
+
+  # (2) Domain-specific recognizers.
   musicxml = _try_serialize_music21(value, snippet)
   if musicxml is not None:
     return musicxml
 
+  particle_state = _try_serialize_particle_state(value, snippet)
+  if particle_state is not None:
+    return particle_state
+
   # (Future) IFC objects → IFC string
   # (Future) Drawing objects → SVG string
 
-  return value
+  # (3) Generic fallthrough.
+  return _dataclass_to_jsonable(value)
 
 
 def serialize_for_wire(value, snippet=None):
-  """Reduce a python value to (content_type, content_str) for storage.
+  """Reduce a python value to (content_type, content_str) for snapshot
+  storage. DIFFERENT contract from serialize_result, which produces
+  the HTTP-response shape:
 
-  - Tagged payloads from serialize_result (e.g. {type: musicxml, content: ...})
-    decompose into (their type, their content).
-  - Everything else round-trips through JSON. Strings, numbers, dicts, lists,
-    None — all become content_type='json' with json.dumps(value) as body.
+  - serialize_result: emit the shape the consumer wants to render
+    (e.g. moda_sim_state's row-oriented Particle list for the
+    iframe). May be lossy w.r.t. the original value.
+  - serialize_for_wire: emit a shape the snapshot reader can
+    losslessly rebuild via deserialize_text. Must round-trip back
+    to the same python value.
+
+  These coincide for music21 (musicxml deserializes back to the
+  music21 Stream) but diverge for ParticleState — the row-oriented
+  moda_sim_state shape drops internal fields (headings, speeds,
+  width, height) that the dataclass round-trip needs. So
+  serialize_for_wire takes its own route through the music21
+  recognizer (round-trip-safe wire shape) and the dataclass+
+  ndarray codec (round-trip-safe lossless JSON).
   """
-  payload = serialize_result(value, snippet)
-  if isinstance(payload, dict) and payload.get("type") in _NATIVE_WIRE_FORMATS:
-    return payload["type"], payload["content"]
-  return "json", json.dumps(_dataclass_to_jsonable(payload))
+  musicxml = _try_serialize_music21(value, snippet)
+  if musicxml is not None:
+    return "musicxml", musicxml["content"]
+
+  return "json", json.dumps(_dataclass_to_jsonable(value))
 
 
 def deserialize_text(content_type, content_str):
@@ -232,6 +273,47 @@ def deserialize_from_wire(content_type, content_str):
     import base64
     return deserialize_binary(content_type, base64.b64decode(content_str))
   return deserialize_text(content_type, content_str)
+
+
+def _try_serialize_particle_state(value, snippet):
+  """Detect a moda ParticleState dataclass and emit the iframe wire
+  shape: {type: "moda_sim_state", content: {tick, particles:
+  list[{id, type, x, y, mass}]}}. Returns None for non-matches so
+  the caller falls through to other serializers.
+
+  Use-time import keeps `forge.core.serialization` independent of
+  `forge.moda.types` at module-load time — avoids a circular import
+  if forge.moda.types ever needs core helpers. ImportError swallowed
+  so environments without the moda module (or future installations
+  that strip it) still load core serialization fine.
+
+  The row-oriented transposition is intentionally duplicated from
+  forge.api.moda._serialize_particles — pulling it into core would
+  improve layering (the row-shape conversion is a serializer concern,
+  not a router concern) but widen this prompt's blast radius. Flagged
+  as a follow-up in the feedback.
+  """
+  try:
+    from forge.moda.types import ParticleState
+  except ImportError:
+    return None
+  if not isinstance(value, ParticleState):
+    return None
+
+  particles = [
+    {
+      "id": int(value.ids[i]),
+      "type": str(value.types[i]),
+      "x": float(value.xs[i]),
+      "y": float(value.ys[i]),
+      "mass": str(value.masses[i]),
+    }
+    for i in range(len(value.ids))
+  ]
+  return {
+    "type": "moda_sim_state",
+    "content": {"tick": int(value.tick), "particles": particles},
+  }
 
 
 def _try_serialize_music21(value, snippet):

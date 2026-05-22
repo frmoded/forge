@@ -305,3 +305,70 @@ def test_ndarray_inside_dict_round_trips():
   assert isinstance(back["pairs"], np.ndarray)
   assert np.array_equal(back["pairs"], payload["pairs"])
   assert back["pairs"].dtype == payload["pairs"].dtype
+
+
+# ----------------------------------------------------------------------
+# unify-compute-serialization (engine debt cleanup):
+# serialize_result now wire-encodes ParticleState as moda_sim_state for
+# the HTTP-response path, and falls through to _dataclass_to_jsonable
+# for any other dataclass+ndarray return. serialize_for_wire continues
+# to round-trip losslessly via the dataclass codec (its contract is
+# read-back, not render — moda_sim_state's row-oriented shape is lossy
+# w.r.t. internal arrays like headings/speeds/width/height).
+# ----------------------------------------------------------------------
+
+def test_serialize_result_emits_moda_sim_state_for_particle_state():
+  ps = _state(n=3, ink=2, tick=42, w=400, h=300)
+  out = serialize_result(ps)
+  assert isinstance(out, dict)
+  assert out["type"] == "moda_sim_state"
+  content = out["content"]
+  assert content["tick"] == 42
+  particles = content["particles"]
+  # 3 water + 2 ink rows materialized row-oriented for the iframe.
+  assert len(particles) == 5
+  # Row-shape keys match the iframe's Particle interface.
+  assert set(particles[0].keys()) == {"id", "type", "x", "y", "mass"}
+  # First three rows are water, last two are ink (per _state setup).
+  assert [p["type"] for p in particles] == ["water"] * 3 + ["ink"] * 2
+
+
+def test_serialize_result_idempotent_on_tagged_input():
+  """Re-feeding an already-tagged native-wire-format dict returns the
+  same shape, not a re-wrapped one. Guards the idempotency early-
+  return."""
+  tagged = {"type": "moda_sim_state",
+            "content": {"tick": 0, "particles": []}}
+  assert serialize_result(tagged) is tagged
+
+  musicxml = {"type": "musicxml", "content": "<score-partwise>...</score-partwise>"}
+  assert serialize_result(musicxml) is musicxml
+
+
+def test_serialize_result_falls_through_to_dataclass_codec_for_other_dataclasses():
+  """A dataclass NOT recognized by music21 or particle_state recognizers
+  still wire-encodes via _dataclass_to_jsonable rather than passing
+  through raw. This is the closing of the asymmetry with
+  serialize_for_wire."""
+  p = Particle(id=1, type="water", x=10.5, y=20.5,
+               heading=1.5, speed=50.0, mass="medium")
+  out = serialize_result(p)
+  # Tagged dataclass form (the codec's standard shape).
+  assert isinstance(out, dict)
+  assert "__dataclass__" in out
+  assert out["__dataclass__"].endswith(".Particle")
+  assert out["fields"]["id"] == 1
+  assert out["fields"]["type"] == "water"
+
+
+def test_serialize_for_wire_still_round_trips_particle_state_losslessly():
+  """Snapshot path must NOT emit moda_sim_state shape (which is lossy
+  — drops headings/speeds/width/height). It uses the dataclass codec
+  on the original value so deserialize_from_wire reconstructs the
+  full ParticleState."""
+  ps = _state(n=3, tick=7)
+  ct, body = serialize_for_wire(ps)
+  assert ct == "json"  # NOT "moda_sim_state"
+  back = deserialize_from_wire(ct, body)
+  assert isinstance(back, ParticleState)
+  _assert_state_equal(back, ps)
