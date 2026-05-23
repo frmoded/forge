@@ -13,7 +13,7 @@ import pytest
 
 from forge.core.registry import SnippetRegistry, GraphResolver
 from forge.core.executor import extract_python, exec_python
-from tests.moda.conftest import make_state, _find_vault
+from tests.moda._helpers import make_state, _find_vault
 
 
 @pytest.fixture

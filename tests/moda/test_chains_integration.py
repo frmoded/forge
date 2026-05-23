@@ -2,15 +2,15 @@
 
 Each test runs real block snippets against a hand-crafted ParticleState
 and asserts the block's semantics. Uses the session-scoped `run_block`
-fixture (resolves snippets from the moda vault) and the `make_state`
-helper from conftest.
+fixture (resolves snippets from the moda vault, lives in conftest.py)
+and the `make_state` helper (a plain function in _helpers.py).
 """
 import math
 
 import numpy as np
 import pytest
 
-from tests.moda.conftest import make_state
+from tests.moda._helpers import make_state
 
 
 # ---------------------------------------------------------------------------

@@ -6,29 +6,18 @@ distributable). They are not part of the forge package, so these tests
 resolve them through the same registry/resolver machinery the backend
 uses and skip the whole partition if no vault is reachable (fresh
 clone / CI without the sibling repo).
-"""
-import os
-from pathlib import Path
 
-import numpy as np
+Plain (non-fixture) helpers — `make_state`, `_find_vault` — live in
+`_helpers.py` next door so test modules can import them by name
+without the `from tests.moda.conftest import ...` indirection. The
+fixtures below call the helpers internally.
+"""
 import pytest
 
 from forge.core.registry import SnippetRegistry, GraphResolver
 from forge.core.executor import extract_python, exec_python
-from forge.moda.types import ParticleState
 
-_CANDIDATES = [
-    os.environ.get("FORGE_MODA_VAULT_PATH"),
-    os.path.expanduser("~/projects/forge-vaults/forge-moda-vault"),
-    os.path.expanduser("~/projects/forge-moda"),
-]
-
-
-def _find_vault():
-    for c in _CANDIDATES:
-        if c and Path(c, "go.md").is_file() and Path(c, "setup.md").is_file():
-            return c
-    return None
+from tests.moda._helpers import _find_vault
 
 
 @pytest.fixture(scope="session")
@@ -73,38 +62,3 @@ def block_source(resolver):
         return extract_python(res.resolve(snippet_id)["body"])
 
     return _src
-
-
-def make_state(
-    *,
-    n_water=0,
-    n_ink=0,
-    width=800.0,
-    height=600.0,
-    tick=0,
-    water_speed=50.0,
-    ink_speed=50.0,
-    seed=0,
-):
-    """Hand-crafted struct-of-arrays ParticleState for integration tests.
-
-    Water rows first (ids 0..n_water-1), then ink (continuing ids).
-    Positions are spread deterministically inside the chamber; headings
-    are a fixed sweep so collision/bounce assertions are reproducible.
-    """
-    rng = np.random.default_rng(seed)
-    n = n_water + n_ink
-    ids = np.arange(n, dtype=np.int64)
-    types = np.array(["water"] * n_water + ["ink"] * n_ink, dtype=object)
-    xs = rng.uniform(10, width - 10, n).astype(np.float64)
-    ys = rng.uniform(10, height - 10, n).astype(np.float64)
-    headings = (np.linspace(0.0, 2 * np.pi, n, endpoint=False)
-                if n else np.array([], dtype=np.float64))
-    speeds = np.array([water_speed] * n_water + [ink_speed] * n_ink,
-                      dtype=np.float64)
-    masses = np.array(["medium"] * n, dtype=object)
-    return ParticleState(
-        tick=tick, ids=ids, types=types, xs=xs, ys=ys,
-        headings=headings, speeds=speeds, masses=masses,
-        width=width, height=height,
-    )
