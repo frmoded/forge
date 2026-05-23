@@ -90,6 +90,17 @@ class SnippetExecError(Exception):
     self.stdout = stdout
 
 
+class SnapshotCaptureError(Exception):
+  """Raised when an action snippet returns a value the wire-format codec
+  can't serialize AND the snippet hasn't opted out of capture via
+  `snapshot_capture: false` in frontmatter.
+
+  Per constitution C7/A7: returns must be wire-serializable, or the
+  snippet must declare it isn't capturable. Silent skips hide missing
+  edges in the freeze graph and the Edges panel."""
+  pass
+
+
 class ForgeContext:
   """Passed as the `context` argument to run(context). Carries session state and
   allows snippets to call other snippets."""
@@ -253,14 +264,22 @@ class ForgeContext:
     """Write a snapshot for the (caller, callee) edge per A7. Skipped when:
     - There's no enclosing snippet (top-level /compute — no edge exists).
     - vault_path isn't set (raw exec_python in a test, no filesystem to write to).
-    - The value isn't wire-serializable (Manifest objects, file handles, etc.
-      that pass between sub-snippets in pipelines like install). A divergence
-      from a strict read of A7: capture is best-effort per the wire-format
-      contract in F3. Non-serializable returns are warned-and-skipped rather
-      than crashing the compute — but they ARE warned, because silent skips
-      hide missing edges in the freeze graph and the edges panel.
+    - The callee declares `snapshot_capture: false` in frontmatter (C7
+      opt-out): the author has acknowledged the return isn't capturable.
+
+    Non-serializable returns on capture-eligible snippets RAISE
+    SnapshotCaptureError (per the C7/A7 tightening: silent skips hide
+    missing edges in the freeze graph and the Edges panel). The error
+    names the snippet and the offending Python type so authors can
+    either fix the return or declare the opt-out.
     """
     if self._caller_id is None or self.vault_path is None:
+      return
+    # C7 opt-out: `snapshot_capture: false` in callee frontmatter
+    # skips capture silently. Default (absent) is True. We don't
+    # warn on opt-out — the author has explicitly signaled intent.
+    meta = callee_snippet.get("meta") or {}
+    if meta.get("snapshot_capture") is False:
       return
     from forge.core.snapshots import write_snapshot
     try:
@@ -272,12 +291,14 @@ class ForgeContext:
         callee_snippet,
       )
     except (TypeError, ValueError) as e:
-      import logging
-      logging.getLogger(__name__).warning(
-        "snapshot skipped for edge %s→%s: %s not wire-serializable (%s)",
-        self._caller_id, callee_snippet["snippet_id"],
-        type(value).__name__, e,
-      )
+      raise SnapshotCaptureError(
+        f"Cannot capture snapshot for edge "
+        f"{self._caller_id}→{callee_snippet['snippet_id']}: "
+        f"return value of type {type(value).__name__} is not "
+        f"wire-serializable ({e}). Either return a serializable "
+        f"value, or declare `snapshot_capture: false` in "
+        f"frontmatter to opt out of capture for this snippet."
+      ) from e
 
 
 def read_data_snippet(snippet):

@@ -120,8 +120,12 @@ def test_title_left_alone_when_no_snippet_provided():
 #
 # Added after the moda integration started capturing snapshots whose return
 # values were Particle / ParticleState dataclasses — json.dumps used to
-# silently TypeError on those and the silent skip in _capture_edge meant
-# we shipped two missing edges before noticing.
+# silently TypeError on those and the (then) silent skip in
+# _capture_edge meant we shipped two missing edges before noticing.
+# That silent-skip branch is gone as of the C7/A7 tightening — capture
+# now raises SnapshotCaptureError on unserializable returns unless the
+# snippet opts out — but the codec extensions below remain the right
+# fix for first-class ParticleState capture.
 # ---------------------------------------------------------------------------
 
 from forge.core.serialization import serialize_for_wire, deserialize_from_wire

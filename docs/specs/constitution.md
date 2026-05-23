@@ -106,8 +106,11 @@ during a compute, Forge automatically captures the value the caller
 received and stores it as a snapshot. If a snapshot already exists for
 that edge, it is overwritten with the latest. Capture is automatic;
 users do not invoke it. Capture requires the return value to be
-wire-serializable per F3; non-serializable returns are skipped with a
-warning rather than crashing the compute.
+wire-serializable per F3. A non-serializable return on a
+capture-eligible snippet raises at return time, naming the snippet
+and the offending type. Snippets that declare `snapshot_capture:
+false` (per C7) are not captured; the edge has no snapshot and
+cannot be frozen.
 
 **A8.** An edge may be in one of two states: *live* (default) or
 *frozen*. When frozen, calling the callee from the caller returns the
@@ -428,15 +431,18 @@ yet evaluated; over-eager unfreezing loses captured states the author
 might want to return to. Both extremes are user-controllable; the
 system does not enforce timing.
 
-**C7.** Authors are encouraged to return wire-serializable values
-from `compute`. Returning unserializable values is valid — compute
-still runs — but cuts off the snapshot/freeze pathway for that edge:
-work can't be locked against drift, and the Edges panel shows no
-captured value. When a snippet's natural return type isn't yet
-wire-serializable, the cleaner move is usually to extend the engine's
-codec (see [`wire-format.md`](./wire-format.md)) rather than reshape
-the return value to fit. Domain return types are first-class once
-their wire encoding lands.
+**C7.** Action snippets must return wire-serializable values from
+`compute`. The engine attempts capture per A7; failure to serialize
+raises a clear error at return time naming the snippet and the
+offending Python type. Authors who deliberately need a non-capturable
+return must declare `snapshot_capture: false` in frontmatter — the
+engine then skips capture for that snippet (silently, no warning) and
+the edge has no snapshot, no freeze, no replay. The default (field
+omitted) is `snapshot_capture: true`. When a snippet's natural return
+type isn't yet wire-serializable, the cleaner move is to extend the
+engine's codec (see [`wire-format.md`](./wire-format.md)) rather than
+reshape the return or opt out. Domain return types are first-class
+once their wire encoding lands.
 
 **C8.** Snippets that depend on execution history — by reading their
 own prior snapshots, accumulating state across invocations, or any
