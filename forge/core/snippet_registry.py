@@ -75,6 +75,34 @@ class SnippetRegistry:
   def get_in_vault(self, vault_name: str, bare_id: str) -> Optional[dict]:
     return self._vaults.get(vault_name, {}).get(bare_id)
 
+  def refresh_file(self, filepath: str, vault_name: str = AUTHORING_VAULT, source: str = "authoring") -> Optional[str]:
+    """v0.2.17: re-index a single file from disk and update the cached
+    entry. Used by the forge-client-obsidian plugin to keep the
+    MEMFS-mounted registry in sync with disk edits (writeGeneratedCode,
+    direct editor saves) without paying the full vault-scan cost.
+
+    Returns an error string if indexing failed (same shape as scan()'s
+    self.errors entries), None on success.
+
+    vault_path is inferred from an existing entry in `vault_name` —
+    works for the V1 single-user-vault model where the plugin only
+    ever calls this against the authoring vault. If no entries exist
+    yet (registry never scanned), falls back to the file's parent
+    directory, which is the right default for "write into an empty
+    vault" cases."""
+    vault_path = None
+    if vault_name in self._vaults:
+      for entry in self._vaults[vault_name].values():
+        vault_path = entry.get("vault_path")
+        if vault_path:
+          break
+    if not vault_path:
+      vault_path = os.path.dirname(filepath)
+    # Ensure the per-vault dict exists; _index_authoring_file writes
+    # into self._vaults[vault_name] directly.
+    self._vaults.setdefault(vault_name, {})
+    return self._index_authoring_file(filepath, vault_name, source, vault_path)
+
   def get_bare(self, bare_id: str) -> Optional[dict]:
     """Walk the resolution order, return the first match."""
     for vault_name in self._order:
