@@ -131,8 +131,11 @@ class ForgeContext:
   def compute(self, snippet_id, *args, **inputs):
     if self._resolver is None:
       raise RuntimeError("context.compute requires a resolver")
-    # SnippetResolutionError propagates with structured "searched" info per ADR 0002
-    snippet = self._resolver.resolve(snippet_id)
+    # SnippetResolutionError propagates with structured "searched" info per ADR 0002.
+    # v0.2.26: thread caller_id so bare references inside library
+    # subdirs (e.g. `context.compute("chorus")` from
+    # `forge-music/blues/song`) probe the caller's own directory first.
+    snippet = self._resolver.resolve(snippet_id, caller_id=self._caller_id)
 
     # A8/A9: frozen edges short-circuit. Returning the snapshot value here
     # means the callee is never invoked and its own dependencies (if any)
