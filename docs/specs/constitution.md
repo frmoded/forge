@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v3)
+# Forge — Core Invariants and Discipline (V2a v4)
 
 ## Purpose
 
@@ -56,8 +56,15 @@ Python facet. Every data snippet has a `content_type` declaration and
 either an inline body (text content types) or a `content_ref`
 pointing to a sibling asset file (binary content types).
 
-**A2.** Action snippet Python facets define
-`def compute(context, *args, **kwargs)` returning a value.
+**A2.** Action snippet Python facets define a top-level `compute`
+function whose first parameter is `context`. Additional parameters
+are bound by name from the engine's input dict at compute time; the
+engine invokes the function as `fn(context, *args, **inputs)` where
+`inputs` is the kwargs dict derived per B5.2. Any of the following
+shapes are valid: `def compute(context)`, `def compute(context, x, y)`,
+`def compute(context, name)`, `def compute(context, *args, **kwargs)`,
+etc. The function returns a value, which must be wire-serializable
+per C7 unless the snippet declares `snapshot_capture: false`.
 
 **A3.** `context.compute(snippet_id, *args, **kwargs)` invokes another
 snippet and returns its value. For action snippets, this runs Python;
@@ -96,6 +103,20 @@ customizes it (creating a shadow). Snippets without a role field
 default to library-internal behavior (no auto-copy). The engine does
 not consult `role` for resolution — A4 alone determines which copy
 wins. `role` is purely an installer affordance.
+
+**A5.3.** *Bundled distribution (V1).* For closed beta, a fixed set
+of vaults (the "bundled libraries" — currently `forge-moda` and
+`forge-music`) ships inside the plugin at
+`<plugin>/assets/vaults/<library-name>/`. The engine mounts these
+at startup and treats them per A5.1 (library-subdirectory
+convention) without an install step. A user vault declares its use
+of a bundled library by listing the corresponding domain in
+`forge.toml` (per B9); the plugin extracts the bundle into the
+user's vault root as editable `.md` files only when the domain is
+declared. Registry-fetched distribution per A5 remains the path
+for v1.1+ vaults not in the bundle. Bundled-vault content updates
+ship via plugin releases; user-edited copies in the vault root take
+precedence via A4 shadowing.
 
 **A6.** The plugin renders structured output values by their tagged
 shape (`{type, content}`). Current formats: `musicxml` (rendered via
@@ -185,13 +206,26 @@ English facet (or `description` for data snippets) — implementation
 hints stay implementation-side. The runtime ignores the field; the
 plugin's rendered view does not display it prominently.
 
+**B5.2.** *Input derivation.* The engine determines which inputs to
+request from the user at compute time by parsing the snippet's
+Python signature and taking the union of (frontmatter-declared
+`inputs`) and (positional / keyword-only params other than
+`context`). The Python signature is the source of truth for what
+`compute` actually needs; frontmatter `inputs` is a declarative
+hint that informs `/generate`'s authoring context (per B5) and
+provides UI ordering. When the LLM produces Python with params not
+declared in frontmatter, the engine still surfaces them to the
+user via the input modal — the snippet's runtime contract
+self-describes via its signature, not its frontmatter. Inputs are
+delivered to `compute` as kwargs (via `**inputs` unpacking, per
+A2); declared parameters bind by name. The `context` parameter is
+always supplied by the engine and never surfaced to the user.
+
 **B6.** The Python produced by `/generate` is then static code. It
 does not re-invoke `/generate` at runtime. Runtime LLM calls inside
 Python are allowed and explicit, distinct from the `/generate`
 mechanism.
 
-As B7 — a new clause in the "Engine behavior" section, paired with B5 since it's a side artifact of /generate.
-Suggested wording:
 **B7.** After /generate produces a Python facet, Forge performs static
 analysis on the result to extract direct dependencies (calls to
 `context.compute(...)` with literal-string snippet IDs). These
@@ -489,8 +523,16 @@ churn.
 
 **I1.** Python is the realization language for action snippets.
 
-**I2.** Forge is delivered as an Obsidian plugin plus a Python backend
-communicating via HTTP.
+**I2.** Forge is delivered as an Obsidian plugin. In V1 closed beta,
+the plugin bundles Pyodide and runs the engine in-process inside
+the Obsidian renderer; the user's machine requires no Python install
+and no local backend. LLM-driven `/generate` requests go to a hosted
+transpile service over HTTPS (authenticated via a shared bearer
+token); all other compute paths — `/compute`, snippet resolution,
+snapshot read/write — execute locally inside the plugin process via
+Pyodide. A legacy HTTP backend mode (Python uvicorn serving the
+engine) remains supported for engine development workflows but is
+not exercised on student installs.
 
 **I3.** The plugin's renderer set is fixed at build time: SVG (browser
 native), MusicXML (Verovio). New formats added through plugin updates.
