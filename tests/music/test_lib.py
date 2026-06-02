@@ -8,6 +8,7 @@ from forge.music.lib import (
   closed_hihat, open_hihat, pedal_hihat,
   low_tom, mid_tom, high_tom,
   crash_cymbal, ride_cymbal,
+  kick, snare,
 )
 
 
@@ -628,3 +629,93 @@ def test_all_kit_factories_on_gm_channel_10():
              low_tom, mid_tom, high_tom,
              crash_cymbal, ride_cymbal]:
     assert fn().midiChannel == 9, fn.__name__
+
+
+# ---------- v0.3.7: percussion serialization fix for MuseScore ----------
+# music21's MusicXML exporter enforces channel uniqueness per Score
+# (m21ToXml.py:2801-2810). The first percussion instrument keeps
+# midiChannel=9; subsequent same-channel parts get reassigned to
+# melodic channels 1, 2, 3... — which MuseScore renders as Piano
+# treble staves. The v0.3.7 factories patch autoAssignMidiChannel
+# to return 9 unconditionally; tests verify the post-fix MusicXML
+# output puts every percussion part on channel 10.
+
+def _serialize_to_text(score):
+  from music21 import musicxml
+  xml = musicxml.m21ToXml.GeneralObjectExporter(score).parse()
+  return xml.decode('utf-8') if isinstance(xml, bytes) else str(xml)
+
+
+def _make_multi_perc_score(factories):
+  """Build a Score with one Part per factory call. Returns the Score
+  and the MusicXML text."""
+  import re
+  score = stream.Score()
+  for fn in factories:
+    p = stream.Part()
+    p.append(fn())
+    p.append(note.Note('C4', quarterLength=1))
+    score.insert(0, p)
+  text = _serialize_to_text(score)
+  channels = re.findall(r'<midi-channel>(\d+)</midi-channel>', text)
+  names = re.findall(r'<instrument-name[^>]*>([^<]+)</instrument-name>', text)
+  return score, text, channels, names
+
+
+def test_kick_factory_returns_BassDrum_with_kick_name():
+  inst = kick()
+  assert isinstance(inst, instrument.BassDrum)
+  assert inst.instrumentName == 'Kick'
+  assert inst.midiChannel == 9
+
+
+def test_snare_factory_returns_SnareDrum_with_snare_name():
+  inst = snare()
+  assert isinstance(inst, instrument.SnareDrum)
+  assert inst.instrumentName == 'Snare'
+  assert inst.midiChannel == 9
+
+
+def test_multi_percussion_score_all_channels_are_10():
+  """Regression test for v0.2.34's MuseScore rendering bug. Pre-fix:
+  music21 assigned ch10 only to the first percussion part; the rest
+  got melodic channels (1, 2, 3...). Post-fix: every percussion part
+  serializes to <midi-channel>10</midi-channel>."""
+  _score, _text, channels, _names = _make_multi_perc_score([
+    kick, snare, closed_hihat, open_hihat, low_tom, mid_tom, crash_cymbal,
+  ])
+  assert channels == ['10'] * 7, (
+    f"all percussion parts should be on GM channel 10; got {channels}"
+  )
+
+
+def test_kit_factory_instrument_names_are_kit_conventional():
+  """No 'Bangu' (music21's default for BassDrum) or 'Hi-Hat Cymbal'
+  / 'Tom-Tom' bare class names. Each factory overrides to a
+  kit-conventional label."""
+  _score, _text, _channels, names = _make_multi_perc_score([
+    kick, snare, closed_hihat, open_hihat, pedal_hihat,
+    low_tom, mid_tom, high_tom, crash_cymbal, ride_cymbal,
+  ])
+  expected = [
+    'Kick', 'Snare', 'Closed Hi-Hat', 'Open Hi-Hat', 'Pedal Hi-Hat',
+    'Low Tom', 'Mid Tom', 'High Tom', 'Crash Cymbal', 'Ride Cymbal',
+  ]
+  assert names == expected, f"expected {expected}, got {names}"
+  # Hard guard against the v0.2.34 'Bangu Bass drum' issue.
+  for n in names:
+    assert 'Bangu' not in n, f"name {n!r} contains 'Bangu'"
+
+
+def test_force_perc_channel_does_not_change_percMapPitch():
+  """percMapPitch values must stay unchanged from v0.3.6 — MIDI export
+  (GarageBand-readable) was already correct. The v0.3.7 fix only
+  touches autoAssignMidiChannel + instrumentName."""
+  assert closed_hihat().percMapPitch == 42
+  assert open_hihat().percMapPitch == 46
+  assert pedal_hihat().percMapPitch == 44
+  assert low_tom().percMapPitch == 41
+  assert mid_tom().percMapPitch == 47
+  assert high_tom().percMapPitch == 50
+  assert crash_cymbal().percMapPitch == 49
+  assert ride_cymbal().percMapPitch == 51

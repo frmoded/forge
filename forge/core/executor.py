@@ -47,6 +47,8 @@ try:
     "high_tom": _music_lib.high_tom,
     "crash_cymbal": _music_lib.crash_cymbal,
     "ride_cymbal": _music_lib.ride_cymbal,
+    "kick": _music_lib.kick,
+    "snare": _music_lib.snare,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}

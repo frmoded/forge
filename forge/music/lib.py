@@ -368,34 +368,64 @@ def with_velocity(notes, pattern):
 # ONE HiHatCymbal class; open vs closed vs pedal articulation is
 # encoded as the GM percussion note number on channel 10 (the
 # `percMapPitch` attribute), not as separate classes or midi-program
-# changes. Same shape for cymbals + toms. These factories configure
-# the correct percMapPitch so GM playback distinguishes the
-# articulations / kit pieces.
+# changes. Same shape for cymbals + toms.
 #
-# All factories return music21 Instrument instances with
-# midiChannel=9 (0-indexed) = channel 10 (1-indexed) = GM percussion.
-# music21 sets midiChannel correctly by default for percussion
-# subclasses; we don't override it.
+# v0.3.7 — fix MuseScore rendering for multi-part percussion scores.
+# music21's MusicXML exporter enforces channel uniqueness per Score
+# (see m21ToXml.py:2801-2810): the FIRST percussion instrument keeps
+# midiChannel=9 (→ <midi-channel>10</midi-channel>), but subsequent
+# parts with midiChannel=9 collide and get reassigned via
+# autoAssignMidiChannel() to channels 1, 2, 3... — the melodic
+# channels, which MuseScore renders as Piano-default 5-line treble
+# staves instead of percussion staves. _force_perc_channel patches
+# autoAssignMidiChannel on each instance to return 9 unconditionally,
+# so every percussion part ends up on GM channel 10.
+#
+# percMapPitch values are unchanged from v0.3.6 — the MIDI export
+# (which GarageBand reads) was already correct in v0.3.6; we only
+# fix the MusicXML channel assignment for MuseScore visual rendering.
+
+def _force_perc_channel(inst, name, abbrev):
+  """Lock midiChannel=9 (GM channel 10) by overriding autoAssignMidiChannel
+  on this instance, and override the displayed instrument name. Used by
+  every percussion factory so MuseScore renders all percussion parts
+  as percussion staves uniformly."""
+  inst.midiChannel = 9
+  inst.autoAssignMidiChannel = lambda usedChannels=None: 9
+  inst.instrumentName = name
+  inst.instrumentAbbreviation = abbrev
+  return inst
+
+
+def kick():
+  """Kick drum (bass drum). GM note 36 (Bass Drum 1) on channel 10.
+  music21's default instrumentName for BassDrum is 'Bass Drum'; the
+  factory overrides to 'Kick' for kit-conventional labeling."""
+  inst = instrument.BassDrum()
+  # percMapPitch left at music21's default (35), which serializes to
+  # <midi-unpitched>36</midi-unpitched> = GM Bass Drum 1.
+  return _force_perc_channel(inst, 'Kick', 'K')
+
 
 def closed_hihat():
   """Closed hi-hat (short "ts" sound). GM note 42 on channel 10."""
   inst = instrument.HiHatCymbal()
   inst.percMapPitch = 42
-  return inst
+  return _force_perc_channel(inst, 'Closed Hi-Hat', 'CHH')
 
 
 def open_hihat():
   """Open hi-hat (longer "tsh" sound). GM note 46 on channel 10."""
   inst = instrument.HiHatCymbal()
   inst.percMapPitch = 46
-  return inst
+  return _force_perc_channel(inst, 'Open Hi-Hat', 'OHH')
 
 
 def pedal_hihat():
   """Foot-pedal hi-hat (chick). GM note 44 on channel 10."""
   inst = instrument.HiHatCymbal()
   inst.percMapPitch = 44
-  return inst
+  return _force_perc_channel(inst, 'Pedal Hi-Hat', 'PHH')
 
 
 def low_tom():
@@ -404,35 +434,44 @@ def low_tom():
   percMapPitch (41 / 47 / 50)."""
   inst = instrument.TomTom()
   inst.percMapPitch = 41
-  return inst
+  return _force_perc_channel(inst, 'Low Tom', 'LT')
 
 
 def mid_tom():
   """Mid tom. GM note 47 on channel 10."""
   inst = instrument.TomTom()
   inst.percMapPitch = 47
-  return inst
+  return _force_perc_channel(inst, 'Mid Tom', 'MT')
 
 
 def high_tom():
   """High tom. GM note 50 on channel 10."""
   inst = instrument.TomTom()
   inst.percMapPitch = 50
-  return inst
+  return _force_perc_channel(inst, 'High Tom', 'HT')
 
 
 def crash_cymbal():
   """Crash cymbal 1. GM note 49 on channel 10."""
   inst = instrument.CrashCymbals()
   inst.percMapPitch = 49
-  return inst
+  return _force_perc_channel(inst, 'Crash Cymbal', 'CR')
 
 
 def ride_cymbal():
   """Ride cymbal 1. GM note 51 on channel 10."""
   inst = instrument.RideCymbals()
   inst.percMapPitch = 51
-  return inst
+  return _force_perc_channel(inst, 'Ride Cymbal', 'RD')
+
+
+def snare():
+  """Snare drum. GM note 38 (Acoustic Snare) on channel 10. music21's
+  default instrumentName for SnareDrum is 'Snare Drum'; factory keeps
+  that but forces channel 10 for multi-part percussion scores."""
+  inst = instrument.SnareDrum()
+  # percMapPitch left at music21's default (38).
+  return _force_perc_channel(inst, 'Snare', 'S')
 
 
 def _coerce_to_part(s: StreamLike) -> stream.Part:
