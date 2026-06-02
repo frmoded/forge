@@ -5,6 +5,9 @@ from forge.music.lib import (
   bar, voices, sequence, repeat,
   minor_pentatonic, major_pentatonic,
   with_velocity,
+  closed_hihat, open_hihat, pedal_hihat,
+  low_tom, mid_tom, high_tom,
+  crash_cymbal, ride_cymbal,
 )
 
 
@@ -564,3 +567,64 @@ def test_with_velocity_clamps_below_1():
   ns = _make_notes(1)
   with_velocity(ns, -5)
   assert ns[0].volume.velocity == 1
+
+
+# ---------- percussion factories (v0.3.6 Phase B + C) ----------
+
+def test_closed_hihat_uses_gm_note_42():
+  inst = closed_hihat()
+  assert inst.percMapPitch == 42
+  assert isinstance(inst, instrument.HiHatCymbal)
+
+
+def test_open_hihat_uses_gm_note_46():
+  inst = open_hihat()
+  assert inst.percMapPitch == 46
+  assert isinstance(inst, instrument.HiHatCymbal)
+
+
+def test_pedal_hihat_uses_gm_note_44():
+  inst = pedal_hihat()
+  assert inst.percMapPitch == 44
+  assert isinstance(inst, instrument.HiHatCymbal)
+
+
+def test_all_hihat_factories_on_gm_channel_10():
+  # music21 stores channel 0-indexed; channel 9 == GM channel 10.
+  for fn in [closed_hihat, open_hihat, pedal_hihat]:
+    assert fn().midiChannel == 9, fn.__name__
+
+
+def test_low_tom_uses_gm_note_41():
+  inst = low_tom()
+  assert inst.percMapPitch == 41
+  assert isinstance(inst, instrument.TomTom)
+
+
+def test_mid_tom_uses_gm_note_47():
+  inst = mid_tom()
+  assert inst.percMapPitch == 47
+
+
+def test_high_tom_uses_gm_note_50():
+  inst = high_tom()
+  assert inst.percMapPitch == 50
+
+
+def test_crash_cymbal_uses_gm_note_49():
+  inst = crash_cymbal()
+  assert inst.percMapPitch == 49
+  assert isinstance(inst, instrument.CrashCymbals)
+
+
+def test_ride_cymbal_uses_gm_note_51():
+  inst = ride_cymbal()
+  assert inst.percMapPitch == 51
+  assert isinstance(inst, instrument.RideCymbals)
+
+
+def test_all_kit_factories_on_gm_channel_10():
+  for fn in [closed_hihat, open_hihat, pedal_hihat,
+             low_tom, mid_tom, high_tom,
+             crash_cymbal, ride_cymbal]:
+    assert fn().midiChannel == 9, fn.__name__

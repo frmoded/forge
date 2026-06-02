@@ -36,6 +36,19 @@ Composition helpers — also pre-injected as globals (do NOT import these):
                                           -> list[Pitch]
   with_velocity(notes, pattern)           -> notes (mutated in place)
 
+Percussion instrument factories (kit pieces with correct GM
+channel-10 routing + percMapPitch — use these by preference over
+raw music21 percussion classes; they wire articulation + kit-piece
+distinction correctly):
+  closed_hihat()  -> Instrument (GM note 42)
+  open_hihat()    -> Instrument (GM note 46)
+  pedal_hihat()   -> Instrument (GM note 44)
+  low_tom()       -> Instrument (GM note 41)
+  mid_tom()       -> Instrument (GM note 47)
+  high_tom()      -> Instrument (GM note 50)
+  crash_cymbal()  -> Instrument (GM note 49)
+  ride_cymbal()   -> Instrument (GM note 51)
+
 These hide music21 boilerplate (part/measure assembly, deepcopy,
 rest-padding). Use them rather than hand-rolling those patterns.
 Idiomatic examples:
@@ -103,6 +116,25 @@ Composition rules — prefer the helpers above to hand-rolled equivalents:
   convention. The function name documents the choice; you do NOT
   need to write a defensive English note about "deliberate mode
   override" because there is no mode kwarg to override.
+
+- For percussion kits, use the lib factory helpers
+  (`closed_hihat()`, `open_hihat()`, `pedal_hihat()`, `low_tom()`,
+  `mid_tom()`, `high_tom()`, `crash_cymbal()`, `ride_cymbal()`)
+  rather than hand-configuring `instrument.HiHatCymbal()` /
+  `instrument.TomTom()` etc. The factories set `percMapPitch` to
+  the correct GM note number (channel 10), which is what GM
+  playback uses to distinguish closed-vs-open hi-hat, low-vs-mid
+  tom, etc. — music21's default class often picks a non-canonical
+  GM note (e.g. HiHatCymbal defaults to GM 44 = pedal, not 42 =
+  closed). The factories give predictable audible output.
+
+  music21 has ONE `TomTom` class; the three tom factories differ
+  only in `percMapPitch`. Same for hi-hat: one `HiHatCymbal` class,
+  three articulations distinguished by GM note number.
+
+  Standard percussion (`instrument.BassDrum()`, `instrument.SnareDrum()`)
+  is fine without a factory — music21's defaults map correctly to
+  GM Bass Drum 1 (35) and Acoustic Snare (38). Use them directly.
 
 - For percussion (and any rhythmic content), vary note velocities to
   avoid robotic-sounding output. Use `with_velocity(notes, pattern)`

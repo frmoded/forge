@@ -364,6 +364,77 @@ def with_velocity(notes, pattern):
   return notes
 
 
+# v0.3.6 Phase B/C — percussion instrument factories. music21 has
+# ONE HiHatCymbal class; open vs closed vs pedal articulation is
+# encoded as the GM percussion note number on channel 10 (the
+# `percMapPitch` attribute), not as separate classes or midi-program
+# changes. Same shape for cymbals + toms. These factories configure
+# the correct percMapPitch so GM playback distinguishes the
+# articulations / kit pieces.
+#
+# All factories return music21 Instrument instances with
+# midiChannel=9 (0-indexed) = channel 10 (1-indexed) = GM percussion.
+# music21 sets midiChannel correctly by default for percussion
+# subclasses; we don't override it.
+
+def closed_hihat():
+  """Closed hi-hat (short "ts" sound). GM note 42 on channel 10."""
+  inst = instrument.HiHatCymbal()
+  inst.percMapPitch = 42
+  return inst
+
+
+def open_hihat():
+  """Open hi-hat (longer "tsh" sound). GM note 46 on channel 10."""
+  inst = instrument.HiHatCymbal()
+  inst.percMapPitch = 46
+  return inst
+
+
+def pedal_hihat():
+  """Foot-pedal hi-hat (chick). GM note 44 on channel 10."""
+  inst = instrument.HiHatCymbal()
+  inst.percMapPitch = 44
+  return inst
+
+
+def low_tom():
+  """Low (floor) tom. GM note 41 on channel 10. music21 has one
+  TomTom class; the three tom variants in this lib differ only in
+  percMapPitch (41 / 47 / 50)."""
+  inst = instrument.TomTom()
+  inst.percMapPitch = 41
+  return inst
+
+
+def mid_tom():
+  """Mid tom. GM note 47 on channel 10."""
+  inst = instrument.TomTom()
+  inst.percMapPitch = 47
+  return inst
+
+
+def high_tom():
+  """High tom. GM note 50 on channel 10."""
+  inst = instrument.TomTom()
+  inst.percMapPitch = 50
+  return inst
+
+
+def crash_cymbal():
+  """Crash cymbal 1. GM note 49 on channel 10."""
+  inst = instrument.CrashCymbals()
+  inst.percMapPitch = 49
+  return inst
+
+
+def ride_cymbal():
+  """Ride cymbal 1. GM note 51 on channel 10."""
+  inst = instrument.RideCymbals()
+  inst.percMapPitch = 51
+  return inst
+
+
 def _coerce_to_part(s: StreamLike) -> stream.Part:
   """Convert a single-voice StreamLike input to a Part (deepcopied so callers
   can reuse the input). Multi-Part Scores are handled upstream by

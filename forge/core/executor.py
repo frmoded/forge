@@ -39,6 +39,14 @@ try:
     "minor_pentatonic": _music_lib.minor_pentatonic,
     "major_pentatonic": _music_lib.major_pentatonic,
     "with_velocity": _music_lib.with_velocity,
+    "closed_hihat": _music_lib.closed_hihat,
+    "open_hihat": _music_lib.open_hihat,
+    "pedal_hihat": _music_lib.pedal_hihat,
+    "low_tom": _music_lib.low_tom,
+    "mid_tom": _music_lib.mid_tom,
+    "high_tom": _music_lib.high_tom,
+    "crash_cymbal": _music_lib.crash_cymbal,
+    "ride_cymbal": _music_lib.ride_cymbal,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}
