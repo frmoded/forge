@@ -58,6 +58,47 @@ def test_assembled_prompt_contains_base_and_music():
   assert "MusicXML" in prompt or "music21.stream.Stream" in prompt
 
 
+def test_music_fragment_caller_scoped_rule_present():
+  """Post-Phase-B (2026-06-02): v0.2.26 caller-scoped bare-reference
+  resolution lets snippets inside a library subdir write `[[chorus]]`
+  and get the sibling automatically. The music fragment must surface
+  this rule so generated snippets prefer bare refs over qualified
+  paths from inside subdirs."""
+  import forge.core.llm  # noqa: F401
+  prompt = build_system_prompt(["music"])
+  assert "caller-scoped" in prompt, (
+    "Music fragment should explain v0.2.26 caller-scoped resolution so the "
+    "LLM doesn't qualify references from inside library subdirs."
+  )
+
+
+def test_music_fragment_bar_arithmetic_rule_present():
+  """The bar-arithmetic invariant rule (every Measure's notes+rests sum
+  to bar_ql) is load-bearing for blues snippets that construct
+  Measures manually. Phase B preserved this rule; lock it in by asserting
+  the load-bearing identifier is still present."""
+  import forge.core.llm  # noqa: F401
+  prompt = build_system_prompt(["music"])
+  assert "bar_ql" in prompt, (
+    "Music fragment should keep the bar_ql arithmetic guidance."
+  )
+
+
+def test_music_fragment_silent_rest_filled_paragraph_pruned():
+  """Phase B (2026-06-02) pruned the implementation-detail explanation
+  of how lib.sequence auto-pads silent voice slots with rest measures.
+  The high-level 'use sequence' and the CRITICAL 'do not manually
+  replicate' rules stay; the verbose 'silent rest-filled parts'
+  paragraph is gone (LLM doesn't need the mechanism, just the rule
+  to use the helper)."""
+  import forge.core.llm  # noqa: F401
+  prompt = build_system_prompt(["music"])
+  assert "silent rest-filled" not in prompt, (
+    "The lib.sequence implementation-detail paragraph should have been "
+    "pruned in Phase B — found 'silent rest-filled' still in the assembled prompt."
+  )
+
+
 def test_register_fragment_is_per_domain_idempotent():
   """register_fragment(domain, text) keys by domain: registering the
   same domain twice (a uvicorn --reload re-import, or a text tweak)

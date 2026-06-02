@@ -62,18 +62,10 @@ Composition rules — prefer the helpers above to hand-rolled equivalents:
 - For linear composition (sections played end-to-end), use sequence(...)
   — not hand-rolled measure concatenation. sequence aligns parts BY
   POSITION across inputs (input[0].parts[0] + input[1].parts[0] + ...
-  becomes output.parts[0]; same for parts[1], etc.) and renumbers
-  measures sequentially.
-
-  When sections have different numbers of voices — e.g., vocal choruses
-  with [harm, vocal] sit alongside an instrumental solo chorus with
-  [harm, solo] — sequence auto-pads the missing voices with rest
-  measures matching the input's bar count and time signature. So a
-  song that mixes 2-voice and 3-voice sections produces 3 continuous
-  staves automatically: each section's missing voices appear as rest
-  measures in the rendered output. You do NOT need to manually build
-  silent rest-filled parts for sections that don't use a given
-  instrument; sequence handles that.
+  becomes output.parts[0]; same for parts[1], etc.), renumbers measures
+  sequentially, and handles voice-count mismatches between sections
+  automatically. Mix 2-voice and 3-voice sections freely; sequence
+  produces a continuous Score.
 
   CRITICAL: do NOT manually replicate voices()/sequence() by iterating
   `getElementsByClass(stream.Part)` and appending parts to a Score —
@@ -210,11 +202,11 @@ the composition-helper layer):
   meaningfully different branches. Delete unused declarations before
   returning.
 
-- Avoid bend, glissando, and continuous-pitch articulations — Verovio
-  renders them poorly. When the English asks for a bend, prefer a
-  discrete approach note (a grace-note-length pitch one scale step
-  below the target, placed BEFORE the target) rather than trying to
-  engrave a continuous bend.
+- Avoid bend, glissando, and continuous-pitch articulations — they
+  are hard to engrave reliably across renderers. When the English asks
+  for a bend, prefer a discrete approach note (a grace-note-length
+  pitch one scale step below the target, placed BEFORE the target)
+  rather than trying to engrave a continuous bend.
 
 - When the English describes a register relative to the song ("high",
   "octave above the tonic"), anchor the tonic to the song's HOME
@@ -308,7 +300,19 @@ the composition-helper layer):
   links create phantom edges in the dependency graph that don't
   match runtime calls and can mislead the LLM at generation time
   into trying to call the parent. To reference a parent in prose,
-  use plain text ("the song", "the chorus") without the `[[]]`."""
+  use plain text ("the song", "the chorus") without the `[[]]`.
+
+- Bare `[[snippet_name]]` references from a snippet inside a library
+  subdirectory resolve to siblings in the same directory FIRST, per
+  v0.2.26's caller-scoped resolution. For example, a snippet at
+  `forge-music/blues/song.md` writing `[[chorus]]` resolves to
+  `forge-music/blues/chorus`, NOT some unrelated top-level `chorus`.
+  You do NOT need to write `[[blues/chorus]]` from inside
+  `blues/song.md` — bare `[[chorus]]` is sufficient and is the
+  preferred form. Qualified references (`[[forge-music/some_snippet]]`,
+  `[[other-library/name]]`) are still resolved as absolute paths and
+  bypass caller-scope when you genuinely want a cross-directory or
+  cross-library reference."""
 
 
 register_fragment("music", MUSIC_PROMPT_FRAGMENT)
