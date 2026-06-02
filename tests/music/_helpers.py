@@ -23,6 +23,8 @@ def _find_vault():
         # Pick the first candidate that has the blues form snippet on
         # disk — narrow enough to avoid grabbing an empty repo, broad
         # enough to work whether the vault grows to N snippets.
-        if c and Path(c, "form.md").is_file():
+        # v0.3.3 update: top-level form.md was removed in the scaffold
+        # deletion drain; probe blues/form.md instead.
+        if c and Path(c, "blues", "form.md").is_file():
             return c
     return None
