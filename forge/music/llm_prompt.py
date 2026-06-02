@@ -146,6 +146,18 @@ Composition rules — prefer the helpers above to hand-rolled equivalents:
   for content where rhythm is the focus. Rests in the sequence are
   skipped automatically.
 
+- When a piece's dynamic arc is artistically load-bearing, call
+  `with_velocity(notes, profile, mark_dynamics=True)` so the dynamic
+  markings appear visibly in the printed score (MuseScore via
+  MusicXML), not just in MIDI playback. The flag inserts a single
+  Italian dynamic mark (`pp`/`p`/`mp`/`mf`/`f`/`ff`) for int and
+  named profiles, and hairpin spanners (`<` / `>`) plus bracketing
+  dynamics for `'crescendo'` / `'decrescendo'`. List patterns
+  (cyclic per-note variation) deliberately skip dynamic insertion —
+  too granular to mark cleanly. Default is `mark_dynamics=False` for
+  back-compat and for pieces (e.g., Reich-style phase music) where
+  dynamics are intentionally absent.
+
 - For Measures, prefer bar(*items, time_signature=ts) over manual
   Measure construction. bar() auto-pads with a trailing Rest if items
   are short and raises ValueError if they overflow — you don't have

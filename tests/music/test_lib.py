@@ -719,3 +719,148 @@ def test_force_perc_channel_does_not_change_percMapPitch():
   assert high_tom().percMapPitch == 50
   assert crash_cymbal().percMapPitch == 49
   assert ride_cymbal().percMapPitch == 51
+
+
+# ---------- with_velocity(mark_dynamics=True) (v0.3.8) ----------
+
+from forge.music.lib import _velocity_to_dynamic_mark
+
+
+def _make_measure_with_notes(n_notes):
+  """Build a Measure with n_notes notes; return (measure, notes)."""
+  m = stream.Measure()
+  notes_list = []
+  for i in range(n_notes):
+    nn = note.Note('C4', quarterLength=0.5)
+    m.append(nn)
+    notes_list.append(nn)
+  return m, notes_list
+
+
+def test_with_velocity_no_dynamics_inserted_by_default():
+  from music21 import dynamics
+  m, notes_list = _make_measure_with_notes(4)
+  with_velocity(notes_list, 80)  # mark_dynamics defaults to False
+  dyns = list(m.getElementsByClass(dynamics.Dynamic))
+  crescs = list(m.getElementsByClass(dynamics.Crescendo))
+  dims = list(m.getElementsByClass(dynamics.Diminuendo))
+  assert dyns == [] and crescs == [] and dims == []
+
+
+def test_with_velocity_int_inserts_single_dynamic():
+  from music21 import dynamics
+  m, notes_list = _make_measure_with_notes(4)
+  with_velocity(notes_list, 80, mark_dynamics=True)
+  dyns = list(m.getElementsByClass(dynamics.Dynamic))
+  assert len(dyns) == 1
+  assert dyns[0].value == 'mf'
+  assert dyns[0].offset == notes_list[0].offset
+
+
+def test_with_velocity_human_inserts_mf():
+  from music21 import dynamics
+  m, notes_list = _make_measure_with_notes(8)
+  with_velocity(notes_list, 'human', mark_dynamics=True)
+  dyns = list(m.getElementsByClass(dynamics.Dynamic))
+  assert len(dyns) == 1
+  assert dyns[0].value == 'mf'
+
+
+def test_with_velocity_ghost_inserts_pp():
+  from music21 import dynamics
+  m, notes_list = _make_measure_with_notes(8)
+  with_velocity(notes_list, 'ghost', mark_dynamics=True)
+  dyns = list(m.getElementsByClass(dynamics.Dynamic))
+  assert len(dyns) == 1
+  assert dyns[0].value == 'pp'
+
+
+def test_with_velocity_accent_inserts_ff():
+  from music21 import dynamics
+  m, notes_list = _make_measure_with_notes(8)
+  with_velocity(notes_list, 'accent', mark_dynamics=True)
+  dyns = list(m.getElementsByClass(dynamics.Dynamic))
+  assert len(dyns) == 1
+  assert dyns[0].value == 'ff'
+
+
+def test_with_velocity_crescendo_inserts_hairpin():
+  from music21 import dynamics
+  m, notes_list = _make_measure_with_notes(8)
+  with_velocity(notes_list, 'crescendo', mark_dynamics=True)
+  crescs = list(m.getElementsByClass(dynamics.Crescendo))
+  dims = list(m.getElementsByClass(dynamics.Diminuendo))
+  dyns = list(m.getElementsByClass(dynamics.Dynamic))
+  assert len(crescs) == 1, f"expected 1 Crescendo hairpin, got {len(crescs)}"
+  assert len(dims) == 0
+  # Spanner should connect first and last note.
+  spanned = list(crescs[0].getSpannedElements())
+  assert notes_list[0] in spanned and notes_list[-1] in spanned
+  # Bracketing dynamics: 'p' at start, 'f' at end.
+  marks = sorted([(d.offset, d.value) for d in dyns])
+  assert marks[0][1] == 'p'
+  assert marks[-1][1] == 'f'
+
+
+def test_with_velocity_decrescendo_inserts_diminuendo_hairpin():
+  from music21 import dynamics
+  m, notes_list = _make_measure_with_notes(8)
+  with_velocity(notes_list, 'decrescendo', mark_dynamics=True)
+  dims = list(m.getElementsByClass(dynamics.Diminuendo))
+  crescs = list(m.getElementsByClass(dynamics.Crescendo))
+  dyns = list(m.getElementsByClass(dynamics.Dynamic))
+  assert len(dims) == 1
+  assert len(crescs) == 0
+  spanned = list(dims[0].getSpannedElements())
+  assert notes_list[0] in spanned and notes_list[-1] in spanned
+  marks = sorted([(d.offset, d.value) for d in dyns])
+  assert marks[0][1] == 'f'
+  assert marks[-1][1] == 'p'
+
+
+def test_with_velocity_list_pattern_skips_dynamics():
+  from music21 import dynamics
+  m, notes_list = _make_measure_with_notes(4)
+  with_velocity(notes_list, [100, 60, 80, 60], mark_dynamics=True)
+  dyns = list(m.getElementsByClass(dynamics.Dynamic))
+  crescs = list(m.getElementsByClass(dynamics.Crescendo))
+  dims = list(m.getElementsByClass(dynamics.Diminuendo))
+  assert dyns == [] and crescs == [] and dims == [], (
+    "list patterns should not insert any dynamics or hairpins"
+  )
+
+
+@pytest.mark.parametrize("velocity,expected", [
+  (1, 'ppp'), (30, 'ppp'),
+  (31, 'pp'), (45, 'pp'),
+  (46, 'p'),  (60, 'p'),
+  (61, 'mp'), (72, 'mp'),
+  (73, 'mf'), (85, 'mf'),
+  (86, 'f'),  (100, 'f'),
+  (101, 'ff'), (115, 'ff'),
+  (116, 'fff'), (127, 'fff'),
+])
+def test_velocity_to_dynamic_mark_boundaries(velocity, expected):
+  assert _velocity_to_dynamic_mark(velocity) == expected
+
+
+def test_with_velocity_active_site_none_skips_insertion():
+  """Notes without an enclosing stream — call should not raise, and
+  no dynamic insertion happens (no stream to insert into)."""
+  bare_notes = [note.Note('C4', quarterLength=0.5) for _ in range(4)]
+  for n in bare_notes:
+    assert n.activeSite is None
+  # Should not raise:
+  with_velocity(bare_notes, 80, mark_dynamics=True)
+  # All notes still get velocity set:
+  assert all(n.volume.velocity == 80 for n in bare_notes)
+
+
+def test_with_velocity_clamp_to_int_below_1_uses_ppp_mark():
+  """Edge case: clamping happens BEFORE the dynamic mark lookup."""
+  from music21 import dynamics
+  m, notes_list = _make_measure_with_notes(4)
+  with_velocity(notes_list, -5, mark_dynamics=True)
+  dyns = list(m.getElementsByClass(dynamics.Dynamic))
+  assert len(dyns) == 1
+  assert dyns[0].value == 'ppp'  # velocity clamped to 1 → 'ppp'

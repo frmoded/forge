@@ -39,6 +39,27 @@ def test_murmuration_returns_valid_score(run_music_block):
             )
 
 
+def test_murmuration_score_contains_dynamic_markings(run_music_block):
+    """v0.3.8: Murmuration retrofit uses with_velocity(..., mark_dynamics=True)
+    so the dynamic arc is visible in the printed score. Assert the
+    returned Score contains at least one dynamics.Dynamic marking
+    after retrofit. Pre-v0.3.8 would have had zero."""
+    from music21 import dynamics
+    result = run_music_block("murmuration")
+    # Walk every Part and count dynamic markings.
+    all_dynamics = []
+    for part in result.parts:
+        for el in part.recurse():
+            if isinstance(el, dynamics.Dynamic):
+                all_dynamics.append(el.value)
+            elif isinstance(el, (dynamics.Crescendo, dynamics.Diminuendo)):
+                all_dynamics.append(type(el).__name__)
+    assert len(all_dynamics) >= 1, (
+        "Murmuration should have at least one dynamic marking post-retrofit; "
+        "got none — mark_dynamics=True may not be landing"
+    )
+
+
 def test_murmuration_has_velocity_variation(run_music_block):
     """The piece should exhibit velocity variation — robotic uniform
     velocity (every hit at 90) would defeat the with_velocity()

@@ -299,8 +299,16 @@ def major_pentatonic(
 # patterns cover the deterministic cases. Default music21 velocity is
 # 90; uniform 90 sounds like a drum machine. with_velocity is the
 # fastest path to avoiding that.
+#
+# v0.3.8 — added mark_dynamics=True opt-in: insert visible Italian
+# dynamic marks (and hairpin spanners for crescendo/decrescendo) into
+# the notes' parent stream so the dynamic arc shows in the printed
+# score, not just MIDI playback. Default False for back-compat and
+# for pieces (e.g. Reich-style phase music) where dynamics are
+# intentionally absent.
 
 import random as _stdlib_random
+from music21 import dynamics
 
 _VELOCITY_PROFILES = {
   'human':       lambda i, n: 75 + _stdlib_random.randint(-8, 8),
@@ -310,8 +318,50 @@ _VELOCITY_PROFILES = {
   'decrescendo': lambda i, n: int(90 - (90 - 40) * (i / max(n - 1, 1))),
 }
 
+# Profile → nominal Italian dynamic mark (the visible representative,
+# not per-note jitter). Used only when mark_dynamics=True.
+_PROFILE_NOMINAL_MARK = {
+  'human':  'mf',   # nominal center 75
+  'ghost':  'pp',   # nominal center 35
+  'accent': 'ff',   # nominal center 110
+}
 
-def with_velocity(notes, pattern):
+# Standard MIDI velocity → Italian dynamic abbreviation. Boundaries
+# chosen to match typical music-engraving convention (mf is the
+# neutral center around 73-85; band widths roughly equal in the
+# working range).
+_VELOCITY_TO_DYNAMIC = [
+  # (max_velocity_inclusive, dynamic_string)
+  (30,  'ppp'),
+  (45,  'pp'),
+  (60,  'p'),
+  (72,  'mp'),
+  (85,  'mf'),
+  (100, 'f'),
+  (115, 'ff'),
+  (127, 'fff'),
+]
+
+
+def _velocity_to_dynamic_mark(velocity):
+  """Map a MIDI velocity (1-127) to its Italian dynamic abbreviation."""
+  for max_v, mark in _VELOCITY_TO_DYNAMIC:
+    if velocity <= max_v:
+      return mark
+  return 'fff'  # safety; clamped values shouldn't reach here
+
+
+def _insert_dynamic_at_note(target_note, mark):
+  """Insert a music21.dynamics.Dynamic at target_note's offset in its
+  parent stream (activeSite). Skip silently when activeSite is None."""
+  site = target_note.activeSite
+  if site is None:
+    return
+  d = dynamics.Dynamic(mark)
+  site.insert(target_note.offset, d)
+
+
+def with_velocity(notes, pattern, mark_dynamics=False):
   """Apply velocity values to a sequence of Note objects per a pattern.
 
   Mutates each note's `.volume.velocity` in place and returns the list
@@ -327,40 +377,83 @@ def with_velocity(notes, pattern):
     int (1-127)   — uniform value across all notes.
     list of ints  — cyclic pattern, e.g. [100, 60, 80, 60].
 
+  mark_dynamics: When True, insert visible score dynamics in addition
+                 to setting MIDI velocity (default False for back-compat
+                 and respect for pieces where dynamics are intentionally
+                 absent, e.g. Reich-style phase music).
+
+                 - int and named-profile (human/ghost/accent) patterns
+                   insert ONE Dynamic mark at the first non-rest note,
+                   representing the section's overall level.
+                 - 'crescendo' / 'decrescendo' insert a hairpin
+                   (dynamics.Crescendo / dynamics.Diminuendo) spanner
+                   plus bracketing Dynamics ('p'/'f' for crescendo;
+                   'f'/'p' for decrescendo).
+                 - list patterns SKIP dynamic insertion (per-note
+                   alternation is too granular to mark cleanly; use
+                   per-note articulation helpers for accents).
+
+                 Insertion targets each note's `.activeSite` (the
+                 enclosing Measure). Notes whose activeSite is None
+                 are skipped silently — call with_velocity AFTER
+                 adding notes to their measures for marks to land.
+
   Returns: notes (same list reference, mutated)."""
   if isinstance(pattern, bool):
     # Python booleans are ints; guard so True/False don't accidentally
     # become uniform velocity 1 / 0.
     raise ValueError(f"velocity pattern must be int (1-127), list, or named profile; got bool {pattern!r}")
+
+  non_rest_notes = [n for n in notes if not isinstance(n, note.Rest)]
+
   if isinstance(pattern, int):
-    for n in notes:
-      if not isinstance(n, note.Rest):
-        n.volume.velocity = max(1, min(127, pattern))
+    clamped = max(1, min(127, pattern))
+    for n in non_rest_notes:
+      n.volume.velocity = clamped
+    if mark_dynamics and non_rest_notes:
+      _insert_dynamic_at_note(non_rest_notes[0], _velocity_to_dynamic_mark(clamped))
     return notes
+
   if isinstance(pattern, list):
     if not pattern:
       raise ValueError("velocity pattern list must be non-empty")
-    non_rest_idx = 0
-    for n in notes:
-      if isinstance(n, note.Rest):
-        continue
-      n.volume.velocity = max(1, min(127, pattern[non_rest_idx % len(pattern)]))
-      non_rest_idx += 1
+    for i, n in enumerate(non_rest_notes):
+      n.volume.velocity = max(1, min(127, pattern[i % len(pattern)]))
+    # List patterns deliberately SKIP dynamic insertion — per-note
+    # alternation is too granular to mark cleanly without clutter.
     return notes
+
   if pattern not in _VELOCITY_PROFILES:
     raise ValueError(
       f"unknown velocity pattern {pattern!r}; expected one of "
       f"{list(_VELOCITY_PROFILES)} or int 1-127 or list[int]"
     )
+
   profile_fn = _VELOCITY_PROFILES[pattern]
-  non_rest_total = sum(1 for n in notes if not isinstance(n, note.Rest))
-  non_rest_idx = 0
-  for n in notes:
-    if isinstance(n, note.Rest):
-      continue
-    v = profile_fn(non_rest_idx, non_rest_total)
+  n_total = len(non_rest_notes)
+  for i, n in enumerate(non_rest_notes):
+    v = profile_fn(i, n_total)
     n.volume.velocity = max(1, min(127, v))
-    non_rest_idx += 1
+
+  if mark_dynamics and non_rest_notes:
+    if pattern in ('crescendo', 'decrescendo'):
+      # Bracketing Dynamics + a hairpin Spanner across first..last.
+      if pattern == 'crescendo':
+        _insert_dynamic_at_note(non_rest_notes[0], 'p')
+        _insert_dynamic_at_note(non_rest_notes[-1], 'f')
+        hairpin = dynamics.Crescendo()
+      else:
+        _insert_dynamic_at_note(non_rest_notes[0], 'f')
+        _insert_dynamic_at_note(non_rest_notes[-1], 'p')
+        hairpin = dynamics.Diminuendo()
+      hairpin.addSpannedElements([non_rest_notes[0], non_rest_notes[-1]])
+      # Spanner lives at the first note's stream; insert at first note's offset.
+      first_site = non_rest_notes[0].activeSite
+      if first_site is not None:
+        first_site.insert(non_rest_notes[0].offset, hairpin)
+    else:
+      _insert_dynamic_at_note(non_rest_notes[0], _PROFILE_NOMINAL_MARK[pattern])
+
   return notes
 
 
