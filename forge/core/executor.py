@@ -36,7 +36,8 @@ try:
     "voices": _music_lib.voices,
     "sequence": _music_lib.sequence,
     "repeat": _music_lib.repeat,
-    "pentatonic": _music_lib.pentatonic,
+    "minor_pentatonic": _music_lib.minor_pentatonic,
+    "major_pentatonic": _music_lib.major_pentatonic,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}

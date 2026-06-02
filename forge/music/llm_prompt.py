@@ -30,8 +30,10 @@ Composition helpers — also pre-injected as globals (do NOT import these):
   voices(*streams, instruments=)         -> Score (parallel / overlay)
   sequence(*streams)                     -> Score (linear / concat)
   repeat(stream, n)                      -> Score (n copies end-to-end)
-  pentatonic(key_or_tonic, mode='minor', octave_range=(4,5),
-             include_blue=False)         -> list[Pitch]
+  minor_pentatonic(key_or_tonic, octave_range=(4,5),
+                   include_blue=False)   -> list[Pitch]
+  major_pentatonic(key_or_tonic, octave_range=(4,5))
+                                          -> list[Pitch]
 
 These hide music21 boilerplate (part/measure assembly, deepcopy,
 rest-padding). Use them rather than hand-rolling those patterns.
@@ -54,18 +56,24 @@ Idiomatic examples:
   )
 
   # Get a pentatonic scale (with blue note for blues)
-  scale = pentatonic(found_key, mode='minor', octave_range=(4, 5),
-                     include_blue=True)
+  scale = minor_pentatonic(found_key, octave_range=(4, 5),
+                           include_blue=True)
 
 Composition rules — prefer the helpers above to hand-rolled equivalents:
 
 - For linear composition (sections played end-to-end), use sequence(...)
-  — not hand-rolled measure concatenation. sequence aligns parts BY
-  POSITION across inputs (input[0].parts[0] + input[1].parts[0] + ...
-  becomes output.parts[0]; same for parts[1], etc.), renumbers measures
-  sequentially, and handles voice-count mismatches between sections
-  automatically. Mix 2-voice and 3-voice sections freely; sequence
-  produces a continuous Score.
+  — not hand-rolled measure concatenation. At each voice position
+  across the inputs, sequence groups parts by INSTRUMENT IDENTITY:
+  same-instrument parts at the same position merge into one continuous
+  output stave; different-instrument parts split into separate staves
+  with rest-padding for inactive sections. So
+  `sequence(chorus, chorus, solo_chorus, chorus)` where each chorus
+  has [Piano, Vocalist] and solo_chorus has [Piano, ElectricGuitar]
+  produces three staves: Piano continuous across all four sections;
+  Vocalist active in the choruses with rests during the solo;
+  ElectricGuitar active during the solo with rests during choruses.
+  Measures are renumbered sequentially in each output stave. Mix
+  voice counts and instruments freely.
 
   CRITICAL: do NOT manually replicate voices()/sequence() by iterating
   `getElementsByClass(stream.Part)` and appending parts to a Score —
@@ -82,10 +90,18 @@ Composition rules — prefer the helpers above to hand-rolled equivalents:
 - For repeating a section, use repeat(stream, n) instead of writing
   sequence(stream, stream, ..., stream).
 
-- For pentatonic scales, use pentatonic(key_or_tonic, mode='minor', ...)
-  — don't hand-derive intervals like (0, 3, 5, 7, 10) in your own code.
-  The helper returns ordered Pitch objects across the requested octave
-  range; pass include_blue=True to add the b5.
+- For pentatonic scales, use `minor_pentatonic(key_or_tonic, ...)` or
+  `major_pentatonic(key_or_tonic, ...)` — don't hand-derive intervals
+  like (0, 3, 5, 7, 10) in your own code. The helpers return ordered
+  Pitch objects across the requested octave range; minor accepts
+  `include_blue=True` to add the b5 (the major variant does not).
+
+  **For blues vocal/instrumental lines, use `minor_pentatonic` even
+  when the source key's mode is 'major'** — the
+  minor-pentatonic-over-major-progression pattern is the blues
+  convention. The function name documents the choice; you do NOT
+  need to write a defensive English note about "deliberate mode
+  override" because there is no mode kwarg to override.
 
 - For Measures, prefer bar(*items, time_signature=ts) over manual
   Measure construction. bar() auto-pads with a trailing Rest if items

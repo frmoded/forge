@@ -232,27 +232,18 @@ _PENTATONIC_INTERVALS = {
 }
 
 
-def pentatonic(
+def _pentatonic_pitches(
   key_or_tonic: Union[key.Key, str],
-  mode: str = 'minor',
-  octave_range: tuple[int, int] = (4, 5),
-  include_blue: bool = False,
+  intervals: tuple,
+  octave_range: tuple[int, int],
 ) -> list[pitch.Pitch]:
-  """Return pentatonic scale pitches across the given octave range,
-  ordered low-to-high. Mode is 'minor' or 'major'. include_blue=True
-  adds the b5."""
-  if mode not in _PENTATONIC_INTERVALS:
-    raise ValueError(f"mode must be 'minor' or 'major', got {mode!r}")
-
+  """Shared core for {minor,major}_pentatonic — given a tonic and the
+  semitone intervals to apply, return ordered pitches across the
+  requested octaves. Not exported; not pre-injected into snippets."""
   if isinstance(key_or_tonic, key.Key):
     tonic_name = key_or_tonic.tonic.name
   else:
     tonic_name = str(key_or_tonic)
-
-  intervals = list(_PENTATONIC_INTERVALS[mode])
-  if include_blue:
-    intervals.append(6)
-    intervals.sort()
 
   start_oct, end_oct = octave_range
   if start_oct > end_oct:
@@ -266,6 +257,41 @@ def pentatonic(
       pitches.append(base.transpose(semitones))
   pitches.sort(key=lambda p: p.midi)
   return pitches
+
+
+def minor_pentatonic(
+  key_or_tonic: Union[key.Key, str],
+  octave_range: tuple[int, int] = (4, 5),
+  include_blue: bool = False,
+) -> list[pitch.Pitch]:
+  """Return minor-pentatonic scale pitches across the given octave range.
+
+  For blues vocal/instrumental lines: use this even when the source key
+  is in major mode. The minor-pentatonic-over-major-progression pattern
+  is the blues convention; the function name documents the deliberate
+  choice so no "mode='minor'" kwarg or defensive English is needed.
+
+  `include_blue=True` adds the b5 (the blue note)."""
+  intervals = list(_PENTATONIC_INTERVALS['minor'])
+  if include_blue:
+    intervals.append(6)
+    intervals.sort()
+  return _pentatonic_pitches(key_or_tonic, tuple(intervals), octave_range)
+
+
+def major_pentatonic(
+  key_or_tonic: Union[key.Key, str],
+  octave_range: tuple[int, int] = (4, 5),
+) -> list[pitch.Pitch]:
+  """Return major-pentatonic scale pitches across the given octave range.
+
+  Use for content that wants to track the underlying mode (most folk,
+  pop, hymnody). For blues, prefer `minor_pentatonic(...)` regardless of
+  the source key's mode. No `include_blue` kwarg — the blue note is a
+  minor-pentatonic ornament, not a major-pentatonic one."""
+  return _pentatonic_pitches(
+    key_or_tonic, _PENTATONIC_INTERVALS['major'], octave_range,
+  )
 
 
 def _coerce_to_part(s: StreamLike) -> stream.Part:

@@ -1,7 +1,10 @@
 import pytest
 from music21 import key, meter, note, pitch, stream, instrument
 
-from forge.music.lib import bar, voices, sequence, repeat, pentatonic
+from forge.music.lib import (
+  bar, voices, sequence, repeat,
+  minor_pentatonic, major_pentatonic,
+)
 
 
 # ---------- bar ----------
@@ -392,36 +395,50 @@ def test_repeat_does_not_alias_original():
 
 # ---------- pentatonic ----------
 
-def test_pentatonic_minor_e_one_octave():
-  ps = pentatonic('E', mode='minor', octave_range=(4, 4))
+def test_minor_pentatonic_e_one_octave():
+  ps = minor_pentatonic('E', octave_range=(4, 4))
   names = [p.nameWithOctave for p in ps]
   # E minor pent: E, G, A, B, D — D wraps into octave 5 because it's above E4
   assert names == ['E4', 'G4', 'A4', 'B4', 'D5']
 
 
-def test_pentatonic_major_c_one_octave():
-  ps = pentatonic('C', mode='major', octave_range=(4, 4))
+def test_major_pentatonic_c_one_octave():
+  ps = major_pentatonic('C', octave_range=(4, 4))
   names = [p.name for p in ps]
   assert names == ['C', 'D', 'E', 'G', 'A']
 
 
-def test_pentatonic_accepts_key_object():
+def test_minor_pentatonic_accepts_key_object():
   k = key.Key('A', 'minor')
-  ps = pentatonic(k, mode='minor', octave_range=(4, 4))
+  ps = minor_pentatonic(k, octave_range=(4, 4))
   assert ps[0].name == 'A'
 
 
-def test_pentatonic_includes_blue_note():
-  ps_no_blue = pentatonic('E', mode='minor', octave_range=(4, 4))
-  ps_blue = pentatonic('E', mode='minor', octave_range=(4, 4), include_blue=True)
+def test_major_pentatonic_accepts_key_object():
+  """major_pentatonic accepts a Key just like the minor variant."""
+  k = key.Key('G', 'major')
+  ps = major_pentatonic(k, octave_range=(4, 4))
+  assert ps[0].name == 'G'
+
+
+def test_minor_pentatonic_includes_blue_note():
+  ps_no_blue = minor_pentatonic('E', octave_range=(4, 4))
+  ps_blue = minor_pentatonic('E', octave_range=(4, 4), include_blue=True)
   assert len(ps_blue) == len(ps_no_blue) + 1
   # b5 of E is Bb (or A#) — semitone 6 above E
   midis = [p.midi for p in ps_blue]
   assert (ps_no_blue[0].midi + 6) in midis
 
 
-def test_pentatonic_spans_multiple_octaves():
-  ps = pentatonic('E', mode='minor', octave_range=(4, 5))
+def test_major_pentatonic_has_no_include_blue_kwarg():
+  """The blue note is a minor-pentatonic ornament, not a major-pentatonic
+  one. Locking in the asymmetric kwarg surface."""
+  with pytest.raises(TypeError, match="include_blue"):
+    major_pentatonic('C', include_blue=True)  # type: ignore[call-arg]
+
+
+def test_minor_pentatonic_spans_multiple_octaves():
+  ps = minor_pentatonic('E', octave_range=(4, 5))
   midis = [p.midi for p in ps]
   assert midis == sorted(midis)
   # one octave has 5 notes; two octaves' worth should produce ~10 (some
@@ -429,14 +446,20 @@ def test_pentatonic_spans_multiple_octaves():
   assert len(ps) >= 9
 
 
-def test_pentatonic_invalid_mode_raises():
-  with pytest.raises(ValueError, match="mode"):
-    pentatonic('C', mode='dorian')
-
-
-def test_pentatonic_inverted_octave_range_raises():
+def test_minor_pentatonic_inverted_octave_range_raises():
   with pytest.raises(ValueError, match="octave_range"):
-    pentatonic('C', octave_range=(5, 4))
+    minor_pentatonic('C', octave_range=(5, 4))
+
+
+def test_pentatonic_legacy_name_is_gone():
+  """v0.3.3: `pentatonic` was renamed to `minor_pentatonic` +
+  `major_pentatonic`. The legacy name must be unimportable so callers
+  see an ImportError at module-load rather than a silent name shadowing."""
+  from forge.music import lib as _lib
+  assert not hasattr(_lib, 'pentatonic'), (
+    "pentatonic should be removed entirely (no deprecation alias); "
+    "callers must use minor_pentatonic or major_pentatonic"
+  )
 
 
 # ---------- executor injection ----------
