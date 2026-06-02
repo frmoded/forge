@@ -2,14 +2,58 @@ import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import List, Optional
-import tomli_w
-from packaging.version import Version, InvalidVersion
-from forge.installer.exceptions import ValidationError
 
 try:
   import tomllib
 except ImportError:
   import tomli as tomllib
+
+# v0.3.x: tomli_w, packaging.version, and forge.installer.exceptions
+# are not available in the closed-beta Pyodide bundle (tomli_w wasn't
+# vendored; packaging likewise; forge.installer is intentionally
+# excluded from the bundle scope per the engine-bundle drift filter).
+# `read_manifest` is the only function the plugin path exercises; it
+# uses ValidationError + a semver check + tomllib. Make all three
+# imports lazy/fallback so reads work in Pyodide without breaking
+# writes/installs on systems where the full stack is available.
+
+try:
+  from forge.installer.exceptions import ValidationError  # type: ignore[import-not-found]
+except ImportError:
+  class ValidationError(Exception):
+    """Local fallback when forge.installer isn't on sys.path (Pyodide
+    closed-beta bundle excludes the installer subpackage). Callers that
+    catch ValidationError still work via duck-typing on the class
+    obtained at runtime — caller's import resolves to the same module
+    object as this one."""
+    pass
+
+
+def _semver_validators():
+  """Return (Version, InvalidVersion) from packaging.version if
+  available, else a regex-based fallback pair with the same shape.
+
+  Lazy because packaging isn't vendored in the closed-beta Pyodide
+  bundle; the validation in Pyodide can fall back to a regex check
+  without losing the "obviously-bad-version-string" catch."""
+  try:
+    from packaging.version import Version, InvalidVersion  # type: ignore[import-not-found]
+    return Version, InvalidVersion
+  except ImportError:
+    class _FallbackInvalidVersion(Exception):
+      pass
+    # Permissive SemVer-ish: <major>.<minor>.<patch>(-prerelease)?(+build)?
+    _SEMVER_RE = re.compile(
+      r"^\d+(\.\d+){1,2}([-+][0-9A-Za-z.\-+]+)?$"
+    )
+
+    class _FallbackVersion:
+      def __init__(self, s):
+        if not _SEMVER_RE.match(s):
+          raise _FallbackInvalidVersion(f"not a valid version: {s!r}")
+
+    return _FallbackVersion, _FallbackInvalidVersion
+
 
 MANIFEST_FILENAME = "forge.toml"
 _NAME_RE = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
@@ -46,6 +90,10 @@ def read_manifest(vault_dir: Path) -> Manifest:
 
 def write_manifest(vault_dir: Path, manifest: Manifest) -> None:
   _validate(manifest)
+  # tomli_w is only needed for writes; lazy-import keeps the read path
+  # (the only one the closed-beta Pyodide bundle exercises) working
+  # without tomli_w being vendored.
+  import tomli_w
   path = Path(vault_dir) / MANIFEST_FILENAME
   path.parent.mkdir(parents=True, exist_ok=True)
   with open(path, "wb") as f:
@@ -132,6 +180,7 @@ def _validate(manifest: Manifest) -> None:
 
 
 def _validate_semver(s: str, label: str) -> None:
+  Version, InvalidVersion = _semver_validators()
   try:
     Version(s)
   except InvalidVersion as e:
