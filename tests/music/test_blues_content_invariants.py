@@ -82,6 +82,25 @@ def test_song_bars_sum_to_bar_ql(run_music_block):
     )
 
 
+def test_drums_shuffle_returns_valid_score(run_music_block):
+    """v0.3.5 spike: drums_shuffle computes to a Score with at least
+    one Part. Every Measure's notes+rests sum to 6.0 quarterLength
+    per the 12/8 invariant. Detailed rendering quality is a user-side
+    eyeball, not a suite assertion — this test just locks in the
+    structural contract."""
+    result = run_music_block("drums_shuffle")
+    assert isinstance(result, stream.Score)
+    parts = list(result.parts)
+    assert len(parts) >= 1, "drums_shuffle should produce at least one Part"
+    for part in parts:
+        for m in part.getElementsByClass(stream.Measure):
+            total = sum(el.duration.quarterLength for el in m.notesAndRests)
+            assert abs(total - 6.0) < 1e-6, (
+                f"part {part.partName or part.id!r} measure {m.number} "
+                f"total = {total}, expected 6.0"
+            )
+
+
 def test_vocal_phrase_b_bars_already_clean(run_music_block):
     """Investigation found vocal_phrase_b's measures already sum to
     6.0 — its trailing-rest pattern doesn't hit the Rest(0)→Rest(1.0)
