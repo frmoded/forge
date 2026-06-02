@@ -95,6 +95,25 @@ def test_vocal_phrase_b_bars_already_clean(run_music_block):
     )
 
 
+def test_vocal_phrase_a_shape_preserved_through_bar_migration(run_music_block):
+    """Phase B (v0.3.3) migrated vocal_phrase_a from manual stream.Measure
+    + _pad to lib.bar(). The output shape must be unchanged: 1 Part
+    containing 4 Measures, each summing to bar_ql=6.0 (which the
+    bar-arithmetic test above covers). This test locks in the structural
+    shape so a future refactor can't silently drop a measure or split
+    the Part."""
+    result = run_music_block("vocal_phrase_a")
+    assert isinstance(result, stream.Score), (
+        f"expected Score, got {type(result).__name__}"
+    )
+    parts = list(result.parts)
+    assert len(parts) == 1, f"expected 1 Part, got {len(parts)}"
+    measures = list(parts[0].getElementsByClass(stream.Measure))
+    assert len(measures) == 4, (
+        f"expected 4 Measures (the four phrase bars), got {len(measures)}"
+    )
+
+
 def test_minor_pentatonic_intent_documented_in_vocal_phrase_a(music_vault):
     """Mode-forcing audit: vocal_phrase_a calls pentatonic(..., mode='minor', ...)
     regardless of form's declared mode (form uses major). This is
