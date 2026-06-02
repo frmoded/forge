@@ -4,6 +4,7 @@ from music21 import key, meter, note, pitch, stream, instrument
 from forge.music.lib import (
   bar, voices, sequence, repeat,
   minor_pentatonic, major_pentatonic,
+  with_velocity,
 )
 
 
@@ -476,3 +477,90 @@ def test_executor_injects_lib_into_snippet_namespace():
   measures = list(result.getElementsByClass(stream.Part)[0]
                   .getElementsByClass(stream.Measure))
   assert len(measures) == 2
+
+
+# ---------- with_velocity (v0.3.6) ----------
+
+def _make_notes(n):
+  return [note.Note('C4', quarterLength=0.5) for _ in range(n)]
+
+
+def test_with_velocity_uniform_int():
+  ns = _make_notes(3)
+  with_velocity(ns, 80)
+  assert [n.volume.velocity for n in ns] == [80, 80, 80]
+
+
+def test_with_velocity_cyclic_list():
+  ns = _make_notes(5)
+  with_velocity(ns, [100, 60])
+  assert [n.volume.velocity for n in ns] == [100, 60, 100, 60, 100]
+
+
+def test_with_velocity_human_profile_in_range():
+  # 'human' = 75 + randint(-8, 8) ⇒ 67..83 inclusive.
+  ns = _make_notes(20)
+  with_velocity(ns, 'human')
+  for n in ns:
+    assert 67 <= n.volume.velocity <= 83, n.volume.velocity
+
+
+def test_with_velocity_ghost_profile_in_range():
+  # 'ghost' = 35 + randint(-5, 8) ⇒ 30..43 inclusive.
+  ns = _make_notes(20)
+  with_velocity(ns, 'ghost')
+  for n in ns:
+    assert 30 <= n.volume.velocity <= 43, n.volume.velocity
+
+
+def test_with_velocity_accent_profile_in_range():
+  # 'accent' = 110 + randint(-5, 10) ⇒ 105..120 inclusive.
+  ns = _make_notes(20)
+  with_velocity(ns, 'accent')
+  for n in ns:
+    assert 105 <= n.volume.velocity <= 120, n.volume.velocity
+
+
+def test_with_velocity_crescendo_first_is_quiet_last_is_loud():
+  ns = _make_notes(10)
+  with_velocity(ns, 'crescendo')
+  assert ns[0].volume.velocity <= 50
+  assert ns[-1].volume.velocity >= 80
+
+
+def test_with_velocity_decrescendo_first_is_loud_last_is_quiet():
+  ns = _make_notes(10)
+  with_velocity(ns, 'decrescendo')
+  assert ns[0].volume.velocity >= 80
+  assert ns[-1].volume.velocity <= 50
+
+
+def test_with_velocity_skips_rests():
+  ns = [note.Note('C4'), note.Rest(quarterLength=0.5), note.Note('C4')]
+  with_velocity(ns, [100, 60])
+  # rest is untouched; the two notes get 100 and 60 (positions 0 and 1
+  # in the non-rest sequence).
+  assert ns[0].volume.velocity == 100
+  assert ns[2].volume.velocity == 60
+
+
+def test_with_velocity_invalid_pattern_raises():
+  with pytest.raises(ValueError, match="unknown velocity pattern"):
+    with_velocity(_make_notes(1), 'unknown')
+
+
+def test_with_velocity_empty_list_pattern_raises():
+  with pytest.raises(ValueError, match="non-empty"):
+    with_velocity(_make_notes(1), [])
+
+
+def test_with_velocity_clamps_above_127():
+  ns = _make_notes(1)
+  with_velocity(ns, 200)
+  assert ns[0].volume.velocity == 127
+
+
+def test_with_velocity_clamps_below_1():
+  ns = _make_notes(1)
+  with_velocity(ns, -5)
+  assert ns[0].volume.velocity == 1

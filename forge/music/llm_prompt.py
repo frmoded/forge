@@ -34,6 +34,7 @@ Composition helpers — also pre-injected as globals (do NOT import these):
                    include_blue=False)   -> list[Pitch]
   major_pentatonic(key_or_tonic, octave_range=(4,5))
                                           -> list[Pitch]
+  with_velocity(notes, pattern)           -> notes (mutated in place)
 
 These hide music21 boilerplate (part/measure assembly, deepcopy,
 rest-padding). Use them rather than hand-rolling those patterns.
@@ -102,6 +103,16 @@ Composition rules — prefer the helpers above to hand-rolled equivalents:
   convention. The function name documents the choice; you do NOT
   need to write a defensive English note about "deliberate mode
   override" because there is no mode kwarg to override.
+
+- For percussion (and any rhythmic content), vary note velocities to
+  avoid robotic-sounding output. Use `with_velocity(notes, pattern)`
+  with 'human' as a sensible default. Use 'ghost' for soft hits
+  between accented hits (e.g., snare ghost notes); 'accent' for the
+  loud hits that punch. Cyclic int lists like `[100, 60, 80, 60]`
+  apply per-beat emphasis patterns. Default music21 velocity is 90;
+  uniform 90 sounds like a drum machine. Always apply some variation
+  for content where rhythm is the focus. Rests in the sequence are
+  skipped automatically.
 
 - For Measures, prefer bar(*items, time_signature=ts) over manual
   Measure construction. bar() auto-pads with a trailing Rest if items

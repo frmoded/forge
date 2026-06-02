@@ -294,6 +294,76 @@ def major_pentatonic(
   )
 
 
+# v0.3.6 — velocity helper for percussion + any rhythmic content. The
+# 5 named profiles cover the common dynamic shapes; int and list[int]
+# patterns cover the deterministic cases. Default music21 velocity is
+# 90; uniform 90 sounds like a drum machine. with_velocity is the
+# fastest path to avoiding that.
+
+import random as _stdlib_random
+
+_VELOCITY_PROFILES = {
+  'human':       lambda i, n: 75 + _stdlib_random.randint(-8, 8),
+  'ghost':       lambda i, n: 35 + _stdlib_random.randint(-5, 8),
+  'accent':      lambda i, n: 110 + _stdlib_random.randint(-5, 10),
+  'crescendo':   lambda i, n: int(40 + (90 - 40) * (i / max(n - 1, 1))),
+  'decrescendo': lambda i, n: int(90 - (90 - 40) * (i / max(n - 1, 1))),
+}
+
+
+def with_velocity(notes, pattern):
+  """Apply velocity values to a sequence of Note objects per a pattern.
+
+  Mutates each note's `.volume.velocity` in place and returns the list
+  for chaining. Rests in the sequence are skipped.
+
+  Patterns:
+    'human'       — small random variation around 75 (±8). Default for
+                    realistic-feel drumming.
+    'ghost'       — quiet (~35), for ghost notes between accents.
+    'accent'      — loud (~110), for hits that punch.
+    'crescendo'   — linear ramp from 40 to 90 across the sequence.
+    'decrescendo' — linear ramp from 90 to 40.
+    int (1-127)   — uniform value across all notes.
+    list of ints  — cyclic pattern, e.g. [100, 60, 80, 60].
+
+  Returns: notes (same list reference, mutated)."""
+  if isinstance(pattern, bool):
+    # Python booleans are ints; guard so True/False don't accidentally
+    # become uniform velocity 1 / 0.
+    raise ValueError(f"velocity pattern must be int (1-127), list, or named profile; got bool {pattern!r}")
+  if isinstance(pattern, int):
+    for n in notes:
+      if not isinstance(n, note.Rest):
+        n.volume.velocity = max(1, min(127, pattern))
+    return notes
+  if isinstance(pattern, list):
+    if not pattern:
+      raise ValueError("velocity pattern list must be non-empty")
+    non_rest_idx = 0
+    for n in notes:
+      if isinstance(n, note.Rest):
+        continue
+      n.volume.velocity = max(1, min(127, pattern[non_rest_idx % len(pattern)]))
+      non_rest_idx += 1
+    return notes
+  if pattern not in _VELOCITY_PROFILES:
+    raise ValueError(
+      f"unknown velocity pattern {pattern!r}; expected one of "
+      f"{list(_VELOCITY_PROFILES)} or int 1-127 or list[int]"
+    )
+  profile_fn = _VELOCITY_PROFILES[pattern]
+  non_rest_total = sum(1 for n in notes if not isinstance(n, note.Rest))
+  non_rest_idx = 0
+  for n in notes:
+    if isinstance(n, note.Rest):
+      continue
+    v = profile_fn(non_rest_idx, non_rest_total)
+    n.volume.velocity = max(1, min(127, v))
+    non_rest_idx += 1
+  return notes
+
+
 def _coerce_to_part(s: StreamLike) -> stream.Part:
   """Convert a single-voice StreamLike input to a Part (deepcopied so callers
   can reuse the input). Multi-Part Scores are handled upstream by
