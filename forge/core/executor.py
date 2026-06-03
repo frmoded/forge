@@ -288,13 +288,6 @@ class ForgeContext:
     names the snippet and the offending Python type so authors can
     either fix the return or declare the opt-out.
     """
-    # FORGE-DEBUG investigation v0.2.40
-    print(
-      f"FORGE-DEBUG _capture_edge: caller_id={self._caller_id!r} "
-      f"vault_path={self.vault_path!r} "
-      f"callee_snippet_id={callee_snippet.get('snippet_id')!r} "
-      f"value_type={type(value).__name__}"
-    )
     if self._caller_id is None or self.vault_path is None:
       return
     # C7 opt-out: `snapshot_capture: false` in callee frontmatter
