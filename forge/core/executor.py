@@ -159,7 +159,7 @@ class ForgeContext:
     snippet_type = snippet["meta"].get("type")
 
     if snippet_type == "action":
-      code = extract_python(snippet["body"])
+      code = resolve_action_code(snippet)
       if code is None:
         raise ValueError(f"no Python heading in snippet '{snippet_id}'")
       nested_trusted = snippet.get("source") == "builtin"
@@ -447,6 +447,62 @@ def extract_section(body, heading):
       break
     section_lines.append(line)
   return "\n".join(section_lines).strip() or None
+
+
+def resolve_action_code(snippet):
+  """Return the Python code for an action snippet, transpiling via
+  E--'s deterministic compiler when `facet_form: canonical` is set
+  in frontmatter and no Python facet is present.
+
+  v0.2.55 — Stage 2 of the E-- migration. Opt-in canonical compile
+  path. Existing free-English snippets (facet_form absent or
+  'free') still require a pre-generated Python facet; the plugin
+  populates that via the hosted `/generate` endpoint before
+  invoking the engine.
+
+  Returns:
+    - `extract_python(body)` result when a `# Python` heading is
+      present (legacy + canonical-with-cached-Python cases).
+    - E-- transpile output when no Python facet AND `facet_form ==
+      'canonical'` AND `# English` heading is present.
+    - None when no Python facet AND no canonical opt-in — caller
+      surfaces the legacy "no Python heading" ValueError.
+
+  Raises:
+    - ValueError when `facet_form: canonical` but no `# English`
+      section (canonical snippets MUST have an English facet to
+      transpile from).
+    - ValueError on E-- syntax error in the canonical English (with
+      the upstream EmmSyntaxError chained via `from`).
+  """
+  code = extract_python(snippet["body"])
+  if code is not None:
+    return code
+  facet_form = snippet["meta"].get("facet_form")
+  if facet_form != "canonical":
+    return None  # signals legacy "no Python heading" to caller
+  # Local import keeps the E-- package out of the import graph for
+  # the 99% of executor calls that never hit the canonical path.
+  from forge.e_minus_minus import transpile, EmmSyntaxError
+  english = extract_section(snippet["body"], "English")
+  snippet_id = snippet.get("snippet_id", "<unknown>")
+  if english is None:
+    raise ValueError(
+      f"facet_form: canonical snippet '{snippet_id}' has no English heading")
+  try:
+    transpiled = transpile(english.strip())
+  except EmmSyntaxError as e:
+    raise ValueError(
+      f"E-- syntax error in canonical snippet '{snippet_id}': {e}") from e
+  # E-- emits bare statements (e.g. `print("hi")`). The engine's
+  # exec_python contract requires `def compute(context, ...):` per
+  # _find_entrypoint (B-series). Wrap the transpile output in a
+  # compute() function so canonical snippets satisfy the existing
+  # entrypoint convention without burdening E-- with Forge-specific
+  # function-definition syntax. Future Stage 3+ may move this
+  # wrapping into E--'s emitter; today it lives at the call boundary.
+  indented = "\n".join("    " + line for line in transpiled.split("\n"))
+  return f"def compute(context):\n{indented}"
 
 
 def extract_python(body):
