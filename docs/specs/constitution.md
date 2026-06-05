@@ -1,4 +1,64 @@
-# Forge — Core Invariants and Discipline (V2a v4)
+# Forge — Core Invariants and Discipline (V2a v7)
+
+## Mission
+
+Forge is a **constructionist environment**. People learn — and create
+their most meaningful work — by making artifacts they care about, in a
+medium that lets them tinker freely. The system exists to make that
+possible at every scale: a beginner making their first parametric
+greeting, a student composing a 12-bar blues, a researcher orchestrating
+a multi-snippet simulation.
+
+The building blocks are **snippets**, and they must be:
+
+- **Concrete** — every snippet produces a visible, immediately legible
+  artifact (text, score, image, simulation, computed value). The user
+  sees what they made.
+- **Parametric** — every snippet exposes inputs the user can tweak and
+  re-run. Variation is cheap.
+- **Composable** — snippets call snippets; small things become bigger
+  things; the call graph is visible to author and reader, not hidden.
+- **Personally meaningful** — users author for what *they* want to
+  build, not for a curriculum's prescribed exercises.
+
+The environment itself must have:
+
+- A **low floor** — the cost to author and run a first snippet is small.
+  A beginner can be productive within minutes.
+- A **high ceiling** — the cost to author the hundredth snippet stays
+  small. Complex work composes from simple parts without combinatorial
+  pain.
+- **Wide walls** — many directions to play (music, simulation, math,
+  image, text, anything code can do), not a single linear curriculum.
+
+**Every design decision is evaluated against the play loop.** Does this
+make adding a snippet cheaper or more expensive? Does this make tweaking
+a value cheaper or more expensive? Does this make sharing a creation
+cheaper or more expensive? If a feature costs the user more than it
+gives, it is the wrong feature — even if it is elegant.
+
+**The LLM is in service of the play loop, not the other way around.**
+The LLM lowers the entry barrier (free English → canonical) and is
+allowed to be slow or fuzzy *at transpile time*. At runtime, the system
+is deterministic, debuggable, and cheap — so users iterate without
+waiting and without per-click LLM cost. Architectural guarantees below
+serve this principle.
+
+**The canonical form is E--** (`~/projects/e--/`, vendored into the
+Forge engine package). The English facet of every snippet is — or is
+being normalized toward — canonical E--: a closed-vocabulary,
+deterministically-parseable subset of English with explicit markers
+for calls (`[[snippet]](args)`), assignments, returns, and value slots
+(`{{ ... }}`). The LLM is invoked only to normalize free English into
+canonical E-- (and to resolve `{{ slot }}` values) — never to decide
+program structure. After normalization, the deterministic E-- compiler
+emits Python; the LLM is out of the runtime path. This is the
+load-bearing implementation choice that makes the runtime determinism
++ cheap-tweak properties above realizable.
+
+The clauses that follow (Purpose, Core abstractions, A/B/F/D/C-series)
+are the invariants and disciplines that make this mission realizable.
+When a decision is unclear, the mission is the yardstick.
 
 ## Purpose
 
@@ -46,6 +106,23 @@ caller-callee pair). Forge writes snapshots automatically; users do
 not author them directly. Snapshots are the storage mechanism Forge
 uses to implement edge-level freezing.
 
+**S7.** *Infrastructure files vs. snippets.* Markdown files whose
+basename starts with an underscore (`_`) are treated as vault
+**infrastructure files**, not snippets. They are excluded from
+snippet-registry discovery, from chip-palette auto-derivation, from
+the Forge-click compute surface, and from the static dependency
+analyzer. Examples: `_chips.md` (chip palette curation),
+`_meta/*.md` files (vault metadata), future `_config.md`,
+`_aliases.md`, etc. The `_` prefix is a syntactically-explicit
+convention so authors know which files are "real content" vs which
+are "tooling configuration" without reading frontmatter. Infrastructure
+files MAY still be valid data snippets in shape (with frontmatter +
+body), and may be read by tooling (engine, plugin, registry) via
+explicit-name lookups — they're simply not auto-discovered as part of
+the snippet inventory. Auto-discovery rules in registry-building,
+chip-palette construction, and any future discovery surfaces MUST
+honor this exclusion.
+
 ## Architectural guarantees
 
 These are structural and behavioral properties the engine guarantees by
@@ -74,6 +151,19 @@ need to know which.
 **A4.** Snippet resolution order: authoring vault → declared library
 vaults (in manifest order) → built-in vault. Bare references match by
 this order; qualified references (`vault/snippet`) dispatch directly.
+
+**A4.1.** *Caller-scoped sibling resolution.* When
+`context.compute(bare_id)` runs from a snippet whose qualified ID
+has a subdirectory component (e.g. `forge-music/blues/song`), the
+resolver first probes the caller's own directory for
+`{caller_vault}/{caller_dir}/{bare_id}` before walking the A4
+resolution order. Match wins immediately; miss falls through to A4
+unchanged. Qualified references (per A4) are unaffected — they
+dispatch directly to the named vault. This refinement lets snippets
+within a library subdirectory reference siblings by bare ID without
+needing to qualify (e.g. `[[chorus]]` from `forge-music/blues/song`
+resolves to `forge-music/blues/chorus`). The caller's directory is
+the load-bearing scope; deeper or shallower paths are not probed.
 
 **A5.** Vaults are distributed via per-vault GitHub repositories, with
 tagged tarballs and SHA-256 integrity verification at install time.
@@ -236,6 +326,52 @@ is updated at /generate time and on explicit user command; drift
 between the section and the current Python facet may occur if the user
 edits the Python directly. Drift is detected and surfaced by clients
 but not automatically resolved by Forge.
+
+**B7.1.** *Canonical E-- call syntax in English facets.* When an
+action snippet's English facet is in canonical E-- form (the
+canonical form per the Mission preamble; the post-migration default,
+opt-in during the migration), calls to other snippets are written as
+`[[<snippet_id>]](<arg-list>)`, where:
+
+- `<snippet_id>` is a wikilink target identifying the callee
+  (qualified per A4 if needed for disambiguation; bare otherwise).
+- `<arg-list>` is a parenthesized, comma-separated list of arguments,
+  positional and/or keyword. Keyword arguments use `name=expression`
+  syntax. The arguments correspond to the callee's declared `inputs`
+  frontmatter.
+- Each argument is itself an expression per the E-- grammar (literal,
+  variable, nested call, `{{ ... }}` value slot, list, dict, or
+  parenthesized group).
+
+This is the **syntactic contract** that Forge tooling depends on. The
+static dependency analyzer (B7), the chip palette, the Obsidian graph
+view's edge rendering of `# Dependencies` wikilinks, the wikilink-
+context-menu freeze affordance, and any future chat-driven authoring
+surfaces all read or produce calls in this form. A call written in
+canonical form is parser-readable without LLM disambiguation. Tooling
+that inserts calls (chip palette, chat) MUST produce text in this
+shape; tooling that reads calls (static analysis, freeze affordance)
+MUST accept this shape as the canonical input.
+
+Examples:
+
+```
+Set result to [[fibonacci]](7).
+Do [[print]]("hello world").
+Set chord to [[major_chord]](root="C", inversion=2).
+Set song to [[compose_blues]](
+    bars=12,
+    key="E",
+    drums=[[shuffle_drums]](feel="laid_back"),
+).
+```
+
+During the migration from free-English to canonical-E-- facet form
+(see Anticipated extensions), free-English facets may still describe
+calls in prose. The LLM normalizer translates such prose into canonical
+form before the deterministic compiler runs. Post-migration, the
+canonical form is the only authored form for new snippets, and B5/B6/B7
+will be rewritten atomically to describe the new compilation pipeline.
 
 **B8.** Action snippets carry an `edit_mode` (`english` or `python`,
 defaulting to `english`). In `english` mode, the Python facet is
@@ -563,6 +699,7 @@ addressed in future versions; their absence is intentional.
 - Cloud / hosted execution.
 - Streaming output for long-running computations.
 - Automatic snapshot eviction or cleanup policies.
+- **Backward compatibility for free-English snippet facets.** As the E-- migration (anticipated extensions below) progresses, free-English English facets that haven't been normalized to canonical E-- may break or require explicit migration. The contract going forward is: the English facet IS canonical E--, possibly with the LLM-normalizer run automatically on free-form input at /generate time. Snippets authored before the migration are not guaranteed to keep working as their English facets stand — they need re-running through /generate or hand-editing into canonical form.
 
 ## Anticipated extensions
 
@@ -586,6 +723,18 @@ versions when the use case demands them.
   domain-specific generators) that create related sets of snippets.
   Lives outside Forge core; integrates via the standard snippet
   contract.
+- **E-- as the canonical English facet form (in progress).** Forge is
+  migrating the English facet from free-prose-with-LLM-translation to
+  canonical E-- (`~/projects/e--/`, vendored into the Forge engine
+  package as `forge/forge/e_minus_minus/`). The engine compiles E--
+  canonical to Python deterministically; the LLM runs only for
+  free-English → canonical normalization (at /generate time) and for
+  `{{ ... }}` value-slot resolution (cached per slot text). The
+  migration ships as a small number of staged drains post-V1 closed
+  beta. Backward compatibility for free-English facets is not
+  promised (see Deliberate non-commitments). When Stage-1+Stage-2
+  ship, B5/B6/B7 are rewritten atomically to describe the new
+  compilation pipeline.
 
 ## What Forge promises
 
