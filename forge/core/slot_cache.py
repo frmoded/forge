@@ -24,9 +24,92 @@ no I/O, no os.environ, no anthropic client.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 
 import yaml
+
+
+class SlotCacheMissError(Exception):
+  """Raised by the engine resolver when a `{{ ... }}` slot is not in
+  the snippet's # Slots cache.
+
+  Carries a list of `missing` entries — each a dict
+  `{"slot_text": str, "snippet_id": str, "surrounding_context": str}`
+  in document order so the plugin can batch them into a single
+  /resolve-slot call.
+
+  v0.2.70 — Phase 2 wiring. Per the design's two-pass cache-miss
+  seam, the engine raises this on first miss; the resolver's caller
+  in `resolve_action_code` lets it propagate to the plugin
+  orchestration layer (via the Pyodide error boundary). The plugin
+  catches, calls /resolve-slot, writes the responses back to the
+  snippet's # Slots heading, and re-fires the transpile gesture.
+
+  Per E-- spec §1.2 — LLM calls are transpile-time only. At runtime,
+  this error must NOT be caught and silently resolved; the user
+  re-fires the Forge-click and the second pass is a clean cache hit.
+  """
+
+  def __init__(self, missing):
+    self.missing = missing
+    # Encode the missing list as JSON in the message so the
+    # Pyodide → JS exception boundary preserves the structure (Pyodide
+    # surfaces the str of the exception as the JS Error message).
+    super().__init__(json.dumps({"slot_cache_miss": missing}))
+
+
+def build_engine_slot_resolver(snippet_id, slot_cache, missing_collector):
+  """Build a `resolve(slot_text) -> str` callable for E--'s
+  `transpile(source, resolve_slot=...)` interface.
+
+  Parameters:
+  - `snippet_id`: identifies the calling snippet for cache keying +
+     plugin-side LLM context routing.
+  - `slot_cache`: dict of cache_key → python_expr (from
+     parse_slots_section on the snippet body). Read-only here.
+  - `missing_collector`: a mutable list the resolver appends to on
+     each cache miss. After transpile returns, the caller inspects
+     this list and raises SlotCacheMissError with the full set if
+     non-empty.
+
+  Behavior on cache hit: returns the cached python_expr.
+  Behavior on cache miss: appends a dict
+    `{"slot_text": ..., "snippet_id": ..., "surrounding_context": ""}`
+  to `missing_collector` AND returns a `None` sentinel python_expr
+  so transpile can continue scanning. The generated Python from a
+  partial-cache transpile is never returned to the caller — the
+  caller raises SlotCacheMissError instead — but the resolver must
+  return a valid string so E--'s emitter doesn't crash mid-walk.
+
+  This single-pass collection is load-bearing for delta #2 (batched
+  /resolve-slot): one transpile pass surfaces ALL missing slots so
+  the plugin can batch them into one round-trip, not N.
+
+  Per delta #1 (Phase 2 prompt §0): the cache key is
+  `(slot_text, snippet_id)` only — `surrounding_context` flows in
+  the LLM request for disambiguation but NOT in the cache key. This
+  preserves freeze semantics: prose edits to surrounding lines must
+  not invalidate previously-resolved slots.
+
+  v0.2.70 — Phase 2 wiring.
+  """
+  # Sentinel value spliced into the partial-transpile output when a
+  # slot is missing. Never reaches the caller (caller raises instead)
+  # but must be a valid Python expression so emit() doesn't blow up.
+  _MISS_SENTINEL = "None"
+
+  def resolve(slot_text):
+    key = compute_slot_cache_key(slot_text, snippet_id)
+    if key in slot_cache:
+      return slot_cache[key]
+    missing_collector.append({
+      "slot_text": slot_text,
+      "snippet_id": snippet_id,
+      "surrounding_context": "",
+    })
+    return _MISS_SENTINEL
+  return resolve
 
 
 _SLOTS_HEADING = re.compile(r"^#\s+slots\s*$", re.IGNORECASE)

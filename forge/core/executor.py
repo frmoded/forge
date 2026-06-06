@@ -484,16 +484,37 @@ def resolve_action_code(snippet):
   # Local import keeps the E-- package out of the import graph for
   # the 99% of executor calls that never hit the canonical path.
   from forge.e_minus_minus import transpile, EmmSyntaxError
+  # v0.2.70 — Phase 2 slot resolution wiring. Engine builds a
+  # resolver from the snippet's # Slots cache + a fresh "missing"
+  # collector. After transpile returns, if any slots went unresolved
+  # the engine raises SlotCacheMissError with the full batch — the
+  # plugin orchestration layer catches it, calls /resolve-slot, writes
+  # the responses back to # Slots, and re-fires the transpile gesture.
+  from forge.core.slot_cache import (
+    build_engine_slot_resolver,
+    parse_slots_section,
+    SlotCacheMissError,
+  )
   english = extract_section(snippet["body"], "English")
   snippet_id = snippet.get("snippet_id", "<unknown>")
   if english is None:
     raise ValueError(
       f"facet_form: canonical snippet '{snippet_id}' has no English heading")
+  slot_cache = parse_slots_section(snippet["body"])
+  missing_collector = []
+  resolver = build_engine_slot_resolver(
+    snippet_id, slot_cache, missing_collector)
   try:
-    transpiled = transpile(english.strip())
+    transpiled = transpile(english.strip(), resolve_slot=resolver)
   except EmmSyntaxError as e:
     raise ValueError(
       f"E-- syntax error in canonical snippet '{snippet_id}': {e}") from e
+  if missing_collector:
+    # One or more slots missing — abort and report ALL of them in a
+    # single error so the plugin can batch the /resolve-slot round-
+    # trip. Partial transpile output is discarded; the second pass
+    # (post cache populate) re-runs transpile fully.
+    raise SlotCacheMissError(missing_collector)
   # E-- emits bare statements (e.g. `print("hi")`). The engine's
   # exec_python contract requires `def compute(context, ...):` per
   # _find_entrypoint (B-series). Wrap the transpile output in a
