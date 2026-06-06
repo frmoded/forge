@@ -1,6 +1,9 @@
 from typing import Optional
 from forge.core.snippet_registry import SnippetRegistry, BUILTIN_VAULT
-from forge.core.exceptions import SnippetResolutionError
+from forge.core.exceptions import (
+    SnippetResolutionError,
+    AmbiguousSnippetResolutionError,
+)
 
 
 class GraphResolver:
@@ -39,9 +42,25 @@ class GraphResolver:
       caller_vault, caller_bare = caller_id.split("/", 1)
       if "/" in caller_bare:
         caller_dir = caller_bare.rsplit("/", 1)[0]
+        # Probe 1 (V2a v5 A4.1): caller's own directory.
         sibling = self._registry.get_in_vault(caller_vault, f"{caller_dir}/{snippet_id}")
         if sibling is not None:
           return sibling
+        # Probe 2 (V2a v8 A4.1 extension): sibling subdirs within the
+        # caller's vault, excluding the caller's own dir already
+        # probed above. Exactly-one match wins; two-or-more raises
+        # AmbiguousSnippetResolutionError so the author qualifies.
+        # The percussion_lab founding use case: Murmuration in
+        # forge-music/percussion/ resolves bare `solitary` to
+        # forge-music/percussion_lab/solitary.
+        candidates = self._registry.find_in_sibling_subdirs(
+            caller_vault, caller_dir, snippet_id)
+        if len(candidates) == 1:
+          return self._registry.get_in_vault(caller_vault, candidates[0])
+        if len(candidates) >= 2:
+          raise AmbiguousSnippetResolutionError(
+              snippet_id,
+              [f"{caller_vault}/{rel_id}" for rel_id in candidates])
     return self._registry.get_bare(snippet_id)
 
   def _searched_for(self, snippet_id: str) -> list:

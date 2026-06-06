@@ -111,6 +111,37 @@ class SnippetRegistry:
         return hit
     return None
 
+  def find_in_sibling_subdirs(
+      self, vault_name: str, caller_dir: str, bare_id: str,
+  ) -> list:
+    """Probe 2 helper for A4.1's V2a v8 extension.
+
+    Enumerate all keys in `vault_name` matching `<sibling>/<bare_id>`
+    where `<sibling>` is a top-level subdir of the vault AND
+    `<sibling> != caller_dir`. Returns the matching subdir-relative
+    keys (e.g. `percussion_lab/solitary`) sorted alphabetically for
+    deterministic error messages on ambiguity.
+
+    Nested subdirs (e.g. `foo/bar/<bare_id>`) are NOT included — the
+    extension is single-level-sibling by design. Caller's own subdir
+    is excluded because Probe 1 already covered it.
+
+    Returns empty list when no siblings match; caller (graph_resolver
+    Probe 2) handles len(0) vs len(1) vs len(2+) dispatch."""
+    snippets = self._vaults.get(vault_name, {})
+    matches = []
+    for bare in snippets.keys():
+      if "/" not in bare:
+        continue  # vault-root snippet, not a sibling-subdir candidate
+      head, _, tail = bare.partition("/")
+      if tail != bare_id:
+        continue  # different bare_id under this subdir
+      if head == caller_dir:
+        continue  # caller's own dir — Probe 1 territory
+      matches.append(bare)
+    matches.sort()
+    return matches
+
   def get(self, snippet_id: str) -> Optional[dict]:
     """Smart dispatch: qualified ('vault/bare') goes direct; bare walks order."""
     if "/" in snippet_id:
