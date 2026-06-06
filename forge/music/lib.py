@@ -78,12 +78,29 @@ def voices(
 
 def _instrument_key(part: stream.Part) -> str:
   """Return a string key identifying the part's instrument for grouping
-  in sequence(). Parts with no instrument share an empty-string key."""
+  in sequence(). Parts with no instrument share an empty-string key.
+
+  For percussion instruments that carry a `percMapPitch` (used to
+  encode articulation on a shared class — e.g., `HiHatCymbal` with
+  pmp 42 for closed vs pmp 46 for open, or `TomTom` with pmp 41 for
+  low vs pmp 47 for mid), the pitch is included in the key so
+  same-class-different-articulation instruments don't collide
+  during grouping. Forge-music v0.3.9 — fixes the silent open→closed
+  hi-hat merge in sequence() that motivated the percussion_lab
+  canonical 7-part workaround.
+
+  Non-percussion instruments (Vocalist, ElectricGuitar, etc.) carry
+  no percMapPitch attribute and produce the bare class-name key
+  unchanged."""
   inst = next((el for el in part.elements
                if isinstance(el, instrument.Instrument)), None)
   if inst is None:
     return ''
-  return type(inst).__name__
+  base = type(inst).__name__
+  pmp = getattr(inst, 'percMapPitch', None)
+  if pmp is not None:
+    return f"{base}:{pmp}"
+  return base
 
 
 def sequence(*streams: StreamLike) -> stream.Score:

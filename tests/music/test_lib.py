@@ -9,6 +9,7 @@ from forge.music.lib import (
   low_tom, mid_tom, high_tom,
   crash_cymbal, ride_cymbal,
   kick, snare,
+  _instrument_key,
 )
 
 
@@ -864,3 +865,163 @@ def test_with_velocity_clamp_to_int_below_1_uses_ppp_mark():
   dyns = list(m.getElementsByClass(dynamics.Dynamic))
   assert len(dyns) == 1
   assert dyns[0].value == 'ppp'  # velocity clamped to 1 → 'ppp'
+
+
+# ---------- _instrument_key ----------
+#
+# Until v0.3.9 of forge-music, `_instrument_key` returned only the
+# instrument's class name. That collapsed same-class-different-pmp
+# variants (closed_hihat + open_hihat both → "HiHatCymbal";
+# low_tom + mid_tom both → "TomTom") during sequence()/voices()
+# merging — the peak section's open_hihat notes silently rendered
+# as closed_hihat when sequenced with other sections.
+#
+# Fix: include percMapPitch in the key whenever the instrument
+# carries one. Same-class-different-pmp variants now produce
+# distinct keys.
+#
+# Note (drain-time empirical correction to the prompt's premise):
+# kick() and snare() ALSO carry percMapPitch (music21's defaults —
+# BassDrum=35, SnareDrum=38) on the factory output, contradicting
+# the prompt's claim that they had no pmp. The fix's behavior is
+# still correct: kick() → "BassDrum:35", snare() → "SnareDrum:38".
+# There's only one kick factory and one snare factory, so the
+# colon-suffixed key still uniquely identifies them for grouping;
+# tests below assert this new shape.
+
+def _make_part_with_instrument(inst):
+  p = stream.Part()
+  p.append(inst)
+  return p
+
+
+def test_instrument_key_distinguishes_hihat_articulations():
+  k_closed = _instrument_key(_make_part_with_instrument(closed_hihat()))
+  k_open = _instrument_key(_make_part_with_instrument(open_hihat()))
+  k_pedal = _instrument_key(_make_part_with_instrument(pedal_hihat()))
+  # All three keys distinct (the bug-was) AND all carry the
+  # HiHatCymbal prefix (so they STILL cluster as cymbal-family
+  # for any future class-prefix-based logic).
+  assert k_closed != k_open != k_pedal != k_closed
+  for k in (k_closed, k_open, k_pedal):
+    assert k.startswith('HiHatCymbal'), f"expected HiHatCymbal prefix, got {k!r}"
+
+
+def test_instrument_key_distinguishes_tom_pitches():
+  k_low = _instrument_key(_make_part_with_instrument(low_tom()))
+  k_mid = _instrument_key(_make_part_with_instrument(mid_tom()))
+  k_high = _instrument_key(_make_part_with_instrument(high_tom()))
+  assert k_low != k_mid != k_high != k_low
+  for k in (k_low, k_mid, k_high):
+    assert k.startswith('TomTom'), f"expected TomTom prefix, got {k!r}"
+
+
+def test_instrument_key_distinguishes_cymbals():
+  # Crash + Ride are different MUSIC21 classes, so they'd be distinct
+  # even without the fix. This test locks in that the fix doesn't
+  # break the trivially-distinct case.
+  k_crash = _instrument_key(_make_part_with_instrument(crash_cymbal()))
+  k_ride = _instrument_key(_make_part_with_instrument(ride_cymbal()))
+  assert k_crash != k_ride
+
+
+def test_instrument_key_no_percmappitch_returns_class_name_only():
+  # Vocalist and ElectricGuitar carry no percMapPitch attribute —
+  # the key MUST be just the class name (no colon suffix), preserving
+  # the pre-fix behavior for non-percussion instruments.
+  k_voc = _instrument_key(_make_part_with_instrument(instrument.Vocalist()))
+  assert k_voc == 'Vocalist'
+  k_gtr = _instrument_key(_make_part_with_instrument(instrument.ElectricGuitar()))
+  assert k_gtr == 'ElectricGuitar'
+
+
+def test_instrument_key_kick_and_snare_carry_pmp_suffix():
+  # CORRECTION to the original prompt's premise: kick() and snare()
+  # both DO carry percMapPitch on their factory output (music21's
+  # default values — BassDrum=35, SnareDrum=38). Post-fix keys
+  # therefore include the colon suffix. This is fine for collision
+  # avoidance: there's only one kick factory and one snare factory,
+  # so the suffix is constant and groups kicks-with-kicks across
+  # inputs as expected.
+  assert _instrument_key(_make_part_with_instrument(kick())) == 'BassDrum:35'
+  assert _instrument_key(_make_part_with_instrument(snare())) == 'SnareDrum:38'
+
+
+def test_sequence_keeps_closed_and_open_hihat_separate():
+  # The load-bearing integration test. Pre-fix, the open_hihat notes
+  # in input B would silently merge into the closed_hihat part from
+  # input A. Post-fix, the two articulations stack as separate Parts.
+  def _quarters(n):
+    return [note.Note('C4', quarterLength=1) for _ in range(n)]
+  part_a = _make_part_with_instrument(closed_hihat())
+  for nt in _quarters(4):
+    part_a.append(nt)
+  score_a = stream.Score()
+  score_a.append(part_a)
+
+  part_b = _make_part_with_instrument(open_hihat())
+  for nt in _quarters(4):
+    part_b.append(nt)
+  score_b = stream.Score()
+  score_b.append(part_b)
+
+  out = sequence(score_a, score_b)
+  parts = list(out.parts)
+  assert len(parts) == 2, f"expected 2 stacked Parts; got {len(parts)}"
+  # Each Part carries one Instrument; identities match factory pmps.
+  pmps = []
+  for p in parts:
+    inst_el = next((el for el in p.elements
+                    if isinstance(el, instrument.Instrument)), None)
+    assert inst_el is not None
+    pmps.append(inst_el.percMapPitch)
+  # The closed (42) and open (46) hi-hats are now distinct parts.
+  assert set(pmps) == {42, 46}, f"expected {{42, 46}} pmps; got {set(pmps)}"
+
+
+def test_voices_keeps_low_and_mid_tom_separate():
+  # voices() doesn't merge same-class Parts the way sequence() does
+  # (it stacks per input). So this test is really about the keying
+  # primitive being used consistently — voices() preserves the two
+  # input Parts' instruments as distinct.
+  part_low = _make_part_with_instrument(low_tom())
+  part_low.append(note.Note('C4', quarterLength=1))
+  part_mid = _make_part_with_instrument(mid_tom())
+  part_mid.append(note.Note('C4', quarterLength=1))
+  out = voices(part_low, part_mid)
+  parts = list(out.parts)
+  assert len(parts) == 2
+  pmps = []
+  for p in parts:
+    inst_el = next((el for el in p.elements
+                    if isinstance(el, instrument.Instrument)), None)
+    pmps.append(inst_el.percMapPitch)
+  assert set(pmps) == {41, 47}
+
+
+def test_sequence_still_merges_same_articulation_across_inputs():
+  # Regression check: the MERGING behavior is the FEATURE; only the
+  # collision was the bug. Two inputs both with closed_hihat parts
+  # MUST still merge into one Closed Hi-Hat stave (8 notes total,
+  # not two separate 4-note staves).
+  def _quarters(n):
+    return [note.Note('C4', quarterLength=1) for _ in range(n)]
+  score_a = stream.Score()
+  pa = _make_part_with_instrument(closed_hihat())
+  for nt in _quarters(4):
+    pa.append(nt)
+  score_a.append(pa)
+
+  score_b = stream.Score()
+  pb = _make_part_with_instrument(closed_hihat())
+  for nt in _quarters(4):
+    pb.append(nt)
+  score_b.append(pb)
+
+  out = sequence(score_a, score_b)
+  parts = list(out.parts)
+  # One Closed Hi-Hat part containing 8 quarter notes (4 from each
+  # input concatenated in time).
+  assert len(parts) == 1
+  notes_list = list(parts[0].flatten().notes)
+  assert len(notes_list) == 8
