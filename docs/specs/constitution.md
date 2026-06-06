@@ -427,24 +427,22 @@ vault when the user clicks the rendered wikilink. The Forge plugin
 knows it's running inside Obsidian and can mediate the click
 behavior; the engine's transpile path is unaffected.
 
-**B7.3.** *Value-slot resolution.* **[DRAFT — pending Phase 2
-implementation of slot resolution; see
-investigations/slot-resolution-design.md]**
+**B7.3.** *Value-slot resolution.*
 
 When a snippet's canonical E-- facet contains a `{{ free-text }}`
 value slot, the engine resolves the slot to a Python expression at
 **transpile time** via a Forge-hosted `/resolve-slot` endpoint
 (parallel to the existing `/generate` endpoint, same bearer-token
 auth). The resolved expression is cached per
-`(snippet_id, slot_text, surrounding_context)` triple in the
-snippet's `# Slots` heading; the cache is the freeze mechanism.
+`(snippet_id, slot_text)` pair in the snippet's `# Slots` heading;
+the cache is the freeze mechanism.
 
 **At runtime, the engine MUST NOT hit the LLM.** If the cache is
-missing a slot at runtime (the snippet was authored after the cache
-was generated, or the cache was hand-deleted), the runtime raises
-an error; the user re-fires the authoring gesture to re-populate
-the cache. Per E-- spec §1.2, LLM calls are transpile-time only —
-this is a HARD RULE.
+missing a slot at runtime (the snippet was edited to add a new slot
+since the cache was last generated, or the cache was hand-deleted),
+the runtime raises an error; the next transpile (Forge-click)
+re-populates the cache. Per E-- spec §1.2, LLM calls are
+transpile-time only — this is a HARD RULE.
 
 The resolver is hosted-side responsibility: the engine sees only
 the resolved Python expression, never the LLM. The plugin owns the
@@ -460,9 +458,12 @@ directly into the heading).
 
 Slot text MUST be stable across cache hits — the cache key
 incorporates the slot text exactly as authored, plus the
-snippet_id and the surrounding English line for disambiguation. A
-user editing the slot text invalidates that slot's cache entry
-(new hash key) and triggers re-resolution at next transpile.
+snippet_id. The surrounding English line flows in the LLM REQUEST
+for disambiguation but does NOT contribute to the cache key, so
+prose edits to surrounding lines never invalidate previously-
+resolved slots (preserves freeze semantics). A user editing the
+slot text itself invalidates that slot's cache entry (new hash key)
+and triggers re-resolution at the next transpile.
 
 The `# Slots` heading is a YAML-encoded dict of `cache_key →
 python_expr`. See `docs/investigations/slot-resolution-design.md`
