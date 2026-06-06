@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v7)
+# Forge — Core Invariants and Discipline (V2a v9)
 
 ## Mission
 
@@ -155,15 +155,41 @@ this order; qualified references (`vault/snippet`) dispatch directly.
 **A4.1.** *Caller-scoped sibling resolution.* When
 `context.compute(bare_id)` runs from a snippet whose qualified ID
 has a subdirectory component (e.g. `forge-music/blues/song`), the
-resolver first probes the caller's own directory for
-`{caller_vault}/{caller_dir}/{bare_id}` before walking the A4
-resolution order. Match wins immediately; miss falls through to A4
-unchanged. Qualified references (per A4) are unaffected — they
-dispatch directly to the named vault. This refinement lets snippets
-within a library subdirectory reference siblings by bare ID without
-needing to qualify (e.g. `[[chorus]]` from `forge-music/blues/song`
-resolves to `forge-music/blues/chorus`). The caller's directory is
-the load-bearing scope; deeper or shallower paths are not probed.
+resolver applies the following ordered probes:
+
+1. **Caller's own directory**: `{caller_vault}/{caller_dir}/{bare_id}`.
+   Match wins immediately.
+2. **Sibling subdirs within the caller's vault**: `{caller_vault}/*/{bare_id}`,
+   excluding the caller's own directory probed in (1). If exactly one
+   sibling subdir contains `{bare_id}`, match wins. If two or more
+   sibling subdirs each contain a `{bare_id}` snippet, the resolver
+   raises `AmbiguousSnippetResolutionError(bare_id, [candidates...])`,
+   naming every candidate qualified path; the author must qualify
+   the call explicitly to disambiguate.
+3. **Fall through to A4** resolution order if (1) and (2) yield no
+   match.
+
+Qualified references (per A4) are unaffected — they dispatch directly
+to the named vault. This refinement lets snippets within one library
+subdirectory reference siblings in the same vault by bare ID (e.g.
+`[[chorus]]` from `forge-music/blues/song` resolves to
+`forge-music/blues/chorus` via probe 1; `[[solitary]]` from
+`forge-music/percussion/murmuration` resolves to
+`forge-music/percussion_lab/solitary` via probe 2 when there's no
+`forge-music/percussion/solitary`). The caller's directory takes
+priority over siblings; ambiguous bare references across siblings
+are an authoring error to be resolved by explicit qualification.
+
+**Rationale for probe 2** (added V2a v8 per forge-music v0.3.9
+percussion-lab decomposition): authors commonly refactor a single
+subdir into a content cluster + lab cluster (e.g. `percussion/`
+holds shipping pieces, `percussion_lab/` holds the section snippets
+the pieces compose from). Without probe 2, every cross-cluster
+call must be qualified or every lab snippet must live in the same
+directory as its caller — both raise the cost of intra-vault
+composability against the Mission's "composable" property. Probe 2
+preserves bare-ID composability across same-vault siblings while
+keeping caller-locality as the primary tie-breaker.
 
 **A5.** Vaults are distributed via per-vault GitHub repositories, with
 tagged tarballs and SHA-256 integrity verification at install time.
@@ -372,6 +398,34 @@ calls in prose. The LLM normalizer translates such prose into canonical
 form before the deterministic compiler runs. Post-migration, the
 canonical form is the only authored form for new snippets, and B5/B6/B7
 will be rewritten atomically to describe the new compilation pipeline.
+
+**B7.2.** *Builtin references in canonical form.* Canonical E-- uses
+`[[name]](args)` for every function call, including Python builtins
+(`print`, `len`, `range`, etc.). When the wikilink target matches a
+known Python builtin, the Forge plugin intercepts the Obsidian
+wikilink-click and suppresses the default "create unresolved file"
+behavior. The user sees a tooltip or Notice naming the builtin; no
+stray file lands in the vault. Builtins are NOT Forge snippets and
+do not require backing `.md` files; the bundled engine knows the
+Python globals.
+
+Forge plugin maintains a vetted list of recognized builtin names —
+the common Python globals (`print`, `len`, `range`, `str`, `int`,
+`float`, `bool`, `list`, `dict`, `set`, `tuple`, `enumerate`,
+`zip`, `map`, `filter`, `sorted`, `reversed`, `min`, `max`, `sum`,
+`abs`, `round`, `type`, `isinstance`, `getattr`, `setattr`, `hasattr`,
+`open`, `input`). Calls to NON-listed names follow the existing
+wikilink resolution per A4 + A4.1 — the link is treated as a snippet
+reference. Authors who want to use a less-common builtin can either
+qualify it (`[[python:builtin_name]]` or similar — TBD per the
+implementation drain) or ship a sibling snippet that wraps it.
+
+**Rationale**: per the Mission's "low floor" property, every stray
+file the user has to clean up raises cost-to-tweak. Canonical
+snippets that contain `print` references shouldn't pollute the
+vault when the user clicks the rendered wikilink. The Forge plugin
+knows it's running inside Obsidian and can mediate the click
+behavior; the engine's transpile path is unaffected.
 
 **B8.** Action snippets carry an `edit_mode` (`english` or `python`,
 defaulting to `english`). In `english` mode, the Python facet is

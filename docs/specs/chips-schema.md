@@ -1,8 +1,10 @@
-# `_chips.md` schema v2 — auto-discovery + signature-sourcing + curation overrides
+# `_chips.md` schema — v2 (current) + v3 (authorized 2026-06-06)
 
-**Status:** committed 2026-06-04. Awaiting CC drain to adopt in the chip-palette code path.
+**Status v2:** committed 2026-06-04; adopted in plugin code via v0.2.48 + polish v0.2.49–v0.2.54.
 
-This document specifies the v2 schema for the chip palette in Forge plugins. v1 was the vault-explicit-only shape (every chip hand-authored in `_chips.md`). v2 introduces **auto-discovery** (every action snippet becomes a chip automatically) and **signature-sourcing** (chip insertion text is derived from the snippet's `inputs:` frontmatter in canonical E-- form per B7.1), with `_chips.md` providing optional curation overrides.
+**Status v3:** authorized 2026-06-06. Awaiting CC drain to adopt in the chip-palette code path. Adds two capabilities forge-doc's tutorial work surfaced as needed: per-chapter `_chips.md` walk-up discovery, and synthetic chips declared directly in `_chips.md` with no backing snippet file.
+
+This document specifies the v2 schema (currently shipped in the chip palette) and the v3 extensions (authorized, not yet implemented). v1 was the vault-explicit-only shape (every chip hand-authored in `_chips.md`). v2 introduces **auto-discovery** (every action snippet becomes a chip automatically) and **signature-sourcing** (chip insertion text is derived from the snippet's `inputs:` frontmatter in canonical E-- form per B7.1), with `_chips.md` providing optional curation overrides. v3 extends both with subdirectory-aware palette context and chips-without-backing-files.
 
 ## Default behavior (no `_chips.md` present)
 
@@ -152,3 +154,158 @@ v1 → v2 migration:
 5. Migrate or add `groups[]` and `hide[]` blocks as the vault curator sees fit.
 
 Vaults that don't migrate continue to work (v1 schema gracefully falls back to "no-curation, all-auto-discovered") but lose their existing curation. Curators are expected to migrate as a one-time touch when the chip-palette code adopts schema v2.
+
+---
+
+# v3 extensions (authorized 2026-06-06)
+
+v3 adds two capabilities surfaced by forge-doc's Tier 1 tutorial proof-of-concept. The v2 surface stays intact; v3 layers on top. A v2 `_chips.md` works unchanged under v3 semantics.
+
+## v3.1 — Per-chapter `_chips.md` walk-up discovery
+
+**Problem v3.1 solves:** today there is ONE `_chips.md` per library vault, at `<vault>/_meta/_chips.md` or `<vault>/_chips.md`. The chip palette doesn't look inside subdirectories. For forge-doc's tutorial, this means every chapter's snippets surface in one palette simultaneously, breaking the "low floor, one concept at a time" pedagogy.
+
+**v3.1 mechanism:** when computing the chip palette for an active file, the discoverer walks UP from the file's directory and accumulates `_chips.md` configuration at each level. Higher-specificity (closer to the file) wins.
+
+**Walk order for an active file at `<vault>/<subdirA>/<subdirB>/snippet.md`:**
+
+1. `<vault>/<subdirA>/<subdirB>/_chips.md` (most specific).
+2. `<vault>/<subdirA>/_chips.md`.
+3. `<vault>/_chips.md` or `<vault>/_meta/_chips.md` (least specific — current v2 location).
+
+For each level, if `_chips.md` exists and parses as v2-shaped (or v3-shaped, see below), its configuration is merged into the accumulated palette config. Merging precedence:
+
+- Lower-specificity `overrides[]` entries are SUPERSEDED by higher-specificity ones with the same `target`.
+- Lower-specificity `hide[]` entries combine with higher-specificity ones (hide is union — once hidden, hidden).
+- Lower-specificity `groups[]` entries are SUPERSEDED by higher-specificity ones with the same `id`.
+- Lower-specificity `synthetic_chips[]` entries (per v3.2 below) combine with higher-specificity ones; same-`label` higher specificity wins.
+
+**Auto-discovery scope changes with walk:** when a per-chapter `_chips.md` exists, the auto-discovery defaults narrow to snippets within that subdirectory. The current vault-wide auto-discovery is replaced (for that active file) by subdirectory-scoped auto-discovery. Example: with active file `forge-tutorial/01-hello/hello.md` and `forge-tutorial/01-hello/_chips.md` present, auto-discovery walks `forge-tutorial/01-hello/*.md` only, not the whole vault. Higher-level `_chips.md` (e.g., `forge-tutorial/_chips.md`) STILL contributes its `overrides`, `hide`, `groups`, and `synthetic_chips` — but auto-discovery's snippet enumeration is scoped to the active file's chapter.
+
+**Forge-doc pedagogical pattern** (canonical example):
+
+```
+forge-tutorial/
+├── _chips.md                          # global synthetic chips (print etc.); empty hide list
+├── 01-hello/
+│   ├── _chips.md                      # chapter-1 curation (only `print` visible)
+│   └── hello.md
+├── 02-variables/
+│   ├── _chips.md                      # chapter-2: unhides Set
+│   └── greeting.md
+├── ...
+└── 09-slots/
+    ├── _chips.md                      # chapter-9: full vocabulary visible
+    └── primes.md
+```
+
+Each chapter's `_chips.md` uses `hide[]` to suppress chips not yet introduced (referencing synthetic chip `label`s from the higher-level vault `_chips.md`).
+
+## v3.2 — Synthetic chips (no backing snippet file)
+
+**Problem v3.2 solves:** language constructs like `print`, `Set ... to ...`, `If ... Otherwise`, `For each ...`, `Define ... taking ...` are E-- builtins or syntax, not Forge snippets. Today's chips are auto-derived from `.md` snippet files. Language constructs have nothing on disk for chip discovery to find. This breaks forge-doc's tutorial sequence — chapter 1 should expose `print` as a chip; chapter 2 adds `Set` as a chip; etc.
+
+**v3.2 mechanism:** a `synthetic_chips[]` section in `_chips.md` declares chips with explicit `insertion` text and no `target` (no backing snippet). Plugin renders them in the palette like regular chips. Clicking them inserts the declared text.
+
+**Schema:**
+
+```yaml
+synthetic_chips:
+  - label: "print"
+    insertion: 'Do [[print]]("<message>").'
+    group: "Builtins"
+    order: 1
+  - label: "Set"
+    insertion: 'Set <var> to <value>.'
+    group: "Statements"
+    order: 1
+  - label: "If"
+    insertion: |
+      If <condition>:
+          <body>
+    group: "Statements"
+    order: 2
+  - label: "For each"
+    insertion: |
+      For each <item> in <collection>:
+          <body>
+    group: "Statements"
+    order: 3
+  - label: "Define"
+    insertion: |
+      Define [[<name>]] taking <params>:
+          <body>
+    group: "Statements"
+    order: 4
+```
+
+**Synthetic chip schema (per `synthetic_chips[]` entry):**
+
+| Field | Required | Type | Default | Description |
+|---|---|---|---|---|
+| `label` | yes | string | — | Display label in the palette (also the lookup key for `hide[]` and merging). |
+| `insertion` | yes | string (single line or multi-line via `|`) | — | Text inserted into the editor at cursor position when chip is clicked. Should be B7.1-canonical where applicable. |
+| `group` | no | string | "Synthetic" | Group ID; same semantics as v2's `overrides[].group`. |
+| `order` | no | int/float | declaration order | Sort order within the group. |
+
+**Hiding synthetic chips:** add the synthetic chip's `label` to `hide[]`. Same mechanism as hiding auto-derived chips.
+
+**No `target` field on synthetic chips.** They don't refer to a snippet file. Distinguishes them from auto-derived chips at discovery time.
+
+**Wikilink-click suppression note:** synthetic chip insertion text may contain `[[builtin_name]]` markup (e.g., `Do [[print]]("<message>").`). The v0.2.59+ B7.2 builtin-wikilink interception handles the click suppression so users don't create stray `print.md` files. This is the load-bearing dependency: synthetic chips work cleanly because B7.2 already suppresses the resulting wikilink clicks.
+
+## v3 file-shape example
+
+```yaml
+---
+type: data
+content_type: yaml
+read_only: true
+schema_version: 3
+description: forge-tutorial chapter 1 (Hello) — minimal vocabulary
+---
+
+# Body
+
+```yaml
+synthetic_chips:
+  - label: "print"
+    insertion: 'Do [[print]]("<message>").'
+    group: "Builtins"
+
+groups:
+  - id: Builtins
+    order: 1
+    label: "Built-in functions"
+
+hide:
+  # Chapter 1 hides every synthetic chip from the vault-level _chips.md
+  # except print (declared above as a chapter-local synthetic).
+  - "Set"
+  - "If"
+  - "For each"
+  - "Define"
+  # ...etc, listed once at top-level _chips.md and hidden per chapter
+```
+```
+
+## v2 → v3 migration
+
+v2 `_chips.md` files work UNCHANGED under v3. No migration step required. Vaults that want to use v3.1 walk-up gain the capability by creating subdirectory `_chips.md` files; vaults that want v3.2 synthetic chips bump `schema_version: 2 → schema_version: 3` in their existing `_chips.md` and add a `synthetic_chips[]` section.
+
+Backward-compat is guaranteed for v2 → v3: a v3-aware plugin reads a v2 file as a single-level walk (no subdirectory enumeration) with no synthetic chips, which is exactly the v2 behavior.
+
+## Error handling
+
+In addition to v2's error handling rules:
+
+- **`schema_version` < 2** (treated as v1 today): unchanged; falls through to auto-discovery.
+- **`schema_version` ≠ 2 and ≠ 3**: warning + skip the file. Forward-compatibility hook for future v4+ changes.
+- **`synthetic_chips[]` entry missing required `label` or `insertion`**: warning, that entry dropped, rest of file processed.
+- **Subdirectory `_chips.md` parse error during walk**: warning, that level skipped, walk continues with the other levels.
+
+## Relation to constitution
+
+- **B7.1**: synthetic chip insertion text MUST be B7.1-canonical for snippet calls. For pure language constructs (`Set <var> to <value>.`), canonical form applies but `[[ ]]` markers are not used (these are statements, not calls).
+- **B7.2**: synthetic chips for Python builtins like `print` rely on B7.2 wikilink-click suppression for clean UX (no stray `print.md` files).
+- **S7**: `_chips.md` (and any other `_*.md`) remain infrastructure files, excluded from auto-discovery as snippets — including in subdirectory walks per v3.1.
