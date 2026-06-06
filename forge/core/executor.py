@@ -529,6 +529,55 @@ def extract_python(body):
   return "\n".join(code_lines).strip() or None
 
 
+def _build_snippet_shims(context, registry):
+  """v0.2.68 — Stage 2.5 sibling-snippet namespace injection.
+
+  Build a dict of lambda shims, one per declared snippet across every
+  vault the registry knows, keyed by the snippet's BARE BASENAME (last
+  path segment of its bare_id). Each shim, when called, dispatches to
+  `context.compute(basename, *args, **kwargs)` so A4.1 (V2a v8) probes
+  resolve to the qualified target — caller's own dir first, then
+  sibling subdirs, then A4 vault walk.
+
+  Motivating use case: E--'s emitter emits bare Python calls (e.g.,
+  `[[greet]](name)` → `greet(name)`). Without shims, that resolves
+  via Python's normal name lookup in the exec namespace, which only
+  has `__builtins__` + a few domain modules. snippet-to-snippet
+  composition would raise NameError. With shims, `greet(name)`
+  dispatches via context.compute and the call graph traverses
+  correctly.
+
+  Skips bare_ids whose basename isn't a valid Python identifier
+  (e.g., basenames containing `-` or starting with a digit) — those
+  can't appear as bare Python references anyway, so no shim is
+  installable. Same-basename collisions across vaults: first one
+  wins; A4.1 dispatches the actual resolution at compute time.
+
+  Returns `{}` when `registry` is None (test fixtures that bypass
+  registry construction)."""
+  shims = {}
+  if registry is None:
+    return shims
+  try:
+    inventory = registry.list_snippets()
+  except Exception:
+    return shims
+  seen = set()
+  for vault_name, snippet_list in inventory.items():
+    for entry in snippet_list:
+      bare_id = entry.get("id", "")
+      basename = bare_id.rsplit("/", 1)[-1] if bare_id else ""
+      if not basename or not basename.isidentifier():
+        continue
+      if basename in seen:
+        continue
+      seen.add(basename)
+      shims[basename] = (
+        lambda *args, _name=basename, **kwargs:
+          context.compute(_name, *args, **kwargs))
+  return shims
+
+
 def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None, domains=None):
   buf = io.StringIO()
   context = ForgeContext(resolver, inputs, vault_path=vault_path,
@@ -541,7 +590,11 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
   del trusted
   # Base names are always injected; domain bundles (music21/helpers,
   # moda types) are gated by the vault's declared `domains` (B9).
+  # v0.2.68 — sibling-snippet shims injected before inputs so an input
+  # named `setup` (or whatever) cleanly shadows the shim of the same
+  # name (input precedence per the canonical-form composition design).
   local_ns = {
+    **_build_snippet_shims(context, registry),
     **inputs,
     "inputs": inputs,
     "__builtins__": builtins.__dict__,
