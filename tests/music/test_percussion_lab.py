@@ -225,3 +225,123 @@ def test_murmuration_after_refactor_matches_pre_refactor_structure(run_music_blo
             f"{key}: expected 32 measures (8 sections × 4 bars), got "
             f"{measures_total}"
         )
+
+
+# ---- v0.3.10: sister piece "wake" — asymmetric arc using same vocab ----
+
+
+def test_wake_returns_score_with_28_measures(run_music_block):
+    """Wake's arc totals 28 bars: 8 + 4 + 2 + 8 + 4 + 2. Each unique
+    instrument-key gets one continuous part of 28 measures after
+    sequence()'s instrument-grouping merge."""
+    score = run_music_block("wake")
+    assert isinstance(score, stream.Score)
+    by_inst = _parts_by_inst_id(score)
+    for key, parts in by_inst.items():
+        measures_total = sum(
+            len(list(p.getElementsByClass(stream.Measure))) for p in parts
+        )
+        assert measures_total == 28, (
+            f"{key}: expected 28 measures (8+4+2+8+4+2 = 28), got "
+            f"{measures_total}"
+        )
+
+
+def test_wake_includes_crash_in_peak_section(run_music_block):
+    """Wake's third section is `peak`(bars=2) at bars 13-14. peak's
+    crash pattern fires on bar 1 (and bar 3 if bars>=3); with bars=2
+    we get exactly one crash hit at the section's bar 1 — which lands
+    at the piece's bar 13. Assert the crash part has notes."""
+    score = run_music_block("wake")
+    by_inst = _parts_by_inst_id(score)
+    crash_key = ('CrashCymbals', 49)
+    assert crash_key in by_inst, (
+        f"wake missing CrashCymbals; got {sorted(by_inst.keys())}"
+    )
+    crash_part = by_inst[crash_key][0]
+    notes_total = sum(
+        len(list(p.flatten().notes)) for p in by_inst[crash_key]
+    )
+    # peak(bars=2) → exactly one crash hit at the section's bar 1.
+    assert notes_total == 1, (
+        f"wake's peak section (bars=2) should yield exactly 1 crash "
+        f"hit (at section bar 1); got {notes_total}"
+    )
+
+
+def test_wake_does_not_use_solitary_or_swarming(run_music_block):
+    """The "sister piece skips sections" hypothesis: Wake uses 6 of
+    the 8 percussion_lab sections, deliberately omitting `solitary`
+    and `swarming`. Read the wake.md source file and assert neither
+    name appears in the English or Python facets."""
+    from tests.music._helpers import _find_vault
+    import os
+    vault = _find_vault()
+    if vault is None:
+        import pytest
+        pytest.skip("forge-music vault unreachable")
+    wake_path = os.path.join(vault, "percussion_lab", "wake.md")
+    with open(wake_path, "r", encoding="utf-8") as fh:
+        body = fh.read()
+    # solitary / swarming should not appear as wikilinks or as
+    # context.compute("...") string args. Searching the literal name
+    # token is sufficient.
+    assert "solitary" not in body.lower(), (
+        "wake.md should not reference `solitary` — it's the skipped "
+        "opening section in this asymmetric arc"
+    )
+    assert "swarming" not in body.lower(), (
+        "wake.md should not reference `swarming` — skipped because "
+        "Wake doesn't build to a full ensemble before the brief peak"
+    )
+
+
+def test_wake_dispersing_section_inserts_decrescendo_hairpin(
+    run_music_block,
+):
+    """Wake's fourth section is `dispersing`(bars=8) at bars 15-22.
+    Dispersing inserts a Diminuendo spanner (hairpin) across its
+    bars. Verify the spanner is present somewhere in Wake's score."""
+    score = run_music_block("wake")
+    spanners = list(score.flatten().getElementsByClass(spanner.Spanner))
+    diminuendos = [
+        s for s in spanners if isinstance(s, dynamics.Diminuendo)
+    ]
+    assert len(diminuendos) >= 1, (
+        "wake should contain at least one Diminuendo spanner from the "
+        f"dispersing section; got {[type(s).__name__ for s in spanners]}"
+    )
+
+
+def test_wake_has_brief_peak_relative_to_fade(run_music_block):
+    """The "asymmetric arc" hypothesis: peak (bars=2) is significantly
+    shorter than dispersing (bars=8). Ratio 1:4. Encoded by reading
+    the snippet body's `bars=N` parameters in the Python facet."""
+    from tests.music._helpers import _find_vault
+    import os
+    import re
+    vault = _find_vault()
+    if vault is None:
+        import pytest
+        pytest.skip("forge-music vault unreachable")
+    wake_path = os.path.join(vault, "percussion_lab", "wake.md")
+    with open(wake_path, "r", encoding="utf-8") as fh:
+        body = fh.read()
+    # Pattern: context.compute("name", bars=N)
+    matches = dict(
+        re.findall(r'context\.compute\(\s*"([a-z_]+)"\s*,\s*bars=(\d+)', body)
+    )
+    assert matches.get("peak") == "2", (
+        f"wake's peak section should be bars=2 (brief recall); "
+        f"got bars={matches.get('peak')}"
+    )
+    assert matches.get("dispersing") == "8", (
+        f"wake's dispersing section should be bars=8 (long fade); "
+        f"got bars={matches.get('dispersing')}"
+    )
+    peak_bars = int(matches["peak"])
+    dispersing_bars = int(matches["dispersing"])
+    assert dispersing_bars >= 4 * peak_bars, (
+        f"wake's dispersing should be at least 4x peak (asymmetric "
+        f"arc); peak={peak_bars} dispersing={dispersing_bars}"
+    )
