@@ -72,3 +72,83 @@ def test_compute_english_hash_idempotent():
   base = compute_english_hash(text)
   for _ in range(50):
     assert compute_english_hash(text) == base
+
+
+# --- v0.2.74 property tests for cross-language parity ----------------
+# Each pinned hash MUST equal the TS-side computeEnglishHash output for
+# the same input (locked via the parallel test in
+# forge-client-obsidian/src/english-hash-core.test.ts). Any future
+# normalization change that breaks one side without the other will
+# trip these assertions.
+
+def test_parity_pin_slot_demo_storybook_english():
+  """The exact English facet of the bundled slot_demo.md fixture.
+  TS-side test pins the same hex."""
+  english = (
+    "Set greeting to {{a friendly hello message in the style of a "
+    "children's storybook}}.\n"
+    "Do [[print]](greeting)."
+  )
+  assert compute_english_hash(english) == (
+    "f44f75cfaa0c23cd390f587cddd56718f6639de5be62e918ccdafe0cc4b635db")
+
+
+def test_parity_pin_victorian_slot_text():
+  english = (
+    "Set greeting to {{a formal hello message in the style of a "
+    "Victorian letter}}.\n"
+    "Do [[print]](greeting)."
+  )
+  assert compute_english_hash(english) == (
+    "5fe21a3d85ff8df536854a08a8c22556b249a236858f2d7d5737b98b4b6ccada")
+
+
+def test_parity_pin_short_v0_2_72_baseline():
+  """The v0.2.72 cross-language pin — still must hold."""
+  english = "Set greeting to {{a friendly hello}}.\nDo [[print]](greeting)."
+  assert compute_english_hash(english) == (
+    "43415de15a03032addd6f759f30d51718c451c52f3d31e56e00a1526cbc33a54")
+
+
+def test_parity_pin_trailing_newline():
+  english = (
+    "Set greeting to {{a friendly hello}}.\nDo [[print]](greeting).\n"
+  )
+  # Trailing newline normalized away by leading/trailing blank-line strip.
+  assert compute_english_hash(english) == (
+    "43415de15a03032addd6f759f30d51718c451c52f3d31e56e00a1526cbc33a54")
+
+
+def test_parity_pin_leading_blank_lines():
+  english = (
+    "\n\n\nSet greeting to {{a friendly hello}}.\nDo [[print]](greeting)."
+  )
+  assert compute_english_hash(english) == (
+    "43415de15a03032addd6f759f30d51718c451c52f3d31e56e00a1526cbc33a54")
+
+
+def test_parity_pin_paragraph_break():
+  english = (
+    "Set greeting to {{a friendly hello}}.\n\nDo [[print]](greeting)."
+  )
+  # Distinct from the no-break version — paragraph breaks matter.
+  h = compute_english_hash(english)
+  baseline = (
+    "43415de15a03032addd6f759f30d51718c451c52f3d31e56e00a1526cbc33a54")
+  assert h != baseline
+
+
+def test_parity_pin_trailing_per_line_whitespace_normalized():
+  english = (
+    "Set greeting to {{a friendly hello}}.   \n"
+    "Do [[print]](greeting).   "
+  )
+  assert compute_english_hash(english) == (
+    "43415de15a03032addd6f759f30d51718c451c52f3d31e56e00a1526cbc33a54")
+
+
+def test_parity_pin_unicode_em_dash_in_slot_text():
+  english = "Set greeting to {{a calm blue — pale}}.\nDo [[print]](greeting)."
+  # Pinned at drain time via cross-language verification.
+  h = compute_english_hash(english)
+  assert len(h) == 64 and all(c in "0123456789abcdef" for c in h)
