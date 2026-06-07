@@ -235,6 +235,93 @@ def sequence(*streams: StreamLike) -> stream.Score:
   return score
 
 
+def voices_canonical(kp, sp=None, chp=None, ohp=None, ltp=None, mtp=None, crp=None):
+  """v0.3.11 — Stack 7 percussion parts in canonical order for
+  percussion_lab sections.
+
+  Every percussion_lab section returns a Score with 7 voice positions
+  (kick, snare, closed_hihat, open_hihat, low_tom, mid_tom, crash)
+  regardless of which instruments actually play. Sections that don't
+  play a given instrument pass None for that parameter; the helper
+  builds an all-rest part at that voice position, using the bar count
+  and time signature of the kick part (always required).
+
+  The canonical layout is the contract `sequence()` requires:
+  `sequence()` groups input parts by voice_idx FIRST, then by
+  instrument identity within each position. Same-instrument staves
+  across sections only merge correctly if every section emits that
+  instrument at the same voice_idx. Without this canonical layout,
+  closed_hihat at voice_idx 1 in companions and voice_idx 2 in
+  gathering would render as two separate staves with 56 measures
+  of combined-and-padded content instead of the intended single
+  32-measure stave (this failure mode empirically verified during
+  the 2026-06-06-2020-percussion-lab-seven-parts-cleanup drain;
+  see that prompt's feedback file for the investigation).
+
+  Args:
+    kp: kick part (REQUIRED — bar count + time signature read here).
+    sp, chp, ohp, ltp, mtp, crp: optional snare, closed_hihat,
+      open_hihat, low_tom, mid_tom, crash parts. None means "this
+      instrument is silent in this section" — the helper generates
+      an all-rest stream.Part for that voice position matching kp's
+      bar count and time signature, with the correct music21
+      instrument attached (so _instrument_key groups it correctly).
+
+  Returns:
+    music21.stream.Score with 7 stacked Parts in canonical
+    (kick, snare, closed_hihat, open_hihat, low_tom, mid_tom, crash)
+    order. Inactive parts have rest-bars with correct instrument
+    metadata.
+  """
+  if kp is None:
+    raise ValueError(
+      "voices_canonical: kp (kick part) is required — every "
+      "percussion_lab section has a kick, and bar count + time "
+      "signature are read from it.")
+
+  # Derive bar count and time signature from the kick.
+  kick_measures = list(kp.getElementsByClass(stream.Measure))
+  n_bars = len(kick_measures)
+  ts_obj = None
+  if kick_measures:
+    ts_obj = next(
+      (el for el in kick_measures[0]
+       if isinstance(el, meter.TimeSignature)),
+      None,
+    )
+  if ts_obj is None:
+    ts_obj = meter.TimeSignature('4/4')
+  bar_ql = ts_obj.barDuration.quarterLength
+
+  def _make_rest_part(inst_factory):
+    """Build an all-rest Part with the same bar count + time signature
+    as kp, with the canonical instrument from inst_factory."""
+    part = stream.Part()
+    part.append(inst_factory())
+    for bar_idx in range(n_bars):
+      m = stream.Measure(number=bar_idx + 1)
+      if bar_idx == 0:
+        m.append(copy.deepcopy(ts_obj))
+      m.append(note.Rest(quarterLength=bar_ql))
+      part.append(m)
+    return part
+
+  # Slot-fill: pass-through provided parts, generate all-rest for None.
+  # Order matches the canonical (kick, snare, closed_hh, open_hh,
+  # low_tom, mid_tom, crash) layout.
+  sp_filled = sp if sp is not None else _make_rest_part(snare)
+  chp_filled = chp if chp is not None else _make_rest_part(closed_hihat)
+  ohp_filled = ohp if ohp is not None else _make_rest_part(open_hihat)
+  ltp_filled = ltp if ltp is not None else _make_rest_part(low_tom)
+  mtp_filled = mtp if mtp is not None else _make_rest_part(mid_tom)
+  crp_filled = crp if crp is not None else _make_rest_part(crash_cymbal)
+
+  return voices(
+    kp, sp_filled, chp_filled, ohp_filled, ltp_filled, mtp_filled,
+    crp_filled,
+  )
+
+
 def repeat(s: StreamLike, n: int) -> stream.Score:
   """Concatenate `s` with itself `n` times. Returns a Score for type
   uniformity (equivalent to sequence(s, s, ..., s))."""

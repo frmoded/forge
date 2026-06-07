@@ -34,6 +34,7 @@ try:
   _FORGE_MUSIC_LIB_NAMES = {
     "bar": _music_lib.bar,
     "voices": _music_lib.voices,
+    "voices_canonical": _music_lib.voices_canonical,
     "sequence": _music_lib.sequence,
     "repeat": _music_lib.repeat,
     "minor_pentatonic": _music_lib.minor_pentatonic,

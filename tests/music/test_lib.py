@@ -2,7 +2,7 @@ import pytest
 from music21 import key, meter, note, pitch, stream, instrument
 
 from forge.music.lib import (
-  bar, voices, sequence, repeat,
+  bar, voices, voices_canonical, sequence, repeat,
   minor_pentatonic, major_pentatonic,
   with_velocity,
   closed_hihat, open_hihat, pedal_hihat,
@@ -11,6 +11,179 @@ from forge.music.lib import (
   kick, snare,
   _instrument_key,
 )
+
+
+# ---------- voices_canonical (v0.3.11) ----------
+
+def _make_kick_part(bars=4, ts_str='4/4'):
+  """Build a minimal kick part with `bars` measures and the given
+  time signature. Each measure has one quarter-note kick on beat 1."""
+  ts = meter.TimeSignature(ts_str)
+  part = stream.Part()
+  part.append(kick())
+  for i in range(bars):
+    m = stream.Measure(number=i + 1)
+    if i == 0:
+      m.append(ts)
+    m.append(note.Note('C4', quarterLength=1.0))
+    bar_ql = ts.barDuration.quarterLength
+    if bar_ql > 1.0:
+      m.append(note.Rest(quarterLength=bar_ql - 1.0))
+    part.append(m)
+  return part
+
+
+def test_voices_canonical_kick_only_emits_7_parts():
+  kp = _make_kick_part(bars=4)
+  score = voices_canonical(kp)
+  assert isinstance(score, stream.Score)
+  parts = list(score.parts)
+  assert len(parts) == 7
+
+
+def test_voices_canonical_pads_with_correct_bar_count():
+  kp = _make_kick_part(bars=4)
+  score = voices_canonical(kp)
+  for p in score.parts:
+    measures = list(p.getElementsByClass(stream.Measure))
+    assert len(measures) == 4
+
+  kp_long = _make_kick_part(bars=8)
+  score_long = voices_canonical(kp_long)
+  for p in score_long.parts:
+    measures = list(p.getElementsByClass(stream.Measure))
+    assert len(measures) == 8
+
+
+def test_voices_canonical_pads_with_correct_time_signature():
+  kp = _make_kick_part(bars=2, ts_str='12/8')
+  score = voices_canonical(kp)
+  for p in score.parts:
+    measures = list(p.getElementsByClass(stream.Measure))
+    first_ts = next(
+      (el for el in measures[0]
+       if isinstance(el, meter.TimeSignature)),
+      None,
+    )
+    assert first_ts is not None
+    assert first_ts.ratioString == '12/8'
+
+
+def test_voices_canonical_active_parts_pass_through_unchanged():
+  kp = _make_kick_part(bars=4)
+  sp = stream.Part()
+  sp.append(snare())
+  for i in range(4):
+    m = stream.Measure(number=i + 1)
+    if i == 0:
+      m.append(meter.TimeSignature('4/4'))
+    m.append(note.Rest(quarterLength=1.0))
+    m.append(note.Note('B3', quarterLength=1.0))
+    m.append(note.Rest(quarterLength=2.0))
+    sp.append(m)
+
+  score = voices_canonical(kp, sp=sp)
+  snare_parts = []
+  for p in score.parts:
+    inst = next((el for el in p.elements
+                 if isinstance(el, instrument.Instrument)), None)
+    if inst is not None and type(inst).__name__ == 'SnareDrum':
+      snare_parts.append(p)
+  assert len(snare_parts) == 1
+  snare_notes = list(snare_parts[0].flatten().notes)
+  assert len(snare_notes) == 4
+
+
+def test_voices_canonical_missing_kp_raises():
+  with pytest.raises(TypeError):
+    voices_canonical()
+  with pytest.raises(ValueError):
+    voices_canonical(None)
+
+
+def test_voices_canonical_inactive_parts_have_correct_instrument_factories():
+  """Load-bearing for v0.3.11: proves _instrument_key groups correctly
+  across sections that pad different inactive instruments."""
+  kp = _make_kick_part(bars=4)
+  score = voices_canonical(kp)
+  expected = [
+    ('BassDrum', 35),
+    ('SnareDrum', 38),
+    ('HiHatCymbal', 42),
+    ('HiHatCymbal', 46),
+    ('TomTom', 41),
+    ('TomTom', 47),
+    ('CrashCymbals', 49),
+  ]
+  parts = list(score.parts)
+  # score.parts returns parts in canonical order (kick first, crash
+  # last) — music21's iteration honors offsets, and `voices()` inserts
+  # at offset 0 but later inserts re-order by element index, ending up
+  # with the call-order preserved.
+  actual = []
+  for p in parts:
+    inst = next((el for el in p.elements
+                 if isinstance(el, instrument.Instrument)), None)
+    assert inst is not None
+    actual.append(
+      (type(inst).__name__, getattr(inst, 'percMapPitch', None))
+    )
+  assert actual == expected
+
+
+def test_voices_canonical_preserves_voices_function_contract():
+  """A hand-built 7-part voices(kp, all_rest_sp, ...) and
+  voices_canonical(kp) produce structurally identical Scores."""
+
+  def _all_rest_part(inst_factory, bars=4, ts_str='4/4'):
+    ts = meter.TimeSignature(ts_str)
+    part = stream.Part()
+    part.append(inst_factory())
+    bar_ql = ts.barDuration.quarterLength
+    for i in range(bars):
+      m = stream.Measure(number=i + 1)
+      if i == 0:
+        m.append(ts)
+      m.append(note.Rest(quarterLength=bar_ql))
+      part.append(m)
+    return part
+
+  kp = _make_kick_part(bars=4)
+  ref = voices(
+    kp,
+    _all_rest_part(snare),
+    _all_rest_part(closed_hihat),
+    _all_rest_part(open_hihat),
+    _all_rest_part(low_tom),
+    _all_rest_part(mid_tom),
+    _all_rest_part(crash_cymbal),
+  )
+  helper = voices_canonical(_make_kick_part(bars=4))
+
+  ref_parts = list(ref.parts)
+  helper_parts = list(helper.parts)
+  assert len(ref_parts) == len(helper_parts) == 7
+
+  def _inst_keys(parts):
+    keys = []
+    for p in parts:
+      inst = next((el for el in p.elements
+                   if isinstance(el, instrument.Instrument)), None)
+      assert inst is not None
+      keys.append(
+        (type(inst).__name__, getattr(inst, 'percMapPitch', None))
+      )
+    return keys
+
+  assert _inst_keys(ref_parts) == _inst_keys(helper_parts)
+
+  ref_measure_counts = [
+    len(list(p.getElementsByClass(stream.Measure))) for p in ref_parts
+  ]
+  helper_measure_counts = [
+    len(list(p.getElementsByClass(stream.Measure))) for p in helper_parts
+  ]
+  assert ref_measure_counts == helper_measure_counts
 
 
 # ---------- bar ----------
