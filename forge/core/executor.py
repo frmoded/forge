@@ -164,6 +164,10 @@ class ForgeContext:
       if code is None:
         raise ValueError(f"no Python heading in snippet '{snippet_id}'")
       nested_trusted = snippet.get("source") == "builtin"
+      # v0.2.77 — thread declared_inputs so exec_python can bind
+      # positional → keyword for canonical snippets and produce a
+      # clear error on positional-vs-inputs-shape mismatch.
+      declared_inputs = list(snippet["meta"].get("inputs") or [])
       nested_stdout, result = exec_python(
         code, inputs, self._resolver,
         args=args,
@@ -172,6 +176,7 @@ class ForgeContext:
         trusted=nested_trusted,
         snippet_id=snippet["snippet_id"],
         domains=self._domains,
+        declared_inputs=declared_inputs,
       )
       if nested_stdout:
         sys.stdout.write(nested_stdout)
@@ -649,7 +654,7 @@ def _build_snippet_shims(context, registry):
   return shims
 
 
-def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None, domains=None):
+def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None, domains=None, declared_inputs=None):
   buf = io.StringIO()
   context = ForgeContext(resolver, inputs, vault_path=vault_path,
                          registry=registry, caller_id=snippet_id,
@@ -659,6 +664,13 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
   # vault snippets in some other capacity) but no longer controls builtins
   # exposure.
   del trusted
+
+  # v0.2.77 — positional foot-gun fix is applied AFTER entrypoint detection
+  # (inside the try block below), gated on _takes_only_context(fn) — only
+  # canonical-shaped snippets (`def compute(context):`) need the
+  # positional-to-keyword binding. Free-English shape
+  # (`def compute(context, n):`) routes positional via Python's natural
+  # binding and stays untouched.
   # Base names are always injected; domain bundles (music21/helpers,
   # moda types) are gated by the vault's declared `domains` (B9).
   # v0.2.68 — sibling-snippet shims injected before inputs so an input
@@ -683,6 +695,38 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
     # parameter resolution maps positionals to declared params and rejects
     # mismatches with TypeError.
     if _takes_only_context(fn):
+      # v0.2.77 — canonical-shape snippet (`def compute(context):`).
+      # Args reach the body only via the inputs dict spread into
+      # local_ns. Bind positional → declared inputs in order so
+      # `[[double]](5)` against `inputs: [n]` works as expected,
+      # raising a clear error rather than the opaque NameError it
+      # would produce otherwise.
+      if args and declared_inputs is not None:
+        label = f"snippet '{snippet_id}'" if snippet_id else "snippet"
+        if len(declared_inputs) == 0:
+          raise ValueError(
+            f"{label} takes no inputs; positional call provided "
+            f"{len(args)} args. Edit the call site to drop the "
+            f"positional args."
+          )
+        if len(args) > len(declared_inputs):
+          bare = snippet_id.rsplit("/", 1)[-1] if snippet_id else "snippet"
+          kwarg_form = ", ".join(f"{k}=..." for k in declared_inputs)
+          raise ValueError(
+            f"{label} takes inputs {declared_inputs}; "
+            f"positional call provided {len(args)} args; "
+            f"call as [[{bare}]]({kwarg_form})"
+          )
+        positional_inputs = dict(zip(declared_inputs, args))
+        # Inject bound positionals into local_ns so the canonical body
+        # can reference them as bare names (which is exactly the
+        # canonical-form contract — names from `inputs:` are available
+        # as locals). Earlier keyword inputs win on collision (matches
+        # the chip-palette migration path where some call sites are
+        # still positional while others have already adopted kwargs).
+        for k, v in positional_inputs.items():
+          if k not in local_ns:
+            local_ns[k] = v
       result = fn(context)
     else:
       result = fn(context, *args, **inputs)
