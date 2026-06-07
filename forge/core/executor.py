@@ -498,21 +498,44 @@ def resolve_action_code(snippet, slot_resolutions=None):
   edit_mode = meta.get("edit_mode", "english")
 
   if code is not None:
-    # `# Python` present. For canonical + english mode, verify the
-    # english_hash before returning; otherwise return directly.
-    if facet_form == "canonical" and edit_mode != "python":
-      from forge.core.slot_cache import compute_english_hash
-      stored_hash = meta.get("english_hash")
-      english = extract_section(snippet["body"], "English")
-      current_hash = compute_english_hash(english) if english else None
-      if stored_hash == current_hash:
+    # v0.2.73: when slot_resolutions is explicitly provided, the
+    # plugin is in the second-pass of a cache-miss round-trip. The
+    # presence of slot_resolutions signals "I want a re-transpile
+    # with these resolutions, don't short-circuit on the cached
+    # `# Python`." Skip the legacy/cached early-return paths and
+    # fall through to the canonical transpile block below.
+    #
+    # Without this guard, Obsidian dropping `facet_form: canonical`
+    # from frontmatter on save (a known YAML-rewrite quirk for
+    # unrecognized fields) would route through the
+    # `else: return code` legacy branch and return the STALE
+    # `# Python` even though the plugin handed us fresh resolutions.
+    # User-side symptom: english_hash updates on disk but
+    # `# Python` body does not. Hypothesis C of the v0.2.73
+    # investigation; see docs/investigations/v0.2.73-slot-
+    # resolution-stale-python.md.
+    if slot_resolutions is None:
+      # `# Python` present. For canonical + english mode, verify the
+      # english_hash before returning; otherwise return directly.
+      if facet_form == "canonical" and edit_mode != "python":
+        from forge.core.slot_cache import compute_english_hash
+        stored_hash = meta.get("english_hash")
+        english = extract_section(snippet["body"], "English")
+        current_hash = compute_english_hash(english) if english else None
+        if stored_hash == current_hash:
+          return code
+        # Hash mismatch: fall through to re-transpile.
+      else:
         return code
-      # Hash mismatch: fall through to re-transpile.
-    else:
-      return code
+    # else: slot_resolutions provided → fall through to transpile
+    # path so the plugin's resolutions get spliced into the output.
 
-  if facet_form != "canonical":
+  if facet_form != "canonical" and slot_resolutions is None:
     return None  # signals legacy "no Python heading" to caller
+  # v0.2.73: slot_resolutions provided → enter canonical compile path
+  # regardless of facet_form (defends against Obsidian dropping the
+  # frontmatter field). The plugin's intent is clear: re-transpile
+  # the English facet using these resolutions.
 
   # Canonical compile path. Build resolver against slot_resolutions
   # (passed in by the plugin on second pass after /resolve-slot

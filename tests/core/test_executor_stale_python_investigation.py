@@ -167,30 +167,29 @@ def test_hypothesis_c_engine_returns_stale_python_when_facet_form_absent():
 
   code = resolve_action_code(snip, slot_resolutions=resolutions)
 
-  # If Hypothesis C holds, the engine returns STALE storybook code
-  # regardless of slot_resolutions, because the facet_form != "canonical"
-  # branch takes precedence over the hash check.
-  assert '"Hello, dear reader!"' in code, (
-    f"Hypothesis C INTENDS that the engine returns the stale # Python\n"
-    f"when facet_form is absent. If this assertion fails, the engine\n"
-    f"actually re-transpiles even without facet_form — meaning\n"
-    f"Hypothesis C is also refuted and the bug is elsewhere.\n"
-    f"Actual code:\n{code}"
+  # v0.2.73 fix: when slot_resolutions is provided, engine should
+  # re-transpile regardless of whether facet_form is present.
+  # Returns the Victorian-resolved Python, NOT the stale storybook.
+  assert victorian_expr in code, (
+    f"v0.2.73 fix: engine MUST re-transpile when slot_resolutions is\n"
+    f"provided, regardless of facet_form. Expected Victorian\n"
+    f"expression in code; got:\n{code}"
   )
-  # The Victorian expression should NOT be in the returned code.
-  assert victorian_expr not in code, (
-    f"Hypothesis C says engine returns OLD storybook; the new\n"
-    f"Victorian expression should be absent. Got code:\n{code}"
+  assert '"Hello, dear reader!"' not in code, (
+    f"v0.2.73 fix: stale storybook code MUST NOT survive when\n"
+    f"slot_resolutions is provided. Got code:\n{code}"
   )
 
 
-def test_hypothesis_b_slot_resolutions_ignored_when_python_cache_hits_match():
-  """Edge case to characterize: when english_hash matches AND
-  slot_resolutions is provided (could happen if plugin pessimistically
-  passes resolutions even on a cache hit), what does the engine do?
+def test_v0_2_73_slot_resolutions_forces_retranspile_even_when_python_cache_hits_match():
+  """v0.2.73 behavior change: when slot_resolutions is provided, the
+  engine ALWAYS re-transpiles — the plugin's intent is unambiguous.
+  Even on a cache-hit scenario (english_hash matches), the provided
+  resolutions win.
 
-  v0.2.72 implementation returns the cached # Python. This is fine —
-  the cache-hit path documents that # Python wins."""
+  Pre-v0.2.73 behavior: engine returned the cached # Python and
+  silently ignored slot_resolutions. v0.2.73: engine respects the
+  plugin's intent."""
   python = (
     'def compute(context):\n'
     '    greeting = "Hello, dear reader!"\n'
@@ -215,10 +214,10 @@ def test_hypothesis_b_slot_resolutions_ignored_when_python_cache_hits_match():
     },
     "body": body,
   }
-  # Provide a different resolution; cache hit should still return the
-  # cached Python (ignore the provided resolutions).
   k = compute_slot_cache_key(
     "a friendly hello message in the style of a children's storybook",
     "forge-moda/slot_demo")
   code = resolve_action_code(snip, slot_resolutions={k: '"DIFFERENT"'})
-  assert '"Hello, dear reader!"' in code
+  # v0.2.73: slot_resolutions wins; re-transpile with new value.
+  assert '"DIFFERENT"' in code
+  assert '"Hello, dear reader!"' not in code
