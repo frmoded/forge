@@ -1,49 +1,62 @@
-"""v0.2.70 — engine-side slot resolution integration tests.
+"""Engine-side slot resolution + B7.3 unified-cache integration tests.
 
-Phase 2 §1.2 — TDD failing-first for the resolver-wired
-`resolve_action_code` path. Covers:
+v0.2.72 — `# Python` IS the cache (B7.3 unification). The separate
+`# Slots` heading from v0.2.70/v0.2.71 is dead; the engine ignores it.
 
-  1. Slot-bearing snippet, no cache → SlotCacheMissError with all
-     unresolved slots collected (document order preserved).
-  2. Slot-bearing snippet, partial cache → only unresolved surface.
-  3. Slot-bearing snippet, full cache → transpiles to Python normally.
-  4. Slot-free canonical snippet → works unchanged (no regression).
-  5. Slot-bearing snippet, malformed # Slots heading → tolerant:
-     treats as no cache, surfaces all slots as missing.
-  6. Cache-miss-then-cache-hit E2E (§1.6 contract): first transpile
-     records misses; populating the cache and re-running transpiles
-     cleanly with ZERO additional misses.
+These tests exercise the unified contract:
 
-The engine resolver raises `SlotCacheMissError` on a miss. The error
-carries a `missing` list of (slot_text, snippet_id) pairs which the
-plugin batches into a single /resolve-slot call. After the plugin
-writes the responses back to the snippet's # Slots heading and
-re-fires the transpile gesture, the second pass is a clean cache hit.
+  - First-pass cache miss: no `# Python`, no slot_resolutions →
+    SlotCacheMissError with all unresolved slots.
+  - Second-pass populate: slot_resolutions dict supplied → resolver
+    looks up every slot, returns full Python.
+  - Cache hit: `# Python` present + english_hash matches → return
+    cached Python without transpile.
+  - Cache invalidation: `# Python` present + english_hash mismatches
+    → fall through to transpile (which may re-raise on slots).
+  - edit_mode override: `edit_mode: python` → use `# Python`
+    unconditionally (skip hash check).
+  - Slot-free regression: existing canonical snippets with no slots
+    work unchanged.
 """
-
 import pytest
 
 from forge.core.executor import resolve_action_code
-from forge.core.slot_cache import SlotCacheMissError, serialize_slots_section
+from forge.core.slot_cache import (
+  SlotCacheMissError,
+  compute_english_hash,
+  compute_slot_cache_key,
+)
 
 
-def _slot_snippet(english, slots=None, snippet_id="forge-moda/slot_demo"):
-  """Build a canonical-form snippet with optional # Slots heading."""
+def _canonical_snippet(
+  english,
+  python_code=None,
+  english_hash=None,
+  edit_mode=None,
+  snippet_id="forge-moda/slot_demo",
+):
+  """Build a canonical-form snippet, optionally with a # Python facet
+  and english_hash + edit_mode frontmatter fields."""
   body = f"# English\n\n{english}\n"
-  if slots:
-    body += "\n" + serialize_slots_section(slots) + "\n"
+  if python_code is not None:
+    body += f"\n# Python\n\n```python\n{python_code}\n```\n"
+  meta = {"type": "action", "facet_form": "canonical", "inputs": []}
+  if english_hash is not None:
+    meta["english_hash"] = english_hash
+  if edit_mode is not None:
+    meta["edit_mode"] = edit_mode
   return {
     "snippet_id": snippet_id,
-    "meta": {"type": "action", "facet_form": "canonical", "inputs": []},
+    "meta": meta,
     "body": body,
   }
 
 
-# --- 1. Slot-bearing, no cache ---------------------------------------
+# --- 1. Cache miss: no Python, no slot_resolutions ---------------------
 
 
-def test_slot_bearing_no_cache_raises_with_all_misses_in_order():
-  snip = _slot_snippet(
+def test_no_python_no_resolutions_surfaces_all_missing_in_order():
+  snip = _canonical_snippet(
     "Set greeting to {{a friendly hello message}}.\n"
     "Set color to {{a calm blue}}.\n"
     "Do [[print]](greeting)."
@@ -52,66 +65,17 @@ def test_slot_bearing_no_cache_raises_with_all_misses_in_order():
     resolve_action_code(snip)
   missing = exc.value.missing
   assert len(missing) == 2
-  # Document order preserved.
   assert missing[0]["slot_text"] == "a friendly hello message"
   assert missing[1]["slot_text"] == "a calm blue"
-  # snippet_id threaded through to every missing entry.
   for entry in missing:
     assert entry["snippet_id"] == "forge-moda/slot_demo"
 
 
-# --- 2. Slot-bearing, partial cache ----------------------------------
+# --- 2. Slot-free canonical (regression) ----------------------------
 
 
-def test_slot_bearing_partial_cache_only_unresolved_surface():
-  # Pre-populate only the second slot.
-  from forge.core.slot_cache import compute_slot_cache_key
-  k_color = compute_slot_cache_key("a calm blue", "forge-moda/slot_demo")
-  snip = _slot_snippet(
-    "Set greeting to {{a friendly hello message}}.\n"
-    "Set color to {{a calm blue}}.\n"
-    "Do [[print]](greeting).",
-    slots={k_color: '"#3366cc"'},
-  )
-  with pytest.raises(SlotCacheMissError) as exc:
-    resolve_action_code(snip)
-  missing = exc.value.missing
-  assert len(missing) == 1
-  assert missing[0]["slot_text"] == "a friendly hello message"
-
-
-# --- 3. Slot-bearing, full cache ------------------------------------
-
-
-def test_slot_bearing_full_cache_returns_python():
-  from forge.core.slot_cache import compute_slot_cache_key
-  k_greet = compute_slot_cache_key(
-    "a friendly hello message", "forge-moda/slot_demo")
-  k_color = compute_slot_cache_key("a calm blue", "forge-moda/slot_demo")
-  snip = _slot_snippet(
-    'Set greeting to {{a friendly hello message}}.\n'
-    'Set color to {{a calm blue}}.\n'
-    'Do [[print]](greeting).',
-    slots={
-      k_greet: '"hello world"',
-      k_color: '"#3366cc"',
-    },
-  )
-  code = resolve_action_code(snip)
-  assert isinstance(code, str)
-  assert "def compute(context):" in code
-  # The cached values should appear in the generated Python (the E--
-  # emitter splices them verbatim).
-  assert '"hello world"' in code
-  # color isn't used in print but is assigned; should still appear.
-  assert '"#3366cc"' in code
-
-
-# --- 4. Slot-free canonical (regression) ----------------------------
-
-
-def test_slot_free_canonical_unchanged():
-  snip = _slot_snippet(
+def test_slot_free_canonical_no_python_returns_transpiled():
+  snip = _canonical_snippet(
     'Do [[print]]("plain canonical, no slots").'
   )
   code = resolve_action_code(snip)
@@ -120,81 +84,226 @@ def test_slot_free_canonical_unchanged():
   assert '"plain canonical, no slots"' in code
 
 
-# --- 5. Slot-bearing, malformed # Slots heading ----------------------
+# --- 3. Second pass: slot_resolutions supplied ----------------------
 
 
-def test_slot_bearing_malformed_cache_is_tolerant():
-  # Body has a `# Slots` heading with broken YAML — parse_slots_section
-  # returns {} per its tolerance contract. The engine treats this as
-  # "no cache" and surfaces all slots as missing.
-  body = (
-    "# English\n\n"
-    "Set x to {{the answer}}.\n\n"
-    "# Slots\n\n"
-    "```yaml\n"
-    "this is: { ]]] absolutely [[ : not valid YAML\n"
-    "```\n"
+def test_slot_resolutions_supplied_returns_transpiled_python():
+  english = (
+    'Set greeting to {{a friendly hello}}.\n'
+    'Do [[print]](greeting).'
   )
-  snip = {
-    "snippet_id": "forge-moda/broken_demo",
-    "meta": {"type": "action", "facet_form": "canonical", "inputs": []},
-    "body": body,
-  }
+  snippet_id = "forge-moda/slot_demo"
+  snip = _canonical_snippet(english, snippet_id=snippet_id)
+  # Pre-compute the cache key for the slot the resolver will request.
+  k = compute_slot_cache_key("a friendly hello", snippet_id)
+  resolutions = {k: '"Hello, dear reader!"'}
+  code = resolve_action_code(snip, slot_resolutions=resolutions)
+  assert isinstance(code, str)
+  assert "def compute(context):" in code
+  assert '"Hello, dear reader!"' in code
+
+
+def test_slot_resolutions_partial_still_surfaces_remaining_missing():
+  english = (
+    'Set greeting to {{a friendly hello}}.\n'
+    'Set color to {{a calm blue}}.\n'
+    'Do [[print]](greeting).'
+  )
+  snippet_id = "forge-moda/slot_demo"
+  snip = _canonical_snippet(english, snippet_id=snippet_id)
+  # Only resolve the greeting; color still missing.
+  k = compute_slot_cache_key("a friendly hello", snippet_id)
+  with pytest.raises(SlotCacheMissError) as exc:
+    resolve_action_code(snip, slot_resolutions={k: '"Hello"'})
+  missing = exc.value.missing
+  assert len(missing) == 1
+  assert missing[0]["slot_text"] == "a calm blue"
+
+
+# --- 4. # Python + matching english_hash → cache hit -----------------
+
+
+def test_python_present_matching_english_hash_returns_cached():
+  english = (
+    'Set greeting to {{a friendly hello}}.\n'
+    'Do [[print]](greeting).'
+  )
+  # Pre-baked Python that simulates what a prior transpile produced.
+  python = (
+    'def compute(context):\n'
+    '    greeting = "Hello, dear reader!"\n'
+    '    print(greeting)'
+  )
+  # Hash the English exactly as the engine will (via the same helper).
+  english_hash = compute_english_hash(english)
+  snip = _canonical_snippet(
+    english,
+    python_code=python,
+    english_hash=english_hash,
+  )
+  code = resolve_action_code(snip)
+  assert code is not None
+  assert "Hello, dear reader!" in code
+
+
+# --- 5. # Python + mismatched english_hash → re-transpile ------------
+
+
+def test_python_present_mismatched_english_hash_re_transpiles():
+  # The English has been edited since # Python was last generated;
+  # the cached hash no longer matches. Engine falls through to
+  # transpile and surfaces SlotCacheMissError because slots are
+  # unresolved.
+  english = (
+    'Set greeting to {{a NEW slot text}}.\n'
+    'Do [[print]](greeting).'
+  )
+  stale_python = (
+    'def compute(context):\n'
+    '    greeting = "Hello, dear reader!"\n'
+    '    print(greeting)'
+  )
+  stale_hash = compute_english_hash("DIFFERENT english")
+  snip = _canonical_snippet(
+    english,
+    python_code=stale_python,
+    english_hash=stale_hash,
+  )
   with pytest.raises(SlotCacheMissError) as exc:
     resolve_action_code(snip)
   missing = exc.value.missing
   assert len(missing) == 1
-  assert missing[0]["slot_text"] == "the answer"
+  assert missing[0]["slot_text"] == "a NEW slot text"
 
 
-# --- 6. §1.6: cache-miss-then-cache-hit E2E ------------------------
+# --- 6. edit_mode: python → use # Python unconditionally -------------
 
 
-def test_cache_miss_then_cache_hit_e2e():
-  """The load-bearing freeze-by-cache contract.
+def test_edit_mode_python_uses_python_unconditionally():
+  # No english_hash in frontmatter; in python mode the engine should
+  # NOT compute one and NOT compare. Just use # Python as-is.
+  english = "Set greeting to {{whatever}}."  # would normally miss
+  python = (
+    'def compute(context):\n'
+    '    print("manual override")'
+  )
+  snip = _canonical_snippet(
+    english,
+    python_code=python,
+    edit_mode="python",
+    # NO english_hash set — proves python mode skips the check.
+  )
+  code = resolve_action_code(snip)
+  assert "manual override" in code
 
-  First transpile of a slot-bearing snippet records the misses.
-  The user/plugin populates the cache via the recorded keys.
-  Second transpile runs to completion with ZERO additional misses.
-  Two runs of the second transpile yield bytewise-identical Python
-  (deterministic via cache).
+
+def test_edit_mode_python_skips_hash_check_even_with_mismatch():
+  # If english_hash IS set and mismatches, python mode still wins.
+  english = "Set greeting to {{whatever}}."
+  python = (
+    'def compute(context):\n'
+    '    print("manual override")'
+  )
+  snip = _canonical_snippet(
+    english,
+    python_code=python,
+    english_hash="0" * 64,  # definitely doesn't match
+    edit_mode="python",
+  )
+  code = resolve_action_code(snip)
+  assert "manual override" in code
+
+
+# --- 7. Legacy free-English regression --------------------------------
+
+
+def test_legacy_free_english_snippet_with_python_unchanged():
+  # No facet_form; engine returns # Python directly.
+  body = (
+    "# English\n\n"
+    "Print hello world.\n\n"
+    "# Python\n\n"
+    "```python\n"
+    "def compute(context):\n"
+    "    print('hello world')\n"
+    "```\n"
+  )
+  snip = {
+    "snippet_id": "legacy/demo",
+    "meta": {"type": "action", "inputs": []},
+    "body": body,
+  }
+  code = resolve_action_code(snip)
+  assert code is not None
+  assert "hello world" in code
+
+
+# --- 8. Legacy: no Python, no canonical opt-in → None ----------------
+
+
+def test_legacy_no_python_no_canonical_returns_none():
+  body = "# English\n\nSome free-english text without code.\n"
+  snip = {
+    "snippet_id": "legacy/no_python",
+    "meta": {"type": "action", "inputs": []},
+    "body": body,
+  }
+  code = resolve_action_code(snip)
+  assert code is None
+
+
+# --- 9. End-to-end miss → second pass → cached hit ------------------
+
+
+def test_unified_cache_miss_then_populate_then_hit_e2e():
+  """v0.2.72 B7.3 freeze-by-cache contract using # Python:
+
+  1. First pass: no Python, no resolutions → SlotCacheMissError.
+  2. Plugin calls /resolve-slot, gets resolutions.
+  3. Engine second pass with slot_resolutions → returns transpiled
+     Python with resolutions spliced in.
+  4. Plugin writes # Python + english_hash back to disk.
+  5. Third pass: # Python + matching english_hash → cache hit, no
+     transpile, deterministic.
   """
-  from forge.core.slot_cache import compute_slot_cache_key
-
   english = (
     'Set greeting to {{a friendly storybook hello}}.\n'
     'Do [[print]](greeting).'
   )
   snippet_id = "forge-moda/cache_e2e"
 
-  # First transpile: no cache → misses surface.
-  snip1 = _slot_snippet(english, snippet_id=snippet_id)
+  # 1. First pass: miss.
+  snip1 = _canonical_snippet(english, snippet_id=snippet_id)
   with pytest.raises(SlotCacheMissError) as first:
     resolve_action_code(snip1)
   misses = first.value.missing
   assert len(misses) == 1
   miss = misses[0]
   assert miss["slot_text"] == "a friendly storybook hello"
-  assert miss["snippet_id"] == snippet_id
 
-  # Simulate plugin: call /resolve-slot, get back python_expr,
-  # populate the cache and rewrite the body.
+  # 2. Plugin resolves via /resolve-slot.
   resolved_expr = '"Hello, dear reader!"'
-  key = compute_slot_cache_key(miss["slot_text"], miss["snippet_id"])
-  snip2 = _slot_snippet(
-    english, slots={key: resolved_expr}, snippet_id=snippet_id,
+  cache_key = compute_slot_cache_key(miss["slot_text"], miss["snippet_id"])
+  resolutions = {cache_key: resolved_expr}
+
+  # 3. Engine second pass: full Python.
+  code = resolve_action_code(snip1, slot_resolutions=resolutions)
+  assert resolved_expr in code
+
+  # 4. Plugin writes # Python + english_hash to disk. Simulate the
+  #    resulting snippet body.
+  english_hash = compute_english_hash(english)
+  snip2 = _canonical_snippet(
+    english,
+    python_code=code,
+    english_hash=english_hash,
+    snippet_id=snippet_id,
   )
 
-  # Second transpile: cache hit, no misses.
-  code1 = resolve_action_code(snip2)
-  assert isinstance(code1, str)
-  assert resolved_expr in code1
-
-  # Third transpile of the same cached snippet — deterministic.
+  # 5. Third pass: cache hit, no transpile, deterministic.
   code2 = resolve_action_code(snip2)
-  assert code1 == code2
+  assert code2 == code
 
-  # AND a sanity check: a fourth call against the same snippet must
-  # also be a cache hit, never re-raising.
+  # And a fourth call against the same cached snippet — also a hit.
   code3 = resolve_action_code(snip2)
-  assert code1 == code3
+  assert code2 == code3

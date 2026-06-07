@@ -59,6 +59,45 @@ class SlotCacheMissError(Exception):
     super().__init__(json.dumps({"slot_cache_miss": missing}))
 
 
+def compute_english_hash(english_text):
+  """v0.2.72 — stable hash of an English facet for cache invalidation
+  per B7.3.
+
+  Normalizes whitespace before hashing so cosmetic edits (trailing
+  spaces, leading/trailing blank lines) don't churn the cache:
+
+    - Trim trailing whitespace from each line.
+    - Strip leading and trailing fully-blank lines.
+    - Internal blank lines preserved (paragraph breaks matter).
+
+  Returns hex-encoded sha256 of the normalized text encoded as UTF-8.
+
+  Determinism is a HARD requirement — same inputs MUST produce the
+  same output across Python versions and platforms. The TypeScript
+  helper at src/english-hash-core.ts mirrors this implementation
+  byte-for-byte; the cross-language hardcoded-expectation test pins
+  parity.
+
+  Tolerant of None / empty input: returns the hash of the empty
+  string in both cases so callers don't have to special-case.
+  """
+  if english_text is None:
+    english_text = ""
+  if not isinstance(english_text, str):
+    raise TypeError(
+      f"english_text must be str or None, got "
+      f"{type(english_text).__name__}")
+  # Trim trailing whitespace per line.
+  lines = [line.rstrip() for line in english_text.split("\n")]
+  # Strip leading + trailing fully-blank lines.
+  while lines and lines[0] == "":
+    lines.pop(0)
+  while lines and lines[-1] == "":
+    lines.pop()
+  normalized = "\n".join(lines)
+  return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def build_engine_slot_resolver(snippet_id, slot_cache, missing_collector):
   """Build a `resolve(slot_text) -> str` callable for E--'s
   `transpile(source, resolve_slot=...)` interface.

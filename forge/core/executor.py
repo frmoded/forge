@@ -449,50 +449,77 @@ def extract_section(body, heading):
   return "\n".join(section_lines).strip() or None
 
 
-def resolve_action_code(snippet):
+def resolve_action_code(snippet, slot_resolutions=None):
   """Return the Python code for an action snippet, transpiling via
   E--'s deterministic compiler when `facet_form: canonical` is set
-  in frontmatter and no Python facet is present.
+  in frontmatter and either no `# Python` heading is present OR the
+  cached one is stale (english_hash mismatch per B7.3).
 
-  v0.2.55 — Stage 2 of the E-- migration. Opt-in canonical compile
-  path. Existing free-English snippets (facet_form absent or
-  'free') still require a pre-generated Python facet; the plugin
-  populates that via the hosted `/generate` endpoint before
-  invoking the engine.
+  v0.2.72 — `# Python` IS the cache (B7.3 unification). The separate
+  `# Slots` heading from v0.2.70/v0.2.71 is dead; this function does
+  NOT parse it. Cache invalidation runs through `english_hash` in
+  frontmatter:
+
+    - In `english` mode (default), the engine reads `english_hash`
+      from frontmatter and compares it to compute_english_hash() of
+      the current `# English` section. Match → return cached Python.
+      Mismatch → re-transpile (which may re-raise SlotCacheMissError
+      if slots are present and unresolved).
+    - In `python` mode, the user has explicitly taken over `# Python`;
+      the engine uses it directly without hash check.
+
+  `slot_resolutions` (v0.2.72): when None, the resolver collects
+  missing slots and raises SlotCacheMissError (first pass). When
+  provided as `dict[cache_key, python_expr]`, the resolver looks up
+  every slot in the dict; missing entries still raise.
 
   Returns:
-    - `extract_python(body)` result when a `# Python` heading is
-      present (legacy + canonical-with-cached-Python cases).
-    - E-- transpile output when no Python facet AND `facet_form ==
-      'canonical'` AND `# English` heading is present.
-    - None when no Python facet AND no canonical opt-in — caller
-      surfaces the legacy "no Python heading" ValueError.
+    - `extract_python(body)` result when:
+      * a `# Python` heading is present, AND
+      * snippet is legacy (no facet_form), OR
+      * snippet is canonical + `edit_mode: python` (override), OR
+      * snippet is canonical + `edit_mode: english` + english_hash
+        matches.
+    - E-- transpile output when canonical + no Python OR canonical +
+      stale english_hash AND all slots resolve.
+    - None when no Python AND no canonical opt-in — caller surfaces
+      the legacy "no Python heading" ValueError.
 
   Raises:
     - ValueError when `facet_form: canonical` but no `# English`
-      section (canonical snippets MUST have an English facet to
-      transpile from).
-    - ValueError on E-- syntax error in the canonical English (with
-      the upstream EmmSyntaxError chained via `from`).
+      section.
+    - ValueError on E-- syntax error.
+    - SlotCacheMissError when slots can't be resolved (first pass).
   """
   code = extract_python(snippet["body"])
+  meta = snippet["meta"]
+  facet_form = meta.get("facet_form")
+  edit_mode = meta.get("edit_mode", "english")
+
   if code is not None:
-    return code
-  facet_form = snippet["meta"].get("facet_form")
+    # `# Python` present. For canonical + english mode, verify the
+    # english_hash before returning; otherwise return directly.
+    if facet_form == "canonical" and edit_mode != "python":
+      from forge.core.slot_cache import compute_english_hash
+      stored_hash = meta.get("english_hash")
+      english = extract_section(snippet["body"], "English")
+      current_hash = compute_english_hash(english) if english else None
+      if stored_hash == current_hash:
+        return code
+      # Hash mismatch: fall through to re-transpile.
+    else:
+      return code
+
   if facet_form != "canonical":
     return None  # signals legacy "no Python heading" to caller
-  # Local import keeps the E-- package out of the import graph for
-  # the 99% of executor calls that never hit the canonical path.
+
+  # Canonical compile path. Build resolver against slot_resolutions
+  # (passed in by the plugin on second pass after /resolve-slot
+  # round-trip); first pass surfaces missing slots via
+  # SlotCacheMissError so the plugin can batch the resolution.
   from forge.e_minus_minus import transpile, EmmSyntaxError
-  # v0.2.70 — Phase 2 slot resolution wiring. Engine builds a
-  # resolver from the snippet's # Slots cache + a fresh "missing"
-  # collector. After transpile returns, if any slots went unresolved
-  # the engine raises SlotCacheMissError with the full batch — the
-  # plugin orchestration layer catches it, calls /resolve-slot, writes
-  # the responses back to # Slots, and re-fires the transpile gesture.
   from forge.core.slot_cache import (
     build_engine_slot_resolver,
-    parse_slots_section,
     SlotCacheMissError,
   )
   english = extract_section(snippet["body"], "English")
@@ -500,7 +527,7 @@ def resolve_action_code(snippet):
   if english is None:
     raise ValueError(
       f"facet_form: canonical snippet '{snippet_id}' has no English heading")
-  slot_cache = parse_slots_section(snippet["body"])
+  slot_cache = slot_resolutions or {}
   missing_collector = []
   resolver = build_engine_slot_resolver(
     snippet_id, slot_cache, missing_collector)
@@ -510,18 +537,17 @@ def resolve_action_code(snippet):
     raise ValueError(
       f"E-- syntax error in canonical snippet '{snippet_id}': {e}") from e
   if missing_collector:
-    # One or more slots missing — abort and report ALL of them in a
-    # single error so the plugin can batch the /resolve-slot round-
-    # trip. Partial transpile output is discarded; the second pass
-    # (post cache populate) re-runs transpile fully.
+    # First-pass miss: abort and report ALL missing slots in a single
+    # error so the plugin can batch the /resolve-slot round-trip.
+    # Partial transpile output is discarded; the second pass (with
+    # slot_resolutions provided) re-runs transpile fully.
     raise SlotCacheMissError(missing_collector)
   # E-- emits bare statements (e.g. `print("hi")`). The engine's
   # exec_python contract requires `def compute(context, ...):` per
   # _find_entrypoint (B-series). Wrap the transpile output in a
   # compute() function so canonical snippets satisfy the existing
   # entrypoint convention without burdening E-- with Forge-specific
-  # function-definition syntax. Future Stage 3+ may move this
-  # wrapping into E--'s emitter; today it lives at the call boundary.
+  # function-definition syntax.
   indented = "\n".join("    " + line for line in transpiled.split("\n"))
   return f"def compute(context):\n{indented}"
 
