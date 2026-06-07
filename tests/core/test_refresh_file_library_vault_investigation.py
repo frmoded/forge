@@ -87,7 +87,9 @@ def test_hypothesis_a_refresh_file_writes_to_wrong_vault_for_library_snippet():
       "f44f75cfaa0c23cd390f587cddd56718f6639de5be62e918ccdafe0cc4b635db")
 
     # Simulate: plugin edits slot_demo (changes english_hash on disk).
-    NEW_HASH = "0" * 64
+    # Use a hex starting with a non-digit to avoid YAML auto-parsing the
+    # all-zeros string as the integer 0.
+    NEW_HASH = "deadbeef" + "0" * 56
     with open(slot_demo_path, "r") as f:
       body = f.read()
     body_updated = body.replace(initial_hash, NEW_HASH)
@@ -112,3 +114,69 @@ def test_hypothesis_a_refresh_file_writes_to_wrong_vault_for_library_snippet():
       f"  Got     : {post_hash}\n"
       f"  Library entry stayed STALE — the bug shape."
     )
+
+    # Also: refresh_file MUST NOT shadow-write into the AUTHORING vault
+    # (the v0.2.73 bug). The bare_id `slot_demo` should NOT exist under
+    # AUTHORING — only under `forge-moda`.
+    auth_entry = reg.get_in_vault(AUTHORING_VAULT, "slot_demo")
+    assert auth_entry is None, (
+      "refresh_file leaked the library snippet into AUTHORING_VAULT. "
+      "The qualified A4 lookup would still hit the library entry, but "
+      "the AUTHORING entry is a phantom — code reading the registry "
+      "via list_snippets() or get_bare() would see a duplicate.\n"
+      f"  Phantom entry: {auth_entry!r}"
+    )
+
+
+def test_refresh_file_authoring_vault_top_level_file_still_refreshes_correctly():
+  """Regression guard: the fix MUST still refresh a plain authoring
+  vault file (no library subdir). The user could have notes.md sitting
+  at vault root; an editor save calls refresh_file on it.
+
+  Confirms the fix's `longest matching vault_path prefix` rule still
+  picks AUTHORING_VAULT when the file is NOT under any library subdir.
+  """
+  with tempfile.TemporaryDirectory() as tmpdir:
+    vault = os.path.join(tmpdir, "bluh")
+    os.makedirs(vault)
+    os.makedirs(os.path.join(vault, "forge-moda"))
+
+    with open(os.path.join(vault, "forge.toml"), "w") as f:
+      f.write('name = "bluh"\nversion = "1.0"\ndescription = "test"\n')
+    with open(os.path.join(vault, "forge-moda", "forge.toml"), "w") as f:
+      f.write(
+        'name = "forge-moda"\nversion = "0.4.19"\ndescription = "test lib"\n')
+
+    # An authoring-vault snippet at the vault root.
+    notes_path = os.path.join(vault, "notes.md")
+    with open(notes_path, "w") as f:
+      f.write(
+        "---\ntype: action\nenglish_hash: initial-hash\n---\n\n"
+        "# English\n\nDo [[print]](\"hello\").\n")
+
+    reg = SnippetRegistry()
+    reg.scan(vault)
+
+    # Initial state: AUTHORING entry exists.
+    initial = reg.get_in_vault(AUTHORING_VAULT, "notes")
+    assert initial is not None, (
+      "After scan(), notes.md must be indexed under AUTHORING.")
+    assert initial["meta"]["english_hash"] == "initial-hash"
+
+    # Edit the file on disk.
+    NEW_HASH = "refreshed-hash"
+    with open(notes_path, "r") as f:
+      body = f.read()
+    with open(notes_path, "w") as f:
+      f.write(body.replace("initial-hash", NEW_HASH))
+
+    # Refresh.
+    err = reg.refresh_file(notes_path)
+    assert err is None, f"refresh_file errored on authoring file: {err}"
+
+    # The AUTHORING entry should reflect the new state.
+    post = reg.get_in_vault(AUTHORING_VAULT, "notes")
+    assert post is not None
+    assert post["meta"]["english_hash"] == NEW_HASH, (
+      f"Authoring-vault refresh broken. Expected {NEW_HASH}, got "
+      f"{post['meta']['english_hash']}.")

@@ -75,7 +75,7 @@ class SnippetRegistry:
   def get_in_vault(self, vault_name: str, bare_id: str) -> Optional[dict]:
     return self._vaults.get(vault_name, {}).get(bare_id)
 
-  def refresh_file(self, filepath: str, vault_name: str = AUTHORING_VAULT, source: str = "authoring") -> Optional[str]:
+  def refresh_file(self, filepath: str, vault_name: Optional[str] = None, source: Optional[str] = None) -> Optional[str]:
     """v0.2.17: re-index a single file from disk and update the cached
     entry. Used by the forge-client-obsidian plugin to keep the
     MEMFS-mounted registry in sync with disk edits (writeGeneratedCode,
@@ -84,24 +84,99 @@ class SnippetRegistry:
     Returns an error string if indexing failed (same shape as scan()'s
     self.errors entries), None on success.
 
-    vault_path is inferred from an existing entry in `vault_name` —
-    works for the V1 single-user-vault model where the plugin only
-    ever calls this against the authoring vault. If no entries exist
-    yet (registry never scanned), falls back to the file's parent
-    directory, which is the right default for "write into an empty
-    vault" cases."""
-    vault_path = None
-    if vault_name in self._vaults:
-      for entry in self._vaults[vault_name].values():
-        vault_path = entry.get("vault_path")
-        if vault_path:
-          break
-    if not vault_path:
-      vault_path = os.path.dirname(filepath)
-    # Ensure the per-vault dict exists; _index_authoring_file writes
-    # into self._vaults[vault_name] directly.
-    self._vaults.setdefault(vault_name, {})
-    return self._index_authoring_file(filepath, vault_name, source, vault_path)
+    v0.2.74 fix (Hypothesis A pin): when `vault_name` is None, detect
+    the owning vault by finding the longest `vault_path` prefix among
+    all indexed entries. This routes refreshes for library snippets at
+    `<vault>/<lib>/foo.md` to `_vaults[<lib>][foo]` (or sub-path-keyed
+    `_vaults[<lib>][sub/foo]`) instead of leaking them into
+    `AUTHORING['foo']` (the v0.2.73 bug — the library entry stayed
+    stale-since-install while the AUTHORING entry collected the
+    refresh nobody read).
+
+    Explicit `vault_name` (legacy callers) still forces that vault,
+    preserving v0.2.17 behavior. The plugin's `_forge_sync_user_file`
+    helper at pyodide-host.ts calls this with no `vault_name` argument
+    and benefits from the auto-detection.
+
+    Fallback: if no indexed vault claims the filepath, falls back to
+    AUTHORING_VAULT keyed by basename — the right default for "write
+    into an empty vault" / pre-scan file creation cases.
+    """
+    if vault_name is not None:
+      # Legacy path: caller specified the vault explicitly. Honor it.
+      vault_path = None
+      if vault_name in self._vaults:
+        for entry in self._vaults[vault_name].values():
+          vault_path = entry.get("vault_path")
+          if vault_path:
+            break
+      if not vault_path:
+        vault_path = os.path.dirname(filepath)
+      self._vaults.setdefault(vault_name, {})
+      return self._index_authoring_file(
+        filepath, vault_name, source or "authoring", vault_path)
+
+    # Auto-detect owning vault: longest vault_path prefix wins.
+    abs_filepath = os.path.abspath(filepath)
+    best_vault_name = None
+    best_vault_path = None
+    best_source = None
+    for vname, snippets in self._vaults.items():
+      for entry in snippets.values():
+        vp = entry.get("vault_path")
+        if not vp:
+          continue
+        vp_abs = os.path.abspath(vp)
+        # Boundary-safe prefix match: `/vault/foo` must not match
+        # `/vault/foo-bar/x.md`. Compare against vp + os.sep.
+        prefix = vp_abs.rstrip(os.sep) + os.sep
+        if abs_filepath.startswith(prefix) or abs_filepath == vp_abs:
+          if best_vault_path is None or len(vp_abs) > len(best_vault_path):
+            best_vault_name = vname
+            best_vault_path = vp_abs
+            best_source = entry.get("source", "authoring")
+
+    if best_vault_name is None:
+      # No vault claims this path — fall back to AUTHORING under the
+      # file's parent directory. Matches the pre-v0.2.74 behavior for
+      # the "write into an empty vault" / pre-scan case.
+      vault_path_fallback = os.path.dirname(filepath)
+      self._vaults.setdefault(AUTHORING_VAULT, {})
+      return self._index_authoring_file(
+        filepath, AUTHORING_VAULT, source or "authoring",
+        vault_path_fallback)
+
+    if best_source == "library":
+      return self._index_library_file(
+        filepath, best_vault_name, best_vault_path)
+    return self._index_authoring_file(
+      filepath, best_vault_name, source or best_source or "authoring",
+      best_vault_path)
+
+  def _index_library_file(self, filepath: str, vault_name: str, vault_path: str) -> Optional[str]:
+    """v0.2.74: single-file refresh path for library snippets. Mirrors
+    the bare_id convention from `_scan_library_vault` (relpath-keyed,
+    OS-separators normalized to forward slashes)."""
+    try:
+      with open(filepath, encoding="utf-8") as f:
+        content = f.read()
+      meta, body = parse_frontmatter(content)
+      rel = os.path.relpath(filepath, vault_path)
+      bare_id = os.path.splitext(rel)[0].replace(os.sep, "/")
+      if meta.get("type") in _RECOGNIZED_TYPES:
+        self._vaults.setdefault(vault_name, {})
+        self._vaults[vault_name][bare_id] = {
+          "meta": meta,
+          "body": body,
+          "path": filepath,
+          "vault": vault_name,
+          "vault_path": vault_path,
+          "source": "library",
+          "snippet_id": f"{vault_name}/{bare_id}",
+        }
+      return None
+    except Exception as e:
+      return f"{filepath}: {e}"
 
   def get_bare(self, bare_id: str) -> Optional[dict]:
     """Walk the resolution order, return the first match."""
