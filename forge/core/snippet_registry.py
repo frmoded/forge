@@ -24,6 +24,13 @@ _RESERVED_DIRS = {".forge"}
 import re
 _BAK_DIR_PATTERN = re.compile(r"\.bak\.")
 
+# v0.2.82 Item A — dedup set for AUTHORING-vault basename-collision
+# warnings. Module-scoped so multiple SnippetRegistry instances share
+# the same dedup state across a single Pyodide-instance lifetime
+# (matches the v0.2.81 _forge_facet_form_warning_set pattern: browser
+# reload resets, re-warn). Entries are (vault_name, bare_id) tuples.
+_collision_warning_set = set()
+
 
 class SnippetRegistry:
   def __init__(self):
@@ -59,13 +66,21 @@ class SnippetRegistry:
       # Skip Forge-managed state dirs at every level (snapshot files in
       # .forge/edges/ would otherwise shadow real snippets).
       dirs[:] = [d for d in dirs if d not in _RESERVED_DIRS]
-      for fname in files:
+      # v0.2.82 Item A — sort dirs + files so traversal order is
+      # deterministic. AUTHORING-vault basename-collisions resolve via
+      # first-match-wins (per the v0.2.82 collision-detect fix in
+      # _index_authoring_file); deterministic order is what makes that
+      # contract stable across rescans. os.walk's default order is
+      # filesystem-dependent.
+      dirs.sort()
+      for fname in sorted(files):
         if fname.endswith(".md"):
           err = self._index_authoring_file(
             os.path.join(root, fname), vault_name, source, vault_path,
           )
           if err:
             self.errors.append(err)
+      del files  # release the unsorted ref (we iterated `sorted(files)`)
 
     for lib_path in library_dirs:
       self._scan_library_vault(lib_path)
@@ -395,6 +410,42 @@ class SnippetRegistry:
       meta, body = parse_frontmatter(content)
       bare_id = os.path.splitext(os.path.basename(filepath))[0]
       if meta.get("type") in _RECOGNIZED_TYPES:
+        # v0.2.82 Item A — basename collision detection. AUTHORING
+        # entries are keyed by basename alone (per the historical
+        # contract — see _scan_library_vault for the sub-path-keyed
+        # library counterpart). Same-basename files in different
+        # subdirs silently shadowed each other pre-v0.2.82. Detect at
+        # insertion time, log + skip subsequent insert so first-match
+        # wins per the A4 walking contract. Dedup'd per (vault, bare_id)
+        # via module-scoped _collision_warning_set so re-scans in the
+        # same session warn once.
+        existing = self._vaults[vault_name].get(bare_id)
+        # Only treat as collision when the existing entry came from a
+        # DIFFERENT path. Same-path re-index (refresh_file rewriting
+        # the same file after disk edit) is the legitimate update
+        # path — refresh_file's whole point is overwriting cached
+        # state with fresh disk contents. Use os.path.abspath for
+        # robust comparison against vault-relative variations.
+        if existing is not None and (
+          os.path.abspath(existing.get("path", "")) != os.path.abspath(filepath)
+        ):
+          dedup_key = (vault_name, bare_id)
+          if dedup_key not in _collision_warning_set:
+            _collision_warning_set.add(dedup_key)
+            msg = (
+              f"Forge: snippet collision in vault '{vault_name}' on "
+              f"basename '{bare_id}'. Indexed: {existing['path']!r}. "
+              f"Shadowed: {filepath!r}. First-match wins. Rename one "
+              f"to disambiguate."
+            )
+            try:
+              import js
+              js.console.warn(msg)
+            except Exception:
+              # Defensive — Pyodide js module unavailable (test envs).
+              print(msg)
+          # Do NOT overwrite — preserve first-match-wins semantics.
+          return None
         self._vaults[vault_name][bare_id] = {
           "meta": meta,
           "body": body,
