@@ -272,6 +272,57 @@ class SnippetRegistry:
           return snip
     return None
 
+  def find_qualified_by_bare_all(self, bare_id: str) -> list:
+    """v0.2.84 — like `find_qualified_by_bare` but returns ALL matches
+    in resolution order (resolution-order vaults first, then non-
+    resolution-order vaults; within each, direct-key matches first
+    then sub-path basename matches). Used by the freeze handler to
+    disambiguate when a bare wikilink like `[[chorus]]` matches more
+    than one snippet (e.g. `forge-music/blues/chorus` AND
+    `forge-music/jazz/chorus`).
+
+    Deduplicated by qualified `snippet_id` — a snippet that matches
+    via both Pass 1 (direct key) AND Pass 3 (basename scan against
+    a sub-path key) is returned exactly once. The first pass wins
+    the position.
+
+    Returns empty list when no match. Single match → 1-element list
+    (caller does its own len-check)."""
+    order_set = set(self._order)
+    seen_ids = set()
+    out = []
+
+    def _try_append(snip):
+      sid = snip.get("snippet_id")
+      if sid and sid not in seen_ids:
+        seen_ids.add(sid)
+        out.append(snip)
+
+    # Pass 1: direct-key, resolution-order vaults.
+    for vault_name in self._order:
+      hit = self._vaults.get(vault_name, {}).get(bare_id)
+      if hit is not None:
+        _try_append(hit)
+    # Pass 2: direct-key, non-resolution-order vaults.
+    for vault_name, snippets in self._vaults.items():
+      if vault_name in order_set:
+        continue
+      hit = snippets.get(bare_id)
+      if hit is not None:
+        _try_append(hit)
+    # Pass 3: basename scan across sub-path keys, resolution-order first.
+    for vault_name in self._order:
+      for key, snip in self._vaults.get(vault_name, {}).items():
+        if "/" in key and key.rsplit("/", 1)[-1] == bare_id:
+          _try_append(snip)
+    for vault_name, snippets in self._vaults.items():
+      if vault_name in order_set:
+        continue
+      for key, snip in snippets.items():
+        if "/" in key and key.rsplit("/", 1)[-1] == bare_id:
+          _try_append(snip)
+    return out
+
   def find_in_sibling_subdirs(
       self, vault_name: str, caller_dir: str, bare_id: str,
   ) -> list:
