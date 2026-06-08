@@ -160,21 +160,26 @@ def test_bug_b_qualifier_resolves_library_subpath_basename():
     assert reg.get_in_vault("forge-music", "chorus") is None, (
       "Sanity: library is NOT keyed by basename — only sub-path.")
 
-    # The bug: get_bare('chorus') misses the sub-path entry.
-    found = reg.get_bare("chorus")
+    # The bug: pre-v0.2.78 there was no path that finds a library
+    # sub-path entry by basename. v0.2.78 adds find_qualified_by_bare
+    # to serve the qualifier path explicitly (get_bare keeps strict
+    # resolution-order direct-key semantics for the existing A4
+    # walking contract).
+    found = reg.find_qualified_by_bare("chorus")
     assert found is not None, (
-      "Bug B: `get_bare('chorus')` should find the library snippet at "
-      "forge-music/blues/chorus by basename. Pre-v0.2.78 only matches "
-      "top-level keys, so library sub-path entries are invisible to the "
-      "bare lookup, breaking freeze qualifier for library wikilinks.")
+      "Bug B: `find_qualified_by_bare('chorus')` should find the "
+      "library snippet at forge-music/blues/chorus by basename. "
+      "Pre-v0.2.78 nothing did sub-path basename matching, so the "
+      "freeze qualifier path couldn't resolve library wikilinks.")
     assert found["snippet_id"] == "forge-music/blues/chorus", (
       f"Resolved snippet must be the library entry; got {found['snippet_id']!r}.")
 
 
 def test_bug_b_qualifier_basename_resolution_does_not_break_authoring_top_level():
   """Regression: authoring-vault top-level snippets keyed by basename
-  must still resolve via get_bare. The new sub-path scan must not
-  shadow the existing direct-key lookup."""
+  must still resolve via both get_bare and find_qualified_by_bare.
+  The new helper's sub-path scan must not shadow the existing
+  direct-key lookup."""
   with tempfile.TemporaryDirectory() as tmpdir:
     vault = os.path.join(tmpdir, "smoke-vault")
     os.makedirs(vault)
@@ -188,6 +193,9 @@ def test_bug_b_qualifier_basename_resolution_does_not_break_authoring_top_level(
     found = reg.get_bare("greet")
     assert found is not None
     assert found["snippet_id"] == f"{AUTHORING_VAULT}/greet"
+    found2 = reg.find_qualified_by_bare("greet")
+    assert found2 is not None
+    assert found2["snippet_id"] == f"{AUTHORING_VAULT}/greet"
 
 
 def test_bug_b_qualifier_basename_resolution_ambiguity_prefers_first():
@@ -207,15 +215,14 @@ def test_bug_b_qualifier_basename_resolution_ambiguity_prefers_first():
     reg = SnippetRegistry()
     reg.scan(vault)
     # Resolution order set by _auto_set_resolution_order from
-    # smoke-vault's forge.toml deps — which we didn't declare, so
-    # the order is [authoring, builtin]. Library vaults appear in
-    # _vaults dict insertion order (which is filesystem sort:
-    # forge-moda, forge-music alphabetically). The current
-    # `get_bare` walks `_order` only — so it would only find the
-    # authoring vault and builtin vault. With the fix that also
-    # scans sub-path keys, we need to make sure the order is
-    # respected — first vault wins.
-    found = reg.get_bare("song")
+    # smoke-vault's forge.toml deps — none declared so order is
+    # [authoring, builtin] (libraries not declared as deps aren't
+    # in the resolution order, but they ARE in self._vaults).
+    # find_qualified_by_bare's Pass 2 scans non-resolution-order
+    # vaults too; one of forge-moda/scenes/song or
+    # forge-music/blues/song wins (dict insertion order — filesystem
+    # listing sort: forge-moda comes first alphabetically).
+    found = reg.find_qualified_by_bare("song")
     assert found is not None
     assert found["snippet_id"] in (
       "forge-music/blues/song", "forge-moda/scenes/song"), (

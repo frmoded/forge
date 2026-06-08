@@ -10,6 +10,19 @@ _RECOGNIZED_TYPES = ("action", "data", "snapshot")
 # .forge/edges/ holds auto-captured snapshots; if those leaked into the
 # registry they'd shadow the real snippets they were captured from.
 _RESERVED_DIRS = {".forge"}
+# v0.2.78 — `<library>.bak.<old-version>/` directories created by the
+# v0.2.38 auto-re-extract mechanism are user-facing backups of stale
+# library content. They retain an intact forge.toml (literal directory
+# copy), so _detect_library_vaults would otherwise index them as live
+# libraries — either colliding on the library name with the fresh
+# extract (last-write-wins by sort order, stale bodies leak in) or
+# producing snippet_ids like `forge-tutorial.bak.0.1.0/<path>` that
+# the plugin sees when the user clicks a backup file (resolver raises
+# SnippetResolutionError because the vault name isn't registered).
+# Pattern is exactly the rename in welcome.ts:renameWithBackup —
+# `<name>.bak.<version>` with optional `.<n>` collision suffix.
+import re
+_BAK_DIR_PATTERN = re.compile(r"\.bak\.")
 
 
 class SnippetRegistry:
@@ -37,6 +50,12 @@ class SnippetRegistry:
       if root == vault_path:
         # prune library vault subdirs from the authoring traversal
         dirs[:] = [d for d in dirs if d not in library_dir_names]
+        # v0.2.78 — also prune `<base>.bak.<version>/` backup dirs from
+        # the authoring traversal. Otherwise the .md files inside the
+        # backup would be indexed as AUTHORING snippets (still wrong:
+        # the user would see stale duplicates of every library snippet
+        # in chip palettes / qualified lookups).
+        dirs[:] = [d for d in dirs if not _BAK_DIR_PATTERN.search(d)]
       # Skip Forge-managed state dirs at every level (snapshot files in
       # .forge/edges/ would otherwise shadow real snippets).
       dirs[:] = [d for d in dirs if d not in _RESERVED_DIRS]
@@ -179,11 +198,63 @@ class SnippetRegistry:
       return f"{filepath}: {e}"
 
   def get_bare(self, bare_id: str) -> Optional[dict]:
-    """Walk the resolution order, return the first match."""
+    """Walk the resolution order, return the first match. Direct-key
+    lookup only — preserves the A4 walking semantics other callers
+    depend on (caller-vault precedence, declared dependency order).
+
+    For qualifier paths that need to find a snippet by basename
+    regardless of resolution-order membership (e.g. freeze on a
+    library wikilink whose parent library isn't a declared
+    dependency of the authoring vault), see `find_qualified_by_bare`."""
     for vault_name in self._order:
       hit = self._vaults.get(vault_name, {}).get(bare_id)
       if hit is not None:
         return hit
+    return None
+
+  def find_qualified_by_bare(self, bare_id: str) -> Optional[dict]:
+    """v0.2.78 — locate a snippet by its bare basename anywhere in
+    the registry, regardless of resolution-order membership. Used by
+    `_forge_qualify_snippet_id` to resolve freeze-modal wikilink
+    targets like `[[chorus]]` to their qualified id
+    `forge-music/blues/chorus` so the freeze path finds the snapshot
+    the capture path wrote at the qualified key.
+
+    Lookup order:
+      Pass 1: direct key match in resolution-order vaults (matches
+              authoring-vault top-level + library top-level entries).
+      Pass 2: direct key match in NON-resolution-order vaults (covers
+              libraries the authoring vault hasn't declared as deps —
+              freeze on a library wikilink still needs to qualify).
+      Pass 3: basename scan across sub-path keys, resolution-order
+              vaults first, then non-resolution-order vaults. Library
+              entries are stored under `<subdir>/<name>` keys; the
+              basename scan picks up wikilink-bare references.
+    First match wins. Returns the same shape `get_bare` does."""
+    order_set = set(self._order)
+    # Pass 1: direct-key lookup, resolution-order vaults.
+    for vault_name in self._order:
+      hit = self._vaults.get(vault_name, {}).get(bare_id)
+      if hit is not None:
+        return hit
+    # Pass 2: direct-key lookup, other vaults.
+    for vault_name, snippets in self._vaults.items():
+      if vault_name in order_set:
+        continue
+      hit = snippets.get(bare_id)
+      if hit is not None:
+        return hit
+    # Pass 3: basename scan across sub-path keys.
+    for vault_name in self._order:
+      for key, snip in self._vaults.get(vault_name, {}).items():
+        if "/" in key and key.rsplit("/", 1)[-1] == bare_id:
+          return snip
+    for vault_name, snippets in self._vaults.items():
+      if vault_name in order_set:
+        continue
+      for key, snip in snippets.items():
+        if "/" in key and key.rsplit("/", 1)[-1] == bare_id:
+          return snip
     return None
 
   def find_in_sibling_subdirs(
@@ -256,6 +327,14 @@ class SnippetRegistry:
       return []
     out = []
     for entry in sorted(os.listdir(vault_path)):
+      # v0.2.78 — skip `<base>.bak.<anything>` directories. These are
+      # backups left behind by welcome.ts:renameWithBackup after
+      # v0.2.38's auto-re-extract; treating them as libraries either
+      # collides on the library name (stale bodies leak via
+      # last-write-wins in scan order) or produces unroutable
+      # snippet_ids when the user clicks a backup file.
+      if _BAK_DIR_PATTERN.search(entry):
+        continue
       sub = os.path.join(vault_path, entry)
       if os.path.isdir(sub) and os.path.isfile(os.path.join(sub, _MANIFEST_FILENAME)):
         out.append(sub)
