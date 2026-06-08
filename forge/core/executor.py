@@ -766,3 +766,37 @@ def _takes_only_context(fn):
     return len(pos_params) == 1 and not has_var_pos and not has_var_kw
   except (ValueError, TypeError):
     return False
+
+
+def detect_facet_form_strip_trap(meta):
+  """v0.2.81 — pure-decision helper for the Obsidian YAML-strip trap.
+
+  Detect a snippet whose frontmatter shows the cache-write artefact
+  (`english_hash`) from a prior canonical compute, but no longer has
+  `facet_form: canonical`. The prompt phrased this as "has
+  slot_resolutions but facet_form is absent" — `slot_resolutions` is
+  not actually a frontmatter field (it's a transient parameter on
+  resolve_action_code), so we use `english_hash` as the canonical-
+  cache marker since it IS persisted by writePythonAndEnglishHash.
+
+  When this state exists, Obsidian has almost certainly stripped
+  `facet_form: canonical` from frontmatter on a prior write (a known
+  YAML-rewrite quirk for fields Obsidian doesn't recognize). The
+  engine then routes through the legacy `else: return code` path and
+  uses the cached `# Python` directly without re-checking against
+  fresh slot resolutions — meaning the user's edits to the English
+  facet (which would otherwise invalidate via english_hash mismatch
+  + re-transpile) are silently ignored.
+
+  Returns True when the trap is detected (caller should warn the
+  user), False otherwise. Caller dedup is the caller's
+  responsibility (per snippet_id per session).
+
+  Pure function — no side effects. The Pyodide-side wrapper in
+  pyodide-host.ts emits the warning via js.console.warn after
+  consulting this helper."""
+  if not meta:
+    return False
+  if not meta.get("english_hash"):
+    return False
+  return meta.get("facet_form") != "canonical"
