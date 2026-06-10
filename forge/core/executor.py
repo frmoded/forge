@@ -457,14 +457,22 @@ def extract_section(body, heading):
 
 def resolve_action_code(snippet, slot_resolutions=None):
   """Return the Python code for an action snippet, transpiling via
-  E--'s deterministic compiler when `facet_form: canonical` is set
-  in frontmatter and either no `# Python` heading is present OR the
-  cached one is stale (english_hash mismatch per B7.3).
+  E--'s deterministic compiler when E-- can compile the English
+  facet, falling back to None (plugin handles /generate routing)
+  when it can't.
 
-  v0.2.72 — `# Python` IS the cache (B7.3 unification). The separate
-  `# Slots` heading from v0.2.70/v0.2.71 is dead; this function does
-  NOT parse it. Cache invalidation runs through `english_hash` in
-  frontmatter:
+  v0.2.121 — Option C plugin-side routing. The engine no longer
+  reads `facet_form`; the field is inert. The engine tries E--
+  transpile for every action snippet with an `# English` heading
+  and returns None when transpile fails (E-- syntax error OR no
+  English heading). The plugin's
+  `routeActionCodeRegen` wrapper interprets None as "fall back to
+  /generate (LLM)" and surfaces a clear error if no token is set.
+  See docs/specs/constitution.md B7.3 + the v0.2.121 feedback for
+  the migration rationale.
+
+  Cache invalidation runs through `english_hash` in frontmatter
+  per B7.3:
 
     - In `english` mode (default), the engine reads `english_hash`
       from frontmatter and compares it to compute_english_hash() of
@@ -480,72 +488,45 @@ def resolve_action_code(snippet, slot_resolutions=None):
   every slot in the dict; missing entries still raise.
 
   Returns:
-    - `extract_python(body)` result when:
-      * a `# Python` heading is present, AND
-      * snippet is legacy (no facet_form), OR
-      * snippet is canonical + `edit_mode: python` (override), OR
-      * snippet is canonical + `edit_mode: english` + english_hash
-        matches.
-    - E-- transpile output when canonical + no Python OR canonical +
-      stale english_hash AND all slots resolve.
-    - None when no Python AND no canonical opt-in — caller surfaces
-      the legacy "no Python heading" ValueError.
+    - `extract_python(body)` result when a `# Python` heading is
+      present AND either `edit_mode: python` (override) OR
+      english_hash matches (cache hit).
+    - E-- transpile output when transpile succeeds (slot-resolved).
+    - None when E-- can't compile (syntax error) OR no English
+      heading present — plugin falls back to /generate.
 
   Raises:
-    - ValueError when `facet_form: canonical` but no `# English`
-      section.
-    - ValueError on E-- syntax error.
     - SlotCacheMissError when slots can't be resolved (first pass).
   """
   code = extract_python(snippet["body"])
   meta = snippet["meta"]
-  facet_form = meta.get("facet_form")
   edit_mode = meta.get("edit_mode", "english")
 
-  if code is not None:
+  if code is not None and slot_resolutions is None:
     # v0.2.73: when slot_resolutions is explicitly provided, the
     # plugin is in the second-pass of a cache-miss round-trip. The
     # presence of slot_resolutions signals "I want a re-transpile
     # with these resolutions, don't short-circuit on the cached
     # `# Python`." Skip the legacy/cached early-return paths and
     # fall through to the canonical transpile block below.
-    #
-    # Without this guard, Obsidian dropping `facet_form: canonical`
-    # from frontmatter on save (a known YAML-rewrite quirk for
-    # unrecognized fields) would route through the
-    # `else: return code` legacy branch and return the STALE
-    # `# Python` even though the plugin handed us fresh resolutions.
-    # User-side symptom: english_hash updates on disk but
-    # `# Python` body does not. Hypothesis C of the v0.2.73
-    # investigation; see docs/investigations/v0.2.73-slot-
-    # resolution-stale-python.md.
-    if slot_resolutions is None:
-      # `# Python` present. For canonical + english mode, verify the
-      # english_hash before returning; otherwise return directly.
-      if facet_form == "canonical" and edit_mode != "python":
-        from forge.core.slot_cache import compute_english_hash
-        stored_hash = meta.get("english_hash")
-        english = extract_section(snippet["body"], "English")
-        current_hash = compute_english_hash(english) if english else None
-        if stored_hash == current_hash:
-          return code
-        # Hash mismatch: fall through to re-transpile.
-      else:
-        return code
-    # else: slot_resolutions provided → fall through to transpile
-    # path so the plugin's resolutions get spliced into the output.
+    if edit_mode == "python":
+      # User-authored Python: return verbatim regardless of cache.
+      return code
+    # english mode: validate english_hash before returning cached code.
+    from forge.core.slot_cache import compute_english_hash
+    stored_hash = meta.get("english_hash")
+    english_for_hash = extract_section(snippet["body"], "English")
+    current_hash = (
+      compute_english_hash(english_for_hash) if english_for_hash else None)
+    if stored_hash is not None and stored_hash == current_hash:
+      return code
+    # Hash mismatch (or absent) AND no slot_resolutions: fall through
+    # to re-transpile. Plugin's routeActionCodeRegen will catch the
+    # None return (E-- failure) and fall back to /generate.
 
-  if facet_form != "canonical" and slot_resolutions is None:
-    return None  # signals legacy "no Python heading" to caller
-  # v0.2.73: slot_resolutions provided → enter canonical compile path
-  # regardless of facet_form (defends against Obsidian dropping the
-  # frontmatter field). The plugin's intent is clear: re-transpile
-  # the English facet using these resolutions.
-
-  # Canonical compile path. Build resolver against slot_resolutions
-  # (passed in by the plugin on second pass after /resolve-slot
-  # round-trip); first pass surfaces missing slots via
-  # SlotCacheMissError so the plugin can batch the resolution.
+  # Always attempt E-- transpile (no facet_form gate as of v0.2.121).
+  # Returns None for free-text English (EmmSyntaxError); plugin's
+  # router handles the /generate fallback.
   from forge.e_minus_minus import transpile, EmmSyntaxError
   from forge.core.slot_cache import (
     build_engine_slot_resolver,
@@ -554,17 +535,18 @@ def resolve_action_code(snippet, slot_resolutions=None):
   english = extract_section(snippet["body"], "English")
   snippet_id = snippet.get("snippet_id", "<unknown>")
   if english is None:
-    raise ValueError(
-      f"facet_form: canonical snippet '{snippet_id}' has no English heading")
+    return None  # no English to transpile; plugin handles routing
   slot_cache = slot_resolutions or {}
   missing_collector = []
   resolver = build_engine_slot_resolver(
     snippet_id, slot_cache, missing_collector)
   try:
     transpiled = transpile(english.strip(), resolve_slot=resolver)
-  except EmmSyntaxError as e:
-    raise ValueError(
-      f"E-- syntax error in canonical snippet '{snippet_id}': {e}") from e
+  except EmmSyntaxError:
+    # Free-text English (or actual E-- syntax error in a canonical
+    # snippet). Return None; plugin's routeActionCodeRegen falls
+    # back to /generate.
+    return None
   if missing_collector:
     # First-pass miss: abort and report ALL missing slots in a single
     # error so the plugin can batch the /resolve-slot round-trip.
@@ -768,35 +750,9 @@ def _takes_only_context(fn):
     return False
 
 
-def detect_facet_form_strip_trap(meta):
-  """v0.2.81 — pure-decision helper for the Obsidian YAML-strip trap.
-
-  Detect a snippet whose frontmatter shows the cache-write artefact
-  (`english_hash`) from a prior canonical compute, but no longer has
-  `facet_form: canonical`. The prompt phrased this as "has
-  slot_resolutions but facet_form is absent" — `slot_resolutions` is
-  not actually a frontmatter field (it's a transient parameter on
-  resolve_action_code), so we use `english_hash` as the canonical-
-  cache marker since it IS persisted by writePythonAndEnglishHash.
-
-  When this state exists, Obsidian has almost certainly stripped
-  `facet_form: canonical` from frontmatter on a prior write (a known
-  YAML-rewrite quirk for fields Obsidian doesn't recognize). The
-  engine then routes through the legacy `else: return code` path and
-  uses the cached `# Python` directly without re-checking against
-  fresh slot resolutions — meaning the user's edits to the English
-  facet (which would otherwise invalidate via english_hash mismatch
-  + re-transpile) are silently ignored.
-
-  Returns True when the trap is detected (caller should warn the
-  user), False otherwise. Caller dedup is the caller's
-  responsibility (per snippet_id per session).
-
-  Pure function — no side effects. The Pyodide-side wrapper in
-  pyodide-host.ts emits the warning via js.console.warn after
-  consulting this helper."""
-  if not meta:
-    return False
-  if not meta.get("english_hash"):
-    return False
-  return meta.get("facet_form") != "canonical"
+# v0.2.121 — detect_facet_form_strip_trap removed. The strip-trap
+# warning was a v0.2.81 defense against Obsidian's YAML-rewrite
+# quirk that dropped `facet_form: canonical`. With facet_form
+# retired entirely (Option C plugin-side routing), the trap no
+# longer exists — the engine never reads facet_form so it can't
+# be silently dropped by Obsidian. Helper deleted.
