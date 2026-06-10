@@ -432,42 +432,103 @@ behavior; the engine's transpile path is unaffected.
 When a snippet's canonical E-- facet contains a `{{ free-text }}`
 value slot, the engine resolves the slot to a Python expression at
 **transpile time** via a Forge-hosted `/resolve-slot` endpoint
-(parallel to the existing `/generate` endpoint, same bearer-token
-auth). The resolved expression is cached per
-`(snippet_id, slot_text)` pair in the snippet's `# Slots` heading;
-the cache is the freeze mechanism.
+(parallel to `/generate`, same bearer-token auth). The resolved
+expression is spliced into the snippet's transpiled Python; the
+result lands in the snippet's `# Python` heading — the same cache
+surface that legacy free-English snippets use. **There is no
+separate slot-cache structure visible to users.** `# Python` IS the
+cache. The hash-keyed bookkeeping that links a slot text to its
+resolution lives transiently in memory during transpile and is
+never persisted as a user-facing artifact.
 
-**At runtime, the engine MUST NOT hit the LLM.** If the cache is
-missing a slot at runtime (the snippet was edited to add a new slot
-since the cache was last generated, or the cache was hand-deleted),
-the runtime raises an error; the next transpile (Forge-click)
-re-populates the cache. Per E-- spec §1.2, LLM calls are
-transpile-time only — this is a HARD RULE.
+**Cache only when the cache pays for itself.** Slot-free canonical
+snippets continue transpiling fresh on every compute and DO NOT
+write `# Python` — E-- transpile is deterministic, fast, and free,
+so caching adds file noise without saving cost. Only slot-bearing
+canonical snippets persist `# Python` (because the LLM resolution
+cost must be amortized). This means in practice: a tutorial that
+introduces canonical snippets in early chapters ships snippets
+with `# English` + `# Dependencies` and no `# Python`; the moment
+a chapter introduces `{{ }}` slots, those snippets begin growing
+a `# Python` heading on first compute. The discontinuity is
+pedagogically meaningful — the heading appears precisely because
+the LLM's answer needs to be remembered.
+
+Cache semantics for slot-bearing canonical snippets follow B8
+(`edit_mode`). In `english` mode (default), the engine detects
+English-facet changes via an `english_hash` frontmatter field
+written when `# Python` was last generated, and re-transpiles +
+re-resolves on hash mismatch. In `python` mode, `# Python` is
+editable and the cached output is used unconditionally — the
+user's edits to `# Python` are the override path for any slot
+resolution they want to refine. Per the "high ceiling" property,
+the Python facet is the natural surface for fine-tuning compiled
+output (it's where they'd already go for any other manual Python
+correction). For non-programmer cohorts, the override is an
+explicitly advanced affordance — the low-floor headline stays at
+"write English → get a working value."
+
+**At runtime, the engine MUST NOT hit the LLM.** This is a HARD
+RULE per E-- spec §1.2. If a snippet's `# Python` is missing and
+its English contains slots, the engine raises a cache-miss
+exception envelope; the plugin batches the missing slots into one
+`/resolve-slot` call, the engine splices the resolutions into the
+transpiled output on the second pass, the plugin writes the
+resulting Python to `# Python`, and re-fires compute. The user-
+visible flow is a single Forge-click; the miss + resolution +
+write-back are internal.
 
 The resolver is hosted-side responsibility: the engine sees only
-the resolved Python expression, never the LLM. The plugin owns the
-`# Slots` write-back: when a cache-miss surfaces from transpile,
-the plugin calls `/resolve-slot`, writes the result to the
-snippet's `# Slots` heading, and re-fires the original gesture.
+the resolved Python expression, never the LLM. Per the Mission's
+"low floor" property, students never see an API key or per-
+snippet LLM cost.
 
-Per the Mission's "low floor" property, students never see an API
-key or per-snippet LLM cost; per the "high ceiling" property,
-hand-editing a cached value in `# Slots` to override the LLM's
-choice is supported (the user types a different `python_expr`
-directly into the heading).
+**Cache invalidation granularity is snippet-level.** Editing any
+character of the English facet triggers a full re-transpile (and
+re-resolution of all slots) on the next compute. Region-level
+invalidation (re-resolving only the slot whose text changed,
+preserving other slot resolutions) is a deliberate non-commitment
+— see Anticipated extensions. The rationale is V1 cohort scale:
+snippets are short per the Mission preamble, slot counts are
+small (1-2 typical), and haiku-pinned slot resolutions are cheap;
+the architectural simplification of a single cache surface is
+worth more than the marginal cost of re-resolving unchanged slots
+on English edits.
 
-Slot text MUST be stable across cache hits — the cache key
-incorporates the slot text exactly as authored, plus the
-snippet_id. The surrounding English line flows in the LLM REQUEST
-for disambiguation but does NOT contribute to the cache key, so
-prose edits to surrounding lines never invalidate previously-
-resolved slots (preserves freeze semantics). A user editing the
-slot text itself invalidates that slot's cache entry (new hash key)
-and triggers re-resolution at the next transpile.
+See `docs/investigations/slot-resolution-design.md` for the wire-
+format details and the in-memory hash contract used by the
+transpile-time resolver.
 
-The `# Slots` heading is a YAML-encoded dict of `cache_key →
-python_expr`. See `docs/investigations/slot-resolution-design.md`
-§B for the wire-format.
+**Cache invalidation on switch-to-English (added 2026-06-10 per
+v0.2.90 + v0.2.119 arc).** When the user toggles `edit_mode` from
+`python` back to `english` (B8), the plugin MUST delete the
+snippet's `english_hash` frontmatter field as part of the
+transition. This forces a cache miss + re-transpile on the next
+Forge-click, restoring the engine's English-as-source-of-truth
+contract. Without this rule, manual Python edits made during
+`python` mode would persist as the cached output even after the
+user signaled they want English-driven regeneration. The deletion
+is plugin-side (engine never reads `english_hash` for cache
+purposes outside this contract); it shares the same field name as
+the engine's slot-resolution cache key by construction.
+
+**Symmetric facet-mutex invariant (added 2026-06-10 per v0.2.83
+gestural model + v0.2.87 collapse-active completion).** When a
+snippet's `# English` and `# Python` headings are both present in
+the body, the facet-mutex maintains the invariant *exactly one
+facet visible at any time*. Two gestures trigger a flip:
+
+- *Expand inactive*: unfolding the currently-hidden facet flips
+  `edit_mode` to that facet and folds the other.
+- *Collapse active*: folding the currently-visible facet flips
+  `edit_mode` to the OTHER facet and expands it.
+
+Both gestures produce identical post-mutex state. Both-folded and
+both-visible are invalid states; the plugin asserts the invariant
+in a 100ms settle-window watchdog and surfaces violations via
+`console.warn`. The invariant applies only to snippet files whose
+body contains BOTH headings; slot-free canonical snippets (English
++ Dependencies only, no Python heading) are exempt.
 
 **B8.** Action snippets carry an `edit_mode` (`english` or `python`,
 defaulting to `english`). In `english` mode, the Python facet is
@@ -478,6 +539,24 @@ record. An explicit "Sync English to Python" action canonicalizes
 English from current Python via a one-shot LLM call (the inverse
 direction of B5). Round-trip regeneration is not automatic; mode-flips
 and sync are explicit user gestures, never side effects of edits.
+
+**Drift detection in `python` mode.** When the user switches to
+`python` mode, the plugin snapshots `sha256(English facet)` into a
+`locked_english_hash` frontmatter field. On editor refresh, the
+plugin recomputes the hash of the current English facet and compares.
+If they differ (the user edited English while in python mode), the
+plugin shows a yellow-tinted "drifted" indicator on the mode toggle
+button + a hover tooltip prompting the user to either run "Sync
+English ← Python" to canonicalize from the current Python, or switch
+back to `english` mode to regenerate the Python from the new English.
+The `locked_english_hash` field is plugin-internal — the engine does
+NOT read it; it is distinct from `english_hash` (B7.3, which the
+engine uses for slot-resolution cache invalidation). The two fields
+coexist by accident of feature timing: `locked_english_hash`
+predates the B7.3 unification; both happen to hash the English facet
+but serve different consumers. A future consolidation may unify them
+under a single field with two consumers; until then, snippets in
+`edit_mode: python` may carry both fields with the same value.
 
 **B9.** *Snippet execution namespace and declared domains.* The
 runtime sandbox blocks `import` statements; snippets cannot pull in
@@ -516,6 +595,31 @@ declared domains govern the whole execution including nested calls;
 per-callee-vault re-scoping is a recoverable future refinement, not a
 v1 guarantee. `forge-core`'s built-in vault is domain-neutral and
 available regardless of declared domains.
+
+**B10.** *Inlined-asset version stamping (added 2026-06-10 per
+v0.2.98).* When the runtime distribution channel does not deliver
+the plugin's `assets/` tree alongside `main.js` (BRAT being the
+canonical example — it pulls only `main.js`, `manifest.json`,
+`styles.css`, `data.json`), the plugin MUST:
+
+1. Inline the required assets into `main.js` at build time and
+   ship a runtime restore step on plugin onload that writes any
+   missing files to disk under `<plugin-dir>/assets/`.
+2. Stamp each inlined-assets bundle with the plugin's manifest
+   version via a `.bundle-version` sentinel file written at the
+   end of every successful restore.
+3. Force-overwrite the entire inlined-asset tree on every plugin
+   onload where the sentinel version does not match the bundle's
+   embedded version. Skip-if-exists guards on individual files
+   are FORBIDDEN — they cause silent staleness when a BRAT update
+   replaces `main.js` but leaves the previously-restored asset
+   tree untouched.
+
+The skip-if-exists antipattern silently broke every plugin update
+between v0.2.91 (first inlined-assets ship) and v0.2.98 (sentinel
+introduction). Any future asset-bundling mechanism MUST follow
+this stamp + force-overwrite pattern; per-file existence checks
+are not a substitute.
 
 ## Data snippets
 
@@ -819,6 +923,7 @@ versions when the use case demands them.
   domain-specific generators) that create related sets of snippets.
   Lives outside Forge core; integrates via the standard snippet
   contract.
+- **Region-level transpilation caching.** B7.3 commits to snippet-level cache granularity: any English-facet edit triggers a full re-transpile + re-resolution of all slots on the next compute. The architecture admits a finer granularity — caching individual transpiled regions (per-statement, per-slot) and re-running only the changed regions on partial edits. Adoption trigger: evidence that real cohort usage pushes snippets to N>3 slots where re-resolving unchanged slots becomes a real cost (LLM dollars, latency, or user-perceived sluggishness). The diagnostic for this trigger is concrete: per-vault slot-count histograms + post-edit re-transpile latency measurements. Until that evidence surfaces, snippet-level keeps the contract simple, the wire format small (one `# Python` heading, no per-region cache structures), and the user-facing surface minimal (no hash-keyed YAML for students to interpret).
 - **E-- as the canonical English facet form (in progress).** Forge is
   migrating the English facet from free-prose-with-LLM-translation to
   canonical E-- (`~/projects/e--/`, vendored into the Forge engine
