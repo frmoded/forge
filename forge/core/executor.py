@@ -455,7 +455,7 @@ def extract_section(body, heading):
   return "\n".join(section_lines).strip() or None
 
 
-def resolve_action_code(snippet, slot_resolutions=None):
+def resolve_action_code(snippet, slot_resolutions=None, force=False):
   """Return the Python code for an action snippet, transpiling via
   E--'s deterministic compiler when E-- can compile the English
   facet, falling back to None (plugin handles /generate routing)
@@ -502,24 +502,22 @@ def resolve_action_code(snippet, slot_resolutions=None):
   meta = snippet["meta"]
   edit_mode = meta.get("edit_mode", "english")
 
-  # [v0.2.127 engine] diagnostic spike — emit logs to JS console
-  # via Pyodide's js bridge. Remove in v0.2.128 alongside plugin-
-  # side spike removal. Wrapped in try/except because resolve_action_code
-  # also runs under pytest (no js module available there).
-  try:
-    import js  # type: ignore
-    snippet_id_for_log = snippet.get("snippet_id", "<unknown>")
-    js.console.log(f'[v0.2.127 engine] resolve_action_code entered for snippet_id={snippet_id_for_log}')
-    js.console.log(f'[v0.2.127 engine] edit_mode={edit_mode}')
-    js.console.log(f'[v0.2.127 engine] cached # Python present: {code is not None}; length={len(code) if code else 0}')
-    js.console.log(f'[v0.2.127 engine] cached # Python preview: {(code or "")[:120]!r}')
-    js.console.log(f'[v0.2.127 engine] slot_resolutions is None: {slot_resolutions is None}')
-    js.console.log(f'[v0.2.127 engine] meta keys: {list(meta.keys())}')
-    js.console.log(f'[v0.2.127 engine] english_hash in frontmatter: {meta.get("english_hash")!r}')
-  except ImportError:
-    pass
-
-  if code is not None and slot_resolutions is None:
+  # v0.2.128 — `force` parameter bypasses ALL cache-hit paths and
+  # always falls through to re-transpile via E--. Used by the
+  # plugin's moda branch on every Forge-click: canonical moda
+  # snippets in cohort state lack `english_hash` in frontmatter,
+  # so the legacy `stored_hash is None → return cached` rule
+  # (below) would otherwise return the existing `# Python` body
+  # verbatim and English edits would never propagate. Confirmed
+  # H2 from the v0.2.127 diagnostic spike (v0327).
+  #
+  # Force flag is a caller opt-in, not a default change. Non-moda
+  # branches (english-mode forgeSnippet, generate) pass force=False
+  # by default and the existing cache/legacy behavior is unchanged
+  # for them. Force flag retires when V2's `source: english | epython`
+  # field replaces the inferred hand-authored-vs-auto-transpiled
+  # semantics encoded by the `stored_hash is None` rule.
+  if code is not None and slot_resolutions is None and not force:
     # v0.2.73: when slot_resolutions is explicitly provided, the
     # plugin is in the second-pass of a cache-miss round-trip.
     # Skip the legacy/cached early-return paths and fall through to

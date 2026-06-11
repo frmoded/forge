@@ -221,3 +221,77 @@ def test_v0_2_73_slot_resolutions_forces_retranspile_even_when_python_cache_hits
   # v0.2.73: slot_resolutions wins; re-transpile with new value.
   assert '"DIFFERENT"' in code
   assert '"Hello, dear reader!"' not in code
+
+
+def test_v0128_force_bypasses_legacy_stored_hash_is_none_rule():
+  """v0.2.128 force flag — canonical moda cohort state.
+
+  The bug v0327 confirmed: a snippet with `# English` + `# Python`
+  + NO english_hash in frontmatter would hit the legacy
+  `stored_hash is None → return cached` rule and return the
+  existing `# Python` body verbatim regardless of English edits.
+
+  With force=True the engine MUST skip that rule and re-transpile
+  from the current English. Captured Python is the new transpile
+  output, NOT the cached body.
+  """
+  english = 'Do [[print]]("v0128 fresh english").'
+  cached_python = (
+    'def compute(context):\n'
+    '    print("STALE — should not appear when force=True")\n'
+  )
+  body = (
+    f"# English\n\n{english}\n\n"
+    f"# Python\n\n```python\n{cached_python}\n```\n"
+  )
+  snip = {
+    "snippet_id": "forge-moda/simulation",
+    "meta": {
+      "type": "action",
+      # NO english_hash — the cohort state for canonical moda snippets.
+    },
+    "body": body,
+  }
+  # Without force: legacy rule fires, cached returned.
+  cached_result = resolve_action_code(snip)
+  assert "STALE" in cached_result
+  # With force: cached rule skipped, fresh transpile.
+  fresh_result = resolve_action_code(snip, force=True)
+  assert "STALE" not in fresh_result
+  assert "v0128 fresh english" in fresh_result
+
+
+def test_v0128_force_bypasses_cache_hit_when_english_hash_matches():
+  """v0.2.128 force flag — cohort state after self-heal.
+
+  After the first force-transpile + writeCanonicalPythonBack writes
+  english_hash, subsequent clicks WITHOUT force would cache-hit on
+  matching hash. With force=True the engine MUST still re-transpile.
+  Useful for testing-the-pipeline + future force-on-every-click
+  if needed.
+  """
+  english = 'Do [[print]]("v0128 force overrides cache hit").'
+  cached_python = (
+    'def compute(context):\n'
+    '    print("CACHED — should not appear when force=True")\n'
+  )
+  matching_hash = compute_english_hash(english)
+  body = (
+    f"# English\n\n{english}\n\n"
+    f"# Python\n\n```python\n{cached_python}\n```\n"
+  )
+  snip = {
+    "snippet_id": "forge-moda/simulation",
+    "meta": {
+      "type": "action",
+      "english_hash": matching_hash,  # cache-hit shape
+    },
+    "body": body,
+  }
+  # Without force: cache hits, cached body returned.
+  cached_result = resolve_action_code(snip)
+  assert "CACHED" in cached_result
+  # With force: cache-hit skipped, fresh transpile.
+  fresh_result = resolve_action_code(snip, force=True)
+  assert "CACHED" not in fresh_result
+  assert "v0128 force overrides cache hit" in fresh_result
