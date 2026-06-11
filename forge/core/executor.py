@@ -502,27 +502,51 @@ def resolve_action_code(snippet, slot_resolutions=None):
   meta = snippet["meta"]
   edit_mode = meta.get("edit_mode", "english")
 
+  # [v0.2.127 engine] diagnostic spike — emit logs to JS console
+  # via Pyodide's js bridge. Remove in v0.2.128 alongside plugin-
+  # side spike removal. Wrapped in try/except because resolve_action_code
+  # also runs under pytest (no js module available there).
+  try:
+    import js  # type: ignore
+    snippet_id_for_log = snippet.get("snippet_id", "<unknown>")
+    js.console.log(f'[v0.2.127 engine] resolve_action_code entered for snippet_id={snippet_id_for_log}')
+    js.console.log(f'[v0.2.127 engine] edit_mode={edit_mode}')
+    js.console.log(f'[v0.2.127 engine] cached # Python present: {code is not None}; length={len(code) if code else 0}')
+    js.console.log(f'[v0.2.127 engine] cached # Python preview: {(code or "")[:120]!r}')
+    js.console.log(f'[v0.2.127 engine] slot_resolutions is None: {slot_resolutions is None}')
+    js.console.log(f'[v0.2.127 engine] meta keys: {list(meta.keys())}')
+    js.console.log(f'[v0.2.127 engine] english_hash in frontmatter: {meta.get("english_hash")!r}')
+  except ImportError:
+    pass
+
   if code is not None and slot_resolutions is None:
     # v0.2.73: when slot_resolutions is explicitly provided, the
-    # plugin is in the second-pass of a cache-miss round-trip. The
-    # presence of slot_resolutions signals "I want a re-transpile
-    # with these resolutions, don't short-circuit on the cached
-    # `# Python`." Skip the legacy/cached early-return paths and
-    # fall through to the canonical transpile block below.
+    # plugin is in the second-pass of a cache-miss round-trip.
+    # Skip the legacy/cached early-return paths and fall through to
+    # the canonical transpile block below.
     if edit_mode == "python":
       # User-authored Python: return verbatim regardless of cache.
       return code
-    # english mode: validate english_hash before returning cached code.
+    # english mode + # Python present:
+    #   - If english_hash is present AND matches → cache hit.
+    #   - If english_hash is present AND DOESN'T match → cache stale,
+    #     re-transpile (B7.3 invalidation contract).
+    #   - If english_hash is ABSENT → no invalidation contract on this
+    #     snippet (legacy or free-English author who hand-authored
+    #     # Python). Return the cached code; v0.2.121 retains the pre-
+    #     facet_form-removal behavior for snippets without an
+    #     english_hash.
     from forge.core.slot_cache import compute_english_hash
     stored_hash = meta.get("english_hash")
+    if stored_hash is None:
+      return code  # no invalidation contract; use cached Python
     english_for_hash = extract_section(snippet["body"], "English")
     current_hash = (
       compute_english_hash(english_for_hash) if english_for_hash else None)
-    if stored_hash is not None and stored_hash == current_hash:
+    if stored_hash == current_hash:
       return code
-    # Hash mismatch (or absent) AND no slot_resolutions: fall through
-    # to re-transpile. Plugin's routeActionCodeRegen will catch the
-    # None return (E-- failure) and fall back to /generate.
+    # Hash mismatch: fall through to re-transpile. Plugin's
+    # routeActionCodeRegen catches None and falls back to /generate.
 
   # Always attempt E-- transpile (no facet_form gate as of v0.2.121).
   # Returns None for free-text English (EmmSyntaxError); plugin's
