@@ -182,3 +182,46 @@ def test_context_execute_without_resolver_raises():
   with pytest.raises(SnippetExecError) as exc:
     exec_python(code, {})
   assert "resolver" in str(exc.value).lower()
+
+
+def test_v0132_exec_python_raises_clear_error_on_empty_code():
+  """v0.2.132 — empty Python facet (the v0.2.131 cohort smoke crash
+  mode: mangled English → transpile failed → empty code → compile()
+  TypeError).
+
+  Engine must raise SnippetExecError with a user-friendly message
+  pointing at the likely cause, not crash at compile() with an
+  opaque TypeError about non-string args.
+  """
+  from forge.core.executor import exec_python, SnippetExecError
+  import pytest
+  with pytest.raises(SnippetExecError) as exc_info:
+    exec_python('', inputs={}, snippet_id='forge-tutorial/01-hello/hello_world')
+  msg = str(exc_info.value)
+  assert 'Empty or missing Python code' in msg
+  assert 'hello_world' in msg
+  # Cohort UX: message should hint at the cause + remedy.
+  assert 'transpilation failed' in msg or 'English facet' in msg
+
+
+def test_v0132_exec_python_raises_on_none_code():
+  """v0.2.132 — same guard for None (the actual driver smoke shape
+  where resolve_action_code returned None and the JS bridge
+  passed it through to compile()).
+  """
+  from forge.core.executor import exec_python, SnippetExecError
+  import pytest
+  with pytest.raises(SnippetExecError) as exc_info:
+    exec_python(None, inputs={}, snippet_id='foo/bar')
+  assert 'Empty or missing Python code' in str(exc_info.value)
+
+
+def test_v0132_exec_python_raises_on_whitespace_only_code():
+  """v0.2.132 — whitespace-only code is functionally empty (compile()
+  would succeed but execute nothing useful and produce no
+  _find_entrypoint hit). Treat as empty for clarity."""
+  from forge.core.executor import exec_python, SnippetExecError
+  import pytest
+  with pytest.raises(SnippetExecError) as exc_info:
+    exec_python('   \n\n\t  \n', inputs={}, snippet_id='foo')
+  assert 'Empty or missing Python code' in str(exc_info.value)

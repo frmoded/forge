@@ -659,6 +659,30 @@ def _build_snippet_shims(context, registry):
 
 
 def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None, domains=None, declared_inputs=None):
+  # v0.2.132 — guard against empty/None/non-string code reaching
+  # compile(). Driver smoke on v0.2.131 mangled hello_world.md's
+  # English with `}}}}}` and hit the engine through the english-
+  # mode regen → /generate fallback path. The empty Python that
+  # came back was passed straight to `compile(None, ...)`, which
+  # raised `TypeError: compile() arg 1 must be a string, bytes
+  # or AST object` — incomprehensible to the user.
+  #
+  # Raise a clear typed error here instead. Plugin catches
+  # SnippetExecError and surfaces a user-friendly Notice. Empty
+  # `# Python` after a failed regen is the most common cause; the
+  # message points at it directly.
+  if code is None or not isinstance(code, str) or not code.strip():
+    label = f"'{snippet_id}'" if snippet_id else "snippet"
+    raise SnippetExecError(
+      f"Empty or missing Python code for {label}. "
+      "This usually means transpilation failed — check the "
+      "English facet for syntax errors (E-- requires structured "
+      "phrasing like `Print \"hello\".`), or that a # Python "
+      "heading exists if you authored Python directly. "
+      "(Pre-v0.2.132 this would have failed at compile() with "
+      "an opaque TypeError; the engine now raises this clear "
+      "message instead.)",
+    )
   buf = io.StringIO()
   context = ForgeContext(resolver, inputs, vault_path=vault_path,
                          registry=registry, caller_id=snippet_id,
