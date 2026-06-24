@@ -384,10 +384,44 @@ def _try_serialize_music21(value, snippet):
     # highlight tracking unchanged).
     if has_perc:
       try:
-        from music21 import midi as _m21midi
+        from music21 import midi as _m21midi, note as _note, stream as _stream
         import io as _io
         import base64 as _b64
-        _mf = _m21midi.translate.streamToMidiFile(value)
+        import copy as _copy
+        # v0.2.158/v0.2.159 — normalize percussion-Part Note pitches to
+        # each part instrument's percMapPitch BEFORE MIDI export.
+        # forge-music's percussion snippets (solitary, companions,
+        # gathering, etc.) build kicks + hi-hats as
+        # `note.Note('C4', quarterLength=...)` — pitched notes spelled at
+        # C4 = MIDI pitch 60 — attached to a Part whose Instrument is
+        # one of the lib.py percussion factories. music21's MIDI export
+        # correctly puts these on channel 10 (drum) but uses the note's
+        # spelled MIDI pitch (60 = High Bongo) NOT the Part instrument's
+        # percMapPitch. Result: every kick/snare/hi-hat hit broadcasts
+        # on the same drum slot. Driver smoke against v0.2.158 confirmed
+        # this: 394 notes, all pitch=60, all channel 10 = bongo wall.
+        #
+        # Deep-copying the Score and rewriting each Note's
+        # pitch.midi to the Part Instrument's percMapPitch gives music21
+        # the right pitch byte to emit per NOTE_ON event. The original
+        # Score (used for multi_staff_xml + kit_xml + display) is not
+        # mutated. Notes already constructed as note.Unpitched (which
+        # pull pitch from instrument percMap natively) are unaffected.
+        _midi_score = _copy.deepcopy(value)
+        for _part in _midi_score.getElementsByClass(_stream.Part):
+          _inst = _part.getInstrument(returnDefault=False)
+          if _inst is None:
+            continue
+          _pmp = getattr(_inst, "percMapPitch", None)
+          if _pmp is None:
+            continue
+          for _n in _part.recurse().notes:
+            if isinstance(_n, _note.Note):
+              try:
+                _n.pitch.midi = _pmp
+              except Exception:
+                pass
+        _mf = _m21midi.translate.streamToMidiFile(_midi_score)
         _buf = _io.BytesIO()
         _mf.openFileLike(_buf)
         _mf.write()
