@@ -15,7 +15,7 @@ from __future__ import annotations
 import copy
 from typing import Union
 
-from music21 import instrument, key, meter, note, pitch, stream
+from music21 import clef, instrument, key, meter, note, pitch, stream
 
 StreamLike = Union[stream.Score, stream.Part, stream.Measure, stream.Stream]
 
@@ -703,3 +703,237 @@ def _extract_parts(s: StreamLike) -> list[stream.Part]:
     if parts:
       return [copy.deepcopy(p) for p in parts]
   return [_coerce_to_part(s)]
+
+
+# v0.3.x — kit-notation rendering. Folds multiple percussion Parts into a
+# single staff with two voices (stems-up for hands, stems-down for kick),
+# per the v0.2.143 cohort feature. Independent of MIDI export: the
+# canonical multi-Part Score remains the source of truth for playback;
+# `to_kit_notation` produces a *visual* alternative that renders compact
+# (single 5-line staff with kit conventions) for drummer-readable
+# notation.
+#
+# Per the v0.2.143 prompt §3.2 + Hal Leonard Drum Method reference, the
+# pitch + notehead mapping is:
+#
+#   Instrument     music21 pitch  Voice  Notehead   Staff position
+#   Kick           B1             2 (↓)  normal     space below staff
+#   Snare          E2             1 (↑)  normal     middle line
+#   Closed hi-hat  G2             1 (↑)  x          above staff
+#   Open hi-hat    G2             1 (↑)  circle-x   above staff
+#   Pedal hi-hat   D2             2 (↓)  x          space below middle
+#   Low tom        F2             1 (↑)  normal     2nd line up
+#   Mid tom        A2             1 (↑)  normal     3rd space up
+#   High tom       C3             1 (↑)  normal     above staff
+#   Crash          A2             1 (↑)  x          above staff
+#   Ride           F3             1 (↑)  x          above staff
+
+# Pitch + notehead + voice spec keyed by music21 Instrument class name.
+# Looked up via type(inst).__name__ on each Note's getInstrument() return.
+# The mapping uses percMapPitch where it disambiguates within a single
+# music21 class (HiHatCymbal: closed/open/pedal share class but differ
+# on percMapPitch 42/46/44; same for cymbals if needed).
+_KIT_VOICE_HANDS = 1
+_KIT_VOICE_FEET = 2
+
+# Map (m21_class_name, percMapPitch_or_None) → (kit_pitch, voice, notehead).
+# When percMapPitch is None in the key, that's the catch-all for the class.
+_KIT_NOTATION_MAP = {
+  # Kick — voice 2 stems down.
+  ('BassDrum', None): ('B1', _KIT_VOICE_FEET, 'normal'),
+  # Snare — voice 1, middle line.
+  ('SnareDrum', None): ('E2', _KIT_VOICE_HANDS, 'normal'),
+  # Hi-hats — closed/open/pedal share HiHatCymbal class, differ on
+  # percMapPitch (42 / 46 / 44 per the lib.py factories).
+  ('HiHatCymbal', 42): ('G2', _KIT_VOICE_HANDS, 'x'),       # closed
+  ('HiHatCymbal', 46): ('G2', _KIT_VOICE_HANDS, 'circle-x'),  # open
+  ('HiHatCymbal', 44): ('D2', _KIT_VOICE_FEET, 'x'),         # pedal
+  # Catch-all hi-hat (unknown percMapPitch) → treat as closed.
+  ('HiHatCymbal', None): ('G2', _KIT_VOICE_HANDS, 'x'),
+  # Toms — three variants differ only on percMapPitch (41/47/50).
+  ('TomTom', 41): ('F2', _KIT_VOICE_HANDS, 'normal'),  # low
+  ('TomTom', 47): ('A2', _KIT_VOICE_HANDS, 'normal'),  # mid
+  ('TomTom', 50): ('C3', _KIT_VOICE_HANDS, 'normal'),  # high
+  ('TomTom', None): ('A2', _KIT_VOICE_HANDS, 'normal'),  # fallback
+  # Cymbals — crash + ride get X-noteheads above staff. music21 class
+  # names: CrashCymbals (note the plural), RideCymbals.
+  ('CrashCymbals', None): ('A2', _KIT_VOICE_HANDS, 'x'),
+  ('RideCymbals', None): ('F3', _KIT_VOICE_HANDS, 'x'),
+}
+
+
+def _kit_lookup(inst):
+  """Return (kit_pitch, voice, notehead) for a percussion instrument, or
+  None if the instrument isn't a recognized percussion class. Falls back
+  through (class_name, percMapPitch) → (class_name, None) so an
+  unrecognized percMapPitch within a known class still gets a sane
+  default."""
+  if inst is None:
+    return None
+  cls = type(inst).__name__
+  pmp = getattr(inst, 'percMapPitch', None)
+  if (cls, pmp) in _KIT_NOTATION_MAP:
+    return _KIT_NOTATION_MAP[(cls, pmp)]
+  if (cls, None) in _KIT_NOTATION_MAP:
+    return _KIT_NOTATION_MAP[(cls, None)]
+  return None
+
+
+def has_percussion(score: stream.Score) -> bool:
+  """v0.3.x — true iff the score contains at least one Part whose
+  Instrument is an UnpitchedPercussion subclass (or one of the
+  recognized percussion classes from lib.py's factories).
+
+  Used by the plugin to decide whether to show the kit-notation toggle
+  button in the Forge Output pane. Piano-only / melodic-only scores
+  return False; the toggle stays hidden.
+  """
+  if not isinstance(score, stream.Score):
+    return False
+  for part in score.getElementsByClass(stream.Part):
+    inst = part.getInstrument(returnDefault=False)
+    if inst is None:
+      continue
+    if _kit_lookup(inst) is not None:
+      return True
+    # Also recognize generic UnpitchedPercussion subclasses we didn't
+    # explicitly enumerate (defensive forward-compat).
+    if isinstance(inst, instrument.UnpitchedPercussion):
+      return True
+  return False
+
+
+def to_kit_notation(score: stream.Score) -> stream.Score:
+  """v0.3.x — fold percussion Parts of a Score into a single staff with
+  two voices (stems-up for hands, stems-down for kick), preserving
+  music21 note IDs and per-note Instrument identity.
+
+  Non-percussion Parts pass through unchanged. Returns a NEW Score; does
+  not mutate the input.
+
+  Per v0.2.143 cohort feature. The kit Part is a *visual* fold; the
+  per-note Instrument references on the merged notes preserve channel-10
+  routing so MIDI export from the kit Score is equivalent to MIDI export
+  from the original canonical Score.
+
+  Algorithm:
+  1. Walk score.parts. Split into percussion vs non-percussion lists.
+  2. If no percussion: return a deep-copy of the input Score (no work).
+  3. Build a kit Part with PercussionClef + two Voices. Map each
+     percussion-Part note via _KIT_NOTATION_MAP → kit pitch + voice +
+     notehead.
+  4. Preserve note.id (drives the plugin's click-to-play SVG → note
+     map) and the original Instrument reference (via note.editorial so
+     MIDI export still walks per-instrument).
+  5. Stems: voice 1 = up, voice 2 = down. Noteheads applied per the
+     mapping table.
+  6. Assemble output Score: [non-percussion parts in original order +
+     kit Part at the position of the first original percussion Part].
+  """
+  if not isinstance(score, stream.Score):
+    return score
+
+  output = stream.Score()
+  # Copy score-level metadata so engraving (title, composer) survives.
+  if score.metadata is not None:
+    output.metadata = copy.deepcopy(score.metadata)
+
+  parts = list(score.getElementsByClass(stream.Part))
+  if not parts:
+    return output
+
+  percussion_parts: list[stream.Part] = []
+  non_percussion_parts: list[stream.Part] = []
+  first_perc_index: int | None = None
+  for i, part in enumerate(parts):
+    inst = part.getInstrument(returnDefault=False)
+    is_perc = (
+      inst is not None
+      and (_kit_lookup(inst) is not None
+           or isinstance(inst, instrument.UnpitchedPercussion))
+    )
+    if is_perc:
+      percussion_parts.append(part)
+      if first_perc_index is None:
+        first_perc_index = i
+    else:
+      non_percussion_parts.append(part)
+
+  if not percussion_parts:
+    # Percussion-less score: deep-copy parts through; non-mutating.
+    for p in parts:
+      output.append(copy.deepcopy(p))
+    return output
+
+  # Build the kit Part.
+  kit_part = stream.Part()
+  # Use UnpitchedPercussion as a generic Part-level instrument; per-note
+  # Instrument references are preserved via note.editorial so MIDI walks
+  # see the actual kick/snare/etc.
+  kit_inst = instrument.UnpitchedPercussion()
+  _force_perc_channel(kit_inst, 'Kit', 'Kit')
+  kit_part.insert(0, kit_inst)
+  # Percussion clef so Verovio renders the 5-line staff with the
+  # percussion convention (no pitch, just staff positions).
+  kit_part.insert(0, clef.PercussionClef())
+
+  voice_hands = stream.Voice()
+  voice_hands.id = '1'
+  voice_feet = stream.Voice()
+  voice_feet.id = '2'
+
+  # Walk each percussion Part's notes; for each, look up kit position +
+  # voice + notehead; insert into the appropriate voice at the same
+  # offset.
+  for src_part in percussion_parts:
+    src_inst = src_part.getInstrument(returnDefault=False)
+    src_spec = _kit_lookup(src_inst)
+    if src_spec is None:
+      # Unknown percussion class; default to hands voice with normal
+      # notehead at staff middle line.
+      src_spec = ('E2', _KIT_VOICE_HANDS, 'normal')
+    kit_pitch, voice_id, notehead_type = src_spec
+    # Flatten so we walk Measures, Voices, etc. uniformly.
+    for src_note in src_part.recurse().notes:
+      # Preserve the original ID + instrument reference. music21 Notes
+      # carry editorial dicts; stash the source instrument so MIDI
+      # export (which reads instrument context per note) still sees the
+      # right percussion channel routing.
+      new_note = note.Note(kit_pitch)
+      new_note.quarterLength = src_note.quarterLength
+      if src_note.id is not None:
+        new_note.id = src_note.id
+      # Preserve source instrument reference for MIDI walk.
+      new_note.editorial.misc['forge_source_instrument'] = src_inst
+      # Stems + noteheads per kit conventions.
+      if voice_id == _KIT_VOICE_HANDS:
+        new_note.stemDirection = 'up'
+      else:
+        new_note.stemDirection = 'down'
+      if notehead_type != 'normal':
+        new_note.notehead = notehead_type
+      # Preserve velocity / dynamics if present.
+      if src_note.volume is not None:
+        new_note.volume = copy.deepcopy(src_note.volume)
+      # Same offset within the part.
+      offset = src_note.getOffsetInHierarchy(src_part)
+      if voice_id == _KIT_VOICE_HANDS:
+        voice_hands.insert(offset, new_note)
+      else:
+        voice_feet.insert(offset, new_note)
+
+  # Voice 1 before voice 2 so engraving conventions are respected.
+  kit_part.insert(0, voice_hands)
+  kit_part.insert(0, voice_feet)
+
+  # Assemble output Score: non-percussion parts in original order +
+  # kit Part inserted at the first percussion Part's original index.
+  insert_idx = first_perc_index if first_perc_index is not None else len(non_percussion_parts)
+  for i, p in enumerate(non_percussion_parts):
+    if i == insert_idx:
+      output.append(kit_part)
+    output.append(copy.deepcopy(p))
+  if insert_idx >= len(non_percussion_parts):
+    output.append(kit_part)
+
+  return output
