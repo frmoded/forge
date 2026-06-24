@@ -930,6 +930,16 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
       if src_note.id is not None:
         new_note.id = src_note.id
       # Preserve source instrument reference for MIDI walk.
+      # v0.2.147 — initialize editorial.misc if music21's Editorial
+      # class doesn't predefine it. Driver runtime smoke against
+      # v0.2.146 surfaced AttributeError when pyodide-bundled music21
+      # raised on the lazy attribute read (music21's editorial.py has
+      # `predefinedDicts` commented out, so reading `editorial.misc`
+      # before setting it bypasses the dict-membership check and falls
+      # into the AttributeError branch). The membership-check + setattr
+      # pattern works regardless of which music21 version is loaded.
+      if 'misc' not in new_note.editorial:
+        new_note.editorial.misc = {}
       new_note.editorial.misc['forge_source_instrument'] = src_inst
       # Stems + noteheads per kit conventions.
       if voice_id == _KIT_VOICE_HANDS:

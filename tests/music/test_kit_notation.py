@@ -300,3 +300,40 @@ def test_to_kit_notation_unpitched_displayname_is_kit_convention():
   # Voice 1 has snare (C5) + hihat (G5).
   display_names = sorted(n.displayName for n in notes_by_voice['1'])
   assert display_names == ['C5', 'G5']
+
+
+def test_to_kit_notation_handles_uninitialized_editorial_misc():
+  """v0.2.147 regression: ensure to_kit_notation works on notes whose
+  editorial.misc attribute hasn't been pre-initialized.
+
+  Driver runtime smoke against v0.2.146 caught AttributeError in
+  pyodide-bundled music21:
+    File ".../music21/editorial.py", line 126, in __getattr__
+      raise AttributeError(f'Editorial does not have an attribute {name}')
+    AttributeError: Editorial does not have an attribute misc
+
+  Root cause: music21's Editorial class has `predefinedDicts = ('misc',)`
+  COMMENTED OUT in the bundled version. Lazy attribute read on
+  `editorial.misc` raises before the dict-set can fire.
+
+  Fix: dict-membership check + explicit setattr before reading. This
+  test exercises the path by using a fresh Note with no editorial
+  pre-init, simulating the runtime case the driver hit on murmuration.
+  """
+  score = stream.Score()
+  score.append(_make_perc_part(snare, [('E2', 1.0)]))
+  # No editorial.misc pre-init on the source notes — pure runtime case.
+
+  # The pre-v0.2.147 code raised AttributeError here. Post-v0.2.147 it
+  # should run cleanly + preserve the source instrument.
+  out = to_kit_notation(score)
+
+  kit = list(out.getElementsByClass(stream.Part))[0]
+  notes_by_voice = _all_kit_notes(kit)
+  assert len(notes_by_voice['1']) == 1
+  out_note = notes_by_voice['1'][0]
+  # Source instrument preserved via editorial.misc.
+  assert 'misc' in out_note.editorial
+  src_inst = out_note.editorial.misc.get('forge_source_instrument')
+  assert src_inst is not None
+  assert type(src_inst).__name__ == 'SnareDrum'
