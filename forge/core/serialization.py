@@ -348,6 +348,7 @@ def _try_serialize_music21(value, snippet):
   # `kit_content` opt new plugin codepaths into the toggle.
   has_perc = False
   kit_xml = None
+  multi_staff_midi_b64 = None
   if isinstance(value, music21.stream.Score):
     try:
       from forge.music.lib import has_percussion, to_kit_notation
@@ -363,6 +364,38 @@ def _try_serialize_music21(value, snippet):
       # gets a renderable score — just no toggle.
       has_perc = False
       kit_xml = None
+    # v0.2.157 — direct music21 MIDI export for percussion. Pre-v0.2.157
+    # the plugin used Verovio's renderToMIDI to generate audio bytes
+    # from multi_staff_xml. Driver smoke against v0.2.156 (with audio
+    # diagnostic) showed every percussion note routing to MIDI pitch 60
+    # (High Bongo on channel 10) regardless of the underlying instrument
+    # — Verovio falls back to the default display pitch for Unpitched
+    # notes instead of honoring per-Part <midi-unpitched>NN</midi-
+    # unpitched> from the MusicXML's <midi-instrument> block. music21's
+    # streamToMidiFile renders the same Score directly to standard MIDI
+    # with correct per-Part channel-10 routing + correct percMapPitch
+    # (kick=35, snare=38, hi-hat=44 default / 42 closed / 46 open, etc.)
+    # so SoundFont drums fire the right samples.
+    #
+    # Emitted only when the score has percussion (toggle is offered).
+    # The plugin sees `multi_staff_midi_base64` in the payload and uses
+    # it as the player's MIDI source — bypassing Verovio's incorrect
+    # MIDI rendering. Verovio still renders the SVG + timeMap (display +
+    # highlight tracking unchanged).
+    if has_perc:
+      try:
+        from music21 import midi as _m21midi
+        import io as _io
+        import base64 as _b64
+        _mf = _m21midi.translate.streamToMidiFile(value)
+        _buf = _io.BytesIO()
+        _mf.openFileLike(_buf)
+        _mf.write()
+        _midi_bytes = _buf.getvalue()
+        _mf.close()
+        multi_staff_midi_b64 = _b64.b64encode(_midi_bytes).decode("ascii")
+      except Exception:
+        multi_staff_midi_b64 = None
 
   payload = {
     "type": "musicxml",
@@ -372,6 +405,8 @@ def _try_serialize_music21(value, snippet):
     payload["has_percussion"] = True
     payload["multi_staff_content"] = multi_staff_xml
     payload["kit_content"] = kit_xml
+    if multi_staff_midi_b64 is not None:
+      payload["multi_staff_midi_base64"] = multi_staff_midi_b64
   else:
     payload["has_percussion"] = False
   return payload
