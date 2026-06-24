@@ -337,10 +337,44 @@ def _try_serialize_music21(value, snippet):
 
   from music21.musicxml.m21ToXml import GeneralObjectExporter
   xml_bytes = GeneralObjectExporter(value).parse()
-  return {
+  multi_staff_xml = xml_bytes.decode("utf-8")
+
+  # v0.2.150 — dual-XML production for percussion scores. When the
+  # value is a Score with at least one UnpitchedPercussion Part, also
+  # serialize a kit-notation fold so the plugin's Forge Output pane
+  # can offer the multi-staff ↔ kit toggle. Backward-compat: `content`
+  # remains the multi-staff XML (legacy plugin codepaths render it
+  # unchanged); new fields `has_percussion` + `multi_staff_content` +
+  # `kit_content` opt new plugin codepaths into the toggle.
+  has_perc = False
+  kit_xml = None
+  if isinstance(value, music21.stream.Score):
+    try:
+      from forge.music.lib import has_percussion, to_kit_notation
+      has_perc = has_percussion(value)
+      if has_perc:
+        kit_score = to_kit_notation(value)
+        _set_score_title(kit_score, snippet)
+        kit_bytes = GeneralObjectExporter(kit_score).parse()
+        kit_xml = kit_bytes.decode("utf-8")
+    except Exception:
+      # Defensive: if to_kit_notation raises (unexpected music21
+      # shape), drop back to multi-staff-only output. Caller still
+      # gets a renderable score — just no toggle.
+      has_perc = False
+      kit_xml = None
+
+  payload = {
     "type": "musicxml",
-    "content": xml_bytes.decode("utf-8"),
+    "content": multi_staff_xml,
   }
+  if has_perc and kit_xml is not None:
+    payload["has_percussion"] = True
+    payload["multi_staff_content"] = multi_staff_xml
+    payload["kit_content"] = kit_xml
+  else:
+    payload["has_percussion"] = False
+  return payload
 
 
 def _set_score_title(stream_, snippet):
