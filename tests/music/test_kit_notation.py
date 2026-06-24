@@ -337,3 +337,44 @@ def test_to_kit_notation_handles_uninitialized_editorial_misc():
   src_inst = out_note.editorial.misc.get('forge_source_instrument')
   assert src_inst is not None
   assert type(src_inst).__name__ == 'SnareDrum'
+
+
+def test_to_kit_notation_sets_storedInstrument_for_midi_routing():
+  """v0.2.149 — each kit-staff Unpitched note must carry the source
+  instrument as storedInstrument so MIDI export uses its percMapPitch.
+
+  Driver runtime smoke against v0.2.148: 'SoundFont Pitch 0 is outside
+  the valid range for percussion (35-81)' — Unpitched notes had no
+  per-note instrument context, so music21's MIDI export fell back to
+  the Part's generic UnpitchedPercussion (no percMapPitch) and emitted
+  pitch 0. Drums silent.
+
+  Fix: bind each Unpitched note to its source Instrument via
+  storedInstrument. MIDI export walks storedInstrument first, gets
+  the correct percMapPitch (kick=35, snare=38, HH-closed=42, etc.),
+  emits a valid percussion note.
+  """
+  score = stream.Score()
+  score.append(_make_perc_part(kick, [('B2', 1.0)]))
+  score.append(_make_perc_part(snare, [('E2', 1.0)]))
+  score.append(_make_perc_part(closed_hihat, [('F3', 1.0)]))
+  out = to_kit_notation(score)
+  kit = list(out.getElementsByClass(stream.Part))[0]
+  notes_by_voice = _all_kit_notes(kit)
+  all_notes = notes_by_voice['1'] + notes_by_voice['2']
+  assert len(all_notes) == 3
+  # Every note carries its source Instrument as storedInstrument.
+  inst_classes = sorted(type(n.storedInstrument).__name__ for n in all_notes)
+  assert inst_classes == ['BassDrum', 'HiHatCymbal', 'SnareDrum']
+  # And the source instrument's percMapPitch survives — that's what
+  # MIDI export reads.
+  for n in all_notes:
+    cls = type(n.storedInstrument).__name__
+    if cls == 'BassDrum':
+      # music21 BassDrum default percMapPitch is 35 (GM Bass Drum 1).
+      assert n.storedInstrument.midiChannel == 9  # channel 10 in GM
+    elif cls == 'SnareDrum':
+      assert n.storedInstrument.midiChannel == 9
+    elif cls == 'HiHatCymbal':
+      assert n.storedInstrument.percMapPitch == 42  # closed hihat
+      assert n.storedInstrument.midiChannel == 9

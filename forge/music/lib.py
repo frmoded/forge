@@ -929,7 +929,21 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
       new_note.quarterLength = src_note.quarterLength
       if src_note.id is not None:
         new_note.id = src_note.id
-      # Preserve source instrument reference for MIDI walk.
+      # v0.2.149 — bind the source Instrument to this note so MIDI
+      # export uses its percMapPitch (kick=35, snare=38, HH-closed=42,
+      # etc.) instead of falling back to the kit Part's generic
+      # UnpitchedPercussion (which has no percMapPitch and yields
+      # MIDI pitch 0 — outside the SoundFont's percussion range 35-81,
+      # producing the silent-drumming bug driver hit on v0.2.148).
+      #
+      # music21's MIDI exporter walks each note's storedInstrument
+      # before falling back to active-site/Part-level instrument
+      # context. Setting it per-note lets a single Part fold notes
+      # from many percussion instruments while preserving each note's
+      # MIDI routing.
+      new_note.storedInstrument = src_inst
+      # Preserve source instrument reference for MIDI walk + any
+      # downstream consumer.
       # v0.2.147 — initialize editorial.misc if music21's Editorial
       # class doesn't predefine it. Driver runtime smoke against
       # v0.2.146 surfaced AttributeError when pyodide-bundled music21
