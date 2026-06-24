@@ -917,6 +917,7 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
     # `template_measures` check) runs in that case.
     pass
   else:
+    from music21 import tempo as _tempo
     for tmpl in template_measures:
       kit_measure = stream.Measure(number=tmpl.number)
       # Carry over TimeSignature so Verovio + MusicXML know the bar
@@ -928,6 +929,16 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
       # cheap insurance for mixed pieces).
       if tmpl.keySignature is not None:
         kit_measure.keySignature = copy.deepcopy(tmpl.keySignature)
+      # v0.2.160 — also carry over any MetronomeMark (tempo) attached
+      # to this source measure. Without this, kit_xml defaults to
+      # Verovio's ~120 BPM while multi-staff plays at the source's
+      # actual tempo (e.g., murmuration's 96 BPM). The mismatch makes
+      # the kit-mode highlight-tracking scale drift bar-by-bar — by
+      # bar 5 the highlight lags / leads the audio by enough that the
+      # driver perceives notes as "missing" in kit even though the
+      # shared multi-staff MIDI is playing them correctly.
+      for mm in tmpl.getElementsByClass(_tempo.MetronomeMark):
+        kit_measure.insert(mm.offset, copy.deepcopy(mm))
       v_hands = stream.Voice()
       v_hands.id = '1'
       v_feet = stream.Voice()
