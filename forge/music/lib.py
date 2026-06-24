@@ -736,38 +736,58 @@ def _extract_parts(s: StreamLike) -> list[stream.Part]:
 _KIT_VOICE_HANDS = 1
 _KIT_VOICE_FEET = 2
 
-# Map (m21_class_name, percMapPitch_or_None) → (kit_pitch, voice, notehead).
-# When percMapPitch is None in the key, that's the catch-all for the class.
+# Map (m21_class_name, percMapPitch_or_None) → (display_position, voice, notehead).
+#
+# v0.2.145 — values are DISPLAY POSITIONS for note.Unpitched (not real
+# pitches). Pre-v0.2.145 used note.Note with literal pitches (B1, E2,
+# G2 etc.) which Verovio rendered at their absolute pitch positions
+# below the staff. Driver's spike on 2026-06-26 confirmed:
+#   ✗ Kit notes positioned by literal pitch, not kit-convention staff
+#     position.
+#   ✗ Voice stem directions overridden by Verovio's auto-stemming for
+#     low-pitched notes.
+#
+# Migrating to note.Unpitched with displayName='G5'-style display
+# positions makes Verovio honor the position via <display-step> +
+# <display-octave> tags per MusicXML standard. Positions below follow
+# the Hal Leonard Drum Method / MuseScore-Finale default convention
+# for a 5-line staff with percussion clef (treble-clef-conceptual).
 _KIT_NOTATION_MAP = {
-  # Kick — voice 2 stems down.
-  ('BassDrum', None): ('B1', _KIT_VOICE_FEET, 'normal'),
-  # Snare — voice 1, middle line.
-  ('SnareDrum', None): ('E2', _KIT_VOICE_HANDS, 'normal'),
+  # Kick — voice 2 stems down. Just below the staff.
+  ('BassDrum', None): ('F4', _KIT_VOICE_FEET, 'normal'),
+  # Snare — voice 1, middle (3rd space).
+  ('SnareDrum', None): ('C5', _KIT_VOICE_HANDS, 'normal'),
   # Hi-hats — closed/open/pedal share HiHatCymbal class, differ on
-  # percMapPitch (42 / 46 / 44 per the lib.py factories).
-  ('HiHatCymbal', 42): ('G2', _KIT_VOICE_HANDS, 'x'),       # closed
-  ('HiHatCymbal', 46): ('G2', _KIT_VOICE_HANDS, 'circle-x'),  # open
-  ('HiHatCymbal', 44): ('D2', _KIT_VOICE_FEET, 'x'),         # pedal
+  # percMapPitch (42 / 46 / 44 per the lib.py factories). Closed +
+  # open above staff (first leger line up); pedal below staff.
+  ('HiHatCymbal', 42): ('G5', _KIT_VOICE_HANDS, 'x'),         # closed
+  ('HiHatCymbal', 46): ('G5', _KIT_VOICE_HANDS, 'circle-x'),  # open
+  ('HiHatCymbal', 44): ('D4', _KIT_VOICE_FEET, 'x'),          # pedal
   # Catch-all hi-hat (unknown percMapPitch) → treat as closed.
-  ('HiHatCymbal', None): ('G2', _KIT_VOICE_HANDS, 'x'),
-  # Toms — three variants differ only on percMapPitch (41/47/50).
-  ('TomTom', 41): ('F2', _KIT_VOICE_HANDS, 'normal'),  # low
-  ('TomTom', 47): ('A2', _KIT_VOICE_HANDS, 'normal'),  # mid
-  ('TomTom', 50): ('C3', _KIT_VOICE_HANDS, 'normal'),  # high
-  ('TomTom', None): ('A2', _KIT_VOICE_HANDS, 'normal'),  # fallback
-  # Cymbals — crash + ride get X-noteheads above staff. music21 class
-  # names: CrashCymbals (note the plural), RideCymbals.
-  ('CrashCymbals', None): ('A2', _KIT_VOICE_HANDS, 'x'),
-  ('RideCymbals', None): ('F3', _KIT_VOICE_HANDS, 'x'),
+  ('HiHatCymbal', None): ('G5', _KIT_VOICE_HANDS, 'x'),
+  # Toms — low (3rd space from bottom), mid (4th line), high (top
+  # space). Variants differ only on percMapPitch (41/47/50).
+  ('TomTom', 41): ('A4', _KIT_VOICE_HANDS, 'normal'),  # low
+  ('TomTom', 47): ('D5', _KIT_VOICE_HANDS, 'normal'),  # mid
+  ('TomTom', 50): ('E5', _KIT_VOICE_HANDS, 'normal'),  # high
+  ('TomTom', None): ('D5', _KIT_VOICE_HANDS, 'normal'),  # fallback (mid)
+  # Cymbals — crash + ride get X-noteheads above staff. Crash sits
+  # higher than hi-hat per kit convention. Ride on top line.
+  ('CrashCymbals', None): ('A5', _KIT_VOICE_HANDS, 'x'),
+  ('RideCymbals', None): ('F5', _KIT_VOICE_HANDS, 'x'),
 }
 
 
 def _kit_lookup(inst):
-  """Return (kit_pitch, voice, notehead) for a percussion instrument, or
-  None if the instrument isn't a recognized percussion class. Falls back
-  through (class_name, percMapPitch) → (class_name, None) so an
-  unrecognized percMapPitch within a known class still gets a sane
-  default."""
+  """Return (display_position, voice, notehead) for a percussion
+  instrument, or None if the instrument isn't a recognized percussion
+  class. Falls back through (class_name, percMapPitch) → (class_name,
+  None) so an unrecognized percMapPitch within a known class still
+  gets a sane default.
+
+  v0.2.145 — first value is now a DISPLAY POSITION (e.g. 'C5' = snare
+  middle line) for note.Unpitched.displayName, not a literal pitch.
+  """
   if inst is None:
     return None
   cls = type(inst).__name__
@@ -882,24 +902,30 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
   voice_feet = stream.Voice()
   voice_feet.id = '2'
 
-  # Walk each percussion Part's notes; for each, look up kit position +
-  # voice + notehead; insert into the appropriate voice at the same
-  # offset.
+  # Walk each percussion Part's notes; for each, look up the display
+  # position + voice + notehead; insert into the appropriate voice at
+  # the same offset.
+  #
+  # v0.2.145 — uses note.Unpitched with displayName= so the MusicXML
+  # output carries <unpitched> + <display-step> + <display-octave>
+  # tags. Verovio honors these for kit-convention staff positioning;
+  # pre-v0.2.145 used note.Note with literal pitches which Verovio
+  # positioned at their absolute pitch instead.
   for src_part in percussion_parts:
     src_inst = src_part.getInstrument(returnDefault=False)
     src_spec = _kit_lookup(src_inst)
     if src_spec is None:
       # Unknown percussion class; default to hands voice with normal
       # notehead at staff middle line.
-      src_spec = ('E2', _KIT_VOICE_HANDS, 'normal')
-    kit_pitch, voice_id, notehead_type = src_spec
+      src_spec = ('C5', _KIT_VOICE_HANDS, 'normal')
+    display_pos, voice_id, notehead_type = src_spec
     # Flatten so we walk Measures, Voices, etc. uniformly.
     for src_note in src_part.recurse().notes:
-      # Preserve the original ID + instrument reference. music21 Notes
-      # carry editorial dicts; stash the source instrument so MIDI
-      # export (which reads instrument context per note) still sees the
-      # right percussion channel routing.
-      new_note = note.Note(kit_pitch)
+      # Preserve the original ID + instrument reference. Unpitched
+      # carries editorial dicts; stash the source instrument so MIDI
+      # export (which reads instrument context per note) still sees
+      # the right percussion channel routing.
+      new_note = note.Unpitched(displayName=display_pos)
       new_note.quarterLength = src_note.quarterLength
       if src_note.id is not None:
         new_note.id = src_note.id

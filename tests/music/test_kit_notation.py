@@ -108,7 +108,11 @@ def test_to_kit_notation_passthrough_on_percussion_less_score():
 
 def test_to_kit_notation_kick_only_produces_voice_2_only():
   """Kick-only Part → output kit staff has voice 2 (feet, stems-down)
-  populated; voice 1 (hands) empty."""
+  populated; voice 1 (hands) empty.
+
+  v0.2.145 — display position is F4 (just below the staff per kit
+  convention), not B1 like the v0.2.143 literal-pitch version.
+  """
   score = stream.Score()
   score.append(_make_perc_part(kick, [('B2', 1.0), ('B2', 1.0)]))
   out = to_kit_notation(score)
@@ -121,8 +125,9 @@ def test_to_kit_notation_kick_only_produces_voice_2_only():
   # Stems down for voice 2.
   for n in notes_by_voice['2']:
     assert n.stemDirection == 'down'
-  # Pitch B1 (kit-staff position for kick).
-  assert notes_by_voice['2'][0].pitch.nameWithOctave == 'B1'
+  # v0.2.145 — Unpitched displayName F4 (kit-convention kick position).
+  assert isinstance(notes_by_voice['2'][0], note.Unpitched)
+  assert notes_by_voice['2'][0].displayName == 'F4'
 
 
 def test_to_kit_notation_snare_only_produces_voice_1_only():
@@ -133,8 +138,9 @@ def test_to_kit_notation_snare_only_produces_voice_1_only():
   notes_by_voice = _all_kit_notes(kit)
   assert len(notes_by_voice['1']) == 1
   assert len(notes_by_voice['2']) == 0
-  # Snare on middle line = E2.
-  assert notes_by_voice['1'][0].pitch.nameWithOctave == 'E2'
+  # v0.2.145 — Unpitched displayName C5 (snare middle line).
+  assert isinstance(notes_by_voice['1'][0], note.Unpitched)
+  assert notes_by_voice['1'][0].displayName == 'C5'
   assert notes_by_voice['1'][0].stemDirection == 'up'
 
 
@@ -150,9 +156,9 @@ def test_to_kit_notation_multi_instrument_kick_snare_hihat():
   notes_by_voice = _all_kit_notes(kit)
   assert len(notes_by_voice['1']) == 2  # snare + hihat
   assert len(notes_by_voice['2']) == 1  # kick
-  # Hihat (G2) gets x-notehead; snare (E2) normal.
-  hihat_notes = [n for n in notes_by_voice['1'] if n.pitch.nameWithOctave == 'G2']
-  snare_notes = [n for n in notes_by_voice['1'] if n.pitch.nameWithOctave == 'E2']
+  # v0.2.145 — hihat displayName G5 (above staff); snare C5 (middle).
+  hihat_notes = [n for n in notes_by_voice['1'] if n.displayName == 'G5']
+  snare_notes = [n for n in notes_by_voice['1'] if n.displayName == 'C5']
   assert len(hihat_notes) == 1
   assert len(snare_notes) == 1
   assert hihat_notes[0].notehead == 'x'
@@ -249,3 +255,48 @@ def test_to_kit_notation_includes_percussion_clef_in_kit_part():
   kit = list(out.getElementsByClass(stream.Part))[0]
   clefs = list(kit.getElementsByClass(clef.PercussionClef))
   assert len(clefs) == 1
+
+
+# =====================================================================
+# v0.2.145 — Unpitched migration sanity checks (per v0345 §3.2)
+# =====================================================================
+
+
+def test_to_kit_notation_uses_unpitched_class():
+  """v0.2.145 — all notes in the kit Part should be note.Unpitched
+  instances (no plain Note). This is the structural guarantee for
+  Verovio engraving: Unpitched serializes to <unpitched> + <display-
+  step> + <display-octave> MusicXML, which Verovio honors for kit-
+  convention staff positioning. Pre-v0.2.145 used Note with literal
+  pitches, which Verovio positioned by absolute pitch (driver's
+  spike 2026-06-26 confirmed the failure)."""
+  score = stream.Score()
+  score.append(_make_perc_part(kick, [('B2', 1.0)]))
+  score.append(_make_perc_part(snare, [('E3', 1.0)]))
+  score.append(_make_perc_part(closed_hihat, [('F3', 1.0)]))
+  out = to_kit_notation(score)
+  kit = list(out.getElementsByClass(stream.Part))[0]
+  notes_by_voice = _all_kit_notes(kit)
+  all_notes = notes_by_voice['1'] + notes_by_voice['2']
+  assert len(all_notes) > 0
+  for n in all_notes:
+    assert isinstance(n, note.Unpitched), (
+      f"expected note.Unpitched but got {type(n).__name__}; "
+      f"v0.2.145 Unpitched migration must apply to every kit-staff note")
+
+
+def test_to_kit_notation_unpitched_displayname_is_kit_convention():
+  """v0.2.145 — each note's displayName should match the kit convention
+  position from _KIT_NOTATION_MAP."""
+  score = stream.Score()
+  score.append(_make_perc_part(kick, [('B2', 1.0)]))
+  score.append(_make_perc_part(snare, [('E3', 1.0)]))
+  score.append(_make_perc_part(closed_hihat, [('F3', 1.0)]))
+  out = to_kit_notation(score)
+  kit = list(out.getElementsByClass(stream.Part))[0]
+  notes_by_voice = _all_kit_notes(kit)
+  # Voice 2 has kick at F4.
+  assert notes_by_voice['2'][0].displayName == 'F4'
+  # Voice 1 has snare (C5) + hihat (G5).
+  display_names = sorted(n.displayName for n in notes_by_voice['1'])
+  assert display_names == ['C5', 'G5']
