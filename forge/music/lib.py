@@ -897,84 +897,119 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
   # percussion convention (no pitch, just staff positions).
   kit_part.insert(0, clef.PercussionClef())
 
-  voice_hands = stream.Voice()
-  voice_hands.id = '1'
-  voice_feet = stream.Voice()
-  voice_feet.id = '2'
+  # v0.2.153 — measure-preserving build. Pre-v0.2.153 the kit fold
+  # inserted notes into flat Voices on the kit Part, losing the
+  # canonical Score's Measure structure + TimeSignature. music21
+  # serialized that flat stream to MusicXML without bar boundaries,
+  # leaving Verovio to guess barlines from its own heuristics — which
+  # split each canonical bar into multiple kit bars AND dropped some
+  # notes from MIDI playback (driver smoke against v0.2.152 saw kit
+  # bar 1 = "drum, silent drum" where multi-staff bar 1 = "drum,
+  # silence, drum, silence"). Walking measure-by-measure and rebuilding
+  # voices INSIDE each measure preserves the source's bar layout and
+  # restores 1:1 MIDI playback.
+  template_part = percussion_parts[0]
+  template_measures = list(template_part.getElementsByClass(stream.Measure))
 
-  # Walk each percussion Part's notes; for each, look up the display
-  # position + voice + notehead; insert into the appropriate voice at
-  # the same offset.
-  #
-  # v0.2.145 — uses note.Unpitched with displayName= so the MusicXML
-  # output carries <unpitched> + <display-step> + <display-octave>
-  # tags. Verovio honors these for kit-convention staff positioning;
-  # pre-v0.2.145 used note.Note with literal pitches which Verovio
-  # positioned at their absolute pitch instead.
-  for src_part in percussion_parts:
-    src_inst = src_part.getInstrument(returnDefault=False)
-    src_spec = _kit_lookup(src_inst)
-    if src_spec is None:
-      # Unknown percussion class; default to hands voice with normal
-      # notehead at staff middle line.
-      src_spec = ('C5', _KIT_VOICE_HANDS, 'normal')
-    display_pos, voice_id, notehead_type = src_spec
-    # Flatten so we walk Measures, Voices, etc. uniformly.
-    for src_note in src_part.recurse().notes:
-      # Preserve the original ID + instrument reference. Unpitched
-      # carries editorial dicts; stash the source instrument so MIDI
-      # export (which reads instrument context per note) still sees
-      # the right percussion channel routing.
-      new_note = note.Unpitched(displayName=display_pos)
-      new_note.quarterLength = src_note.quarterLength
-      if src_note.id is not None:
-        new_note.id = src_note.id
-      # v0.2.149 — bind the source Instrument to this note so MIDI
-      # export uses its percMapPitch (kick=35, snare=38, HH-closed=42,
-      # etc.) instead of falling back to the kit Part's generic
-      # UnpitchedPercussion (which has no percMapPitch and yields
-      # MIDI pitch 0 — outside the SoundFont's percussion range 35-81,
-      # producing the silent-drumming bug driver hit on v0.2.148).
-      #
-      # music21's MIDI exporter walks each note's storedInstrument
-      # before falling back to active-site/Part-level instrument
-      # context. Setting it per-note lets a single Part fold notes
-      # from many percussion instruments while preserving each note's
-      # MIDI routing.
-      new_note.storedInstrument = src_inst
-      # Preserve source instrument reference for MIDI walk + any
-      # downstream consumer.
-      # v0.2.147 — initialize editorial.misc if music21's Editorial
-      # class doesn't predefine it. Driver runtime smoke against
-      # v0.2.146 surfaced AttributeError when pyodide-bundled music21
-      # raised on the lazy attribute read (music21's editorial.py has
-      # `predefinedDicts` commented out, so reading `editorial.misc`
-      # before setting it bypasses the dict-membership check and falls
-      # into the AttributeError branch). The membership-check + setattr
-      # pattern works regardless of which music21 version is loaded.
-      if 'misc' not in new_note.editorial:
-        new_note.editorial.misc = {}
-      new_note.editorial.misc['forge_source_instrument'] = src_inst
-      # Stems + noteheads per kit conventions.
-      if voice_id == _KIT_VOICE_HANDS:
-        new_note.stemDirection = 'up'
-      else:
-        new_note.stemDirection = 'down'
-      if notehead_type != 'normal':
-        new_note.notehead = notehead_type
-      # Preserve velocity / dynamics if present.
-      if src_note.volume is not None:
-        new_note.volume = copy.deepcopy(src_note.volume)
-      # Same offset within the part.
-      offset = src_note.getOffsetInHierarchy(src_part)
-      if voice_id == _KIT_VOICE_HANDS:
-        voice_hands.insert(offset, new_note)
-      else:
-        voice_feet.insert(offset, new_note)
+  if not template_measures:
+    # Fallback: hand-built test snippets that lack Measure structure.
+    # The flat-fold path at the bottom of this function (gated on this
+    # `template_measures` check) runs in that case.
+    pass
+  else:
+    for tmpl in template_measures:
+      kit_measure = stream.Measure(number=tmpl.number)
+      # Carry over TimeSignature so Verovio + MusicXML know the bar
+      # length. Without this, music21 emits unmeasured content and
+      # downstream renderers guess bar boundaries.
+      if tmpl.timeSignature is not None:
+        kit_measure.timeSignature = copy.deepcopy(tmpl.timeSignature)
+      # Same for KeySignature (no-op for unpitched percussion but
+      # cheap insurance for mixed pieces).
+      if tmpl.keySignature is not None:
+        kit_measure.keySignature = copy.deepcopy(tmpl.keySignature)
+      v_hands = stream.Voice()
+      v_hands.id = '1'
+      v_feet = stream.Voice()
+      v_feet.id = '2'
+      for src_part in percussion_parts:
+        src_inst = src_part.getInstrument(returnDefault=False)
+        spec = _kit_lookup(src_inst)
+        if spec is None:
+          spec = ('C5', _KIT_VOICE_HANDS, 'normal')
+        disp, voice_id, notehead = spec
+        # Locate this part's measure with the matching number. Some
+        # source parts may not have a measure at every number (e.g.,
+        # silence-only measures sometimes omitted); skip gracefully.
+        src_measure = src_part.measure(tmpl.number)
+        if src_measure is None:
+          continue
+        for src_note in src_measure.recurse().notes:
+          new_note = note.Unpitched(displayName=disp)
+          new_note.quarterLength = src_note.quarterLength
+          if src_note.id is not None:
+            new_note.id = src_note.id
+          new_note.storedInstrument = src_inst
+          if 'misc' not in new_note.editorial:
+            new_note.editorial.misc = {}
+          new_note.editorial.misc['forge_source_instrument'] = src_inst
+          if voice_id == _KIT_VOICE_HANDS:
+            new_note.stemDirection = 'up'
+          else:
+            new_note.stemDirection = 'down'
+          if notehead != 'normal':
+            new_note.notehead = notehead
+          if src_note.volume is not None:
+            new_note.volume = copy.deepcopy(src_note.volume)
+          offset_in_measure = src_note.getOffsetInHierarchy(src_measure)
+          if voice_id == _KIT_VOICE_HANDS:
+            v_hands.insert(offset_in_measure, new_note)
+          else:
+            v_feet.insert(offset_in_measure, new_note)
+      kit_measure.insert(0, v_hands)
+      kit_measure.insert(0, v_feet)
+      kit_part.append(kit_measure)
 
-  # Voice 1 before voice 2 so engraving conventions are respected.
-  kit_part.insert(0, voice_hands)
-  kit_part.insert(0, voice_feet)
+  # v0.2.153 — flat-fold fallback path. Runs ONLY when the source
+  # percussion Parts lack Measure structure (typically hand-built test
+  # snippets). The measure-preserving path above is the normal route
+  # for cohort pieces. Same per-note logic as the measure-preserving
+  # path; just walks notes flat instead of grouping by measure.
+  if not template_measures:
+    voice_hands = stream.Voice()
+    voice_hands.id = '1'
+    voice_feet = stream.Voice()
+    voice_feet.id = '2'
+    for src_part in percussion_parts:
+      src_inst = src_part.getInstrument(returnDefault=False)
+      src_spec = _kit_lookup(src_inst)
+      if src_spec is None:
+        src_spec = ('C5', _KIT_VOICE_HANDS, 'normal')
+      display_pos, voice_id, notehead_type = src_spec
+      for src_note in src_part.recurse().notes:
+        new_note = note.Unpitched(displayName=display_pos)
+        new_note.quarterLength = src_note.quarterLength
+        if src_note.id is not None:
+          new_note.id = src_note.id
+        new_note.storedInstrument = src_inst
+        if 'misc' not in new_note.editorial:
+          new_note.editorial.misc = {}
+        new_note.editorial.misc['forge_source_instrument'] = src_inst
+        if voice_id == _KIT_VOICE_HANDS:
+          new_note.stemDirection = 'up'
+        else:
+          new_note.stemDirection = 'down'
+        if notehead_type != 'normal':
+          new_note.notehead = notehead_type
+        if src_note.volume is not None:
+          new_note.volume = copy.deepcopy(src_note.volume)
+        offset = src_note.getOffsetInHierarchy(src_part)
+        if voice_id == _KIT_VOICE_HANDS:
+          voice_hands.insert(offset, new_note)
+        else:
+          voice_feet.insert(offset, new_note)
+    kit_part.insert(0, voice_hands)
+    kit_part.insert(0, voice_feet)
 
   # Assemble output Score: non-percussion parts in original order +
   # kit Part inserted at the first percussion Part's original index.
