@@ -15,7 +15,16 @@ from __future__ import annotations
 import copy
 from typing import Union
 
-from music21 import clef, instrument, key, meter, note, pitch, stream, tempo
+# v0.2.171 — split the multi-name music21 import so a single missing
+# submodule (e.g. partial pyodide wheel) doesn't kill the whole forge.music.lib
+# import. Each line is independent; if `tempo` (added in v0.2.166) isn't
+# available, the others still load and the chips that don't need tempo still
+# work.
+from music21 import clef, instrument, key, meter, note, pitch, stream
+try:
+  from music21 import tempo
+except ImportError:
+  tempo = None
 
 StreamLike = Union[stream.Score, stream.Part, stream.Measure, stream.Stream]
 

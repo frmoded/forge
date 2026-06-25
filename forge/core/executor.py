@@ -99,6 +99,11 @@ def _domain_globals_for(domains):
   """
   global _FORGE_MUSIC_LIB_NAMES, _DOMAIN_GLOBALS
   if not _FORGE_MUSIC_LIB_NAMES:
+    # Catch the BROAD set of exceptions (not just ImportError) — pyodide
+    # often surfaces partial-wheel issues as AttributeError, ModuleNotFoundError,
+    # or other shapes. v0.2.170's narrow `except ImportError` silently swallowed
+    # whichever shape the driver was hitting; surface the actual exception to
+    # stdout so the runtime log shows the root cause.
     try:
       from forge.music import lib as _music_lib_lazy
       _FORGE_MUSIC_LIB_NAMES = {
@@ -116,8 +121,21 @@ def _domain_globals_for(domains):
       }
       _DOMAIN_GLOBALS = dict(_DOMAIN_GLOBALS)
       _DOMAIN_GLOBALS["music"] = {**_MUSIC21_NAMES, **_FORGE_MUSIC_LIB_NAMES}
-    except ImportError:
-      pass
+      import sys as _sys
+      print(
+        f"Forge: music chips hydrated lazily — "
+        f"{len(_FORGE_MUSIC_LIB_NAMES)} chips registered",
+        file=_sys.stderr,
+      )
+    except Exception as e:
+      import sys as _sys
+      import traceback as _tb
+      print(
+        f"Forge: music-domain lazy hydration FAILED — "
+        f"{type(e).__name__}: {e}",
+        file=_sys.stderr,
+      )
+      _tb.print_exc(file=_sys.stderr)
 
   if domains is None:
     selected = _DOMAIN_GLOBALS.values()
