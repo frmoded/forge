@@ -9,13 +9,20 @@ Public surface:
   transpile(module_ast)          -> str  (Python source)
 """
 
-from .detect import detect_v2_shape, extract_emm_body
+from .detect import (
+    InputDecl,
+    detect_v2_shape,
+    extract_emm_body,
+    extract_inputs_declarations,
+)
 from .parser import Module, parse
 from .transpiler import transpile
 
 __all__ = [
+    "InputDecl",
     "detect_v2_shape",
     "extract_emm_body",
+    "extract_inputs_declarations",
     "Module",
     "parse",
     "transpile",

@@ -101,8 +101,18 @@ class IdentRef:
   name: str
 
 
+@dataclass
+class BoolLit:
+  value: bool
+
+
+@dataclass
+class NoneLit:
+  pass
+
+
 Stmt = Union[LetStmt, ReturnStmt, CallStmt, RepeatStmt, ForEachStmt]
-Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef]
+Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit]
 
 
 # --- Tokenizer ---------------------------------------------------------
@@ -138,14 +148,22 @@ def _tokenize(src: str) -> List[Tok]:
       i += 1; col += 1; continue
     if ch == "\n":
       i += 1; line += 1; col = 1; continue
-    # Wikilink
+    # Wikilink — strict `[[IDENT]]` so `[[0,2,3], [0]]` (nested list
+    # literal as a kwarg value) isn't greedy-matched as a single
+    # wikilink. Bail to two separate OP `[` tokens if the content
+    # between `[[` and the next char isn't a valid identifier start —
+    # the parser treats consecutive `[`s as opening a list-of-lists.
     if src[i:i+2] == "[[":
-      end = src.find("]]", i+2)
-      if end == -1:
-        raise ParseError(f"unclosed wikilink at line {line}, col {col}")
-      name = src[i+2:end].strip()
-      toks.append(Tok("WIKILINK", name, line, col))
-      col += end + 2 - i; i = end + 2; continue
+      probe = i + 2
+      while probe < len(src) and (src[probe].isalnum() or src[probe] == "_"):
+        probe += 1
+      if probe > i + 2 and src[probe:probe+2] == "]]":
+        name = src[i+2:probe]
+        toks.append(Tok("WIKILINK", name, line, col))
+        col += probe + 2 - i; i = probe + 2; continue
+      # Not a valid wikilink — fall through and emit a single `[` OP.
+      toks.append(Tok("OP", "[", line, col))
+      i += 1; col += 1; continue
     # Number — consume `.` only if followed by a digit, so `1.` is
     # NumberLit(1) + OP('.') terminator rather than the malformed "1." token.
     if ch.isdigit() or (ch == "-" and i+1 < len(src) and src[i+1].isdigit()):
@@ -397,8 +415,16 @@ def _parse_expr(toks: List[Tok]) -> Expr:
   # String
   if head.kind == "STRING" and len(toks) == 1:
     return StringLit(value=head.value)
-  # Identifier (variable ref)
+  # Identifier (variable ref) — also handles bool / None literals which
+  # share the IDENT lexing pathway. Python-style casing only (True / False
+  # / None) so the transpile output drops in cleanly as Python.
   if head.kind == "IDENT" and len(toks) == 1:
+    if head.value == "True":
+      return BoolLit(value=True)
+    if head.value == "False":
+      return BoolLit(value=False)
+    if head.value == "None":
+      return NoneLit()
     return IdentRef(name=head.value)
   raise ParseError(f"unrecognized expression starting with {head.value!r}")
 

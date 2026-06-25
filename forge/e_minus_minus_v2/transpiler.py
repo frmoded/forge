@@ -12,6 +12,7 @@ Indentation: 2 spaces per level (matches Forge codebase style).
 """
 
 from .parser import (
+    BoolLit,
     CallStmt,
     ChipCall,
     ForEachStmt,
@@ -20,6 +21,7 @@ from .parser import (
     LetStmt,
     ListLit,
     Module,
+    NoneLit,
     NumberLit,
     RepeatStmt,
     ReturnStmt,
@@ -30,12 +32,33 @@ from .parser import (
 INDENT = "  "
 
 
-def transpile(module: Module) -> str:
-  """Render a Module as Python source wrapped in `def compute(context):`."""
+def transpile(module: Module, inputs=None) -> str:
+  """Render a Module as Python source wrapped in `def compute(context, ...):`.
+
+  Args:
+    module: V2 AST.
+    inputs: optional list of InputDecl from extract_inputs_declarations.
+      When provided, each input becomes a kwarg on the compute signature
+      (with its declared default). The V1 executor passes inputs as
+      kwargs in the same way, so V2 reuses V1's calling convention.
+  """
+  if inputs:
+    kwargs = ", ".join(
+      f"{d.name}={_render_default(d.default)}" if d.has_default else d.name
+      for d in inputs
+    )
+    sig = f"def compute(context, {kwargs}):"
+  else:
+    sig = "def compute(context):"
   body_lines = _render_block(module.statements, depth=1)
   if not body_lines:
     body_lines = [INDENT + "pass"]
-  return "def compute(context):\n" + "\n".join(body_lines) + "\n"
+  return sig + "\n" + "\n".join(body_lines) + "\n"
+
+
+def _render_default(v):
+  """repr() works for ints, floats, strings, bools, None, lists of literals."""
+  return repr(v)
 
 
 def _render_block(stmts, depth):
@@ -92,4 +115,8 @@ def _render_expr(expr) -> str:
     return repr(expr.value)
   if isinstance(expr, IdentRef):
     return expr.name
+  if isinstance(expr, BoolLit):
+    return "True" if expr.value else "False"
+  if isinstance(expr, NoneLit):
+    return "None"
   raise TypeError(f"unknown expression type: {type(expr).__name__}")

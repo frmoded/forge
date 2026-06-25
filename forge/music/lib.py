@@ -15,7 +15,7 @@ from __future__ import annotations
 import copy
 from typing import Union
 
-from music21 import clef, instrument, key, meter, note, pitch, stream
+from music21 import clef, instrument, key, meter, note, pitch, stream, tempo
 
 StreamLike = Union[stream.Score, stream.Part, stream.Measure, stream.Stream]
 
@@ -716,6 +716,105 @@ def show_score(score):
   recipes can write `Let s = build_score. [[show_score]] s. Return s.`
   without losing the value."""
   return score
+
+
+def sequence_list(sections):
+  """v2 — composition chip. E-- has no `*args` syntax, so `sequence(*xs)`
+  isn't callable directly from E--. `[[sequence_list]] with sections=[s1, s2, ...]`
+  unpacks the list and forwards to the V1 `sequence` builder. Returns the
+  concatenated Score with sequentially-renumbered measures + same-instrument
+  staves merged across sections (per sequence's existing contract)."""
+  return sequence(*sections)
+
+
+def play_at_offsets(
+    instrument,
+    offsets,
+    duration=0.25,
+    bars=4,
+    time_signature='4/4',
+    tempo_bpm=96,
+    velocity=None,
+    mark_dynamics=False,
+):
+  """v2 — composite percussion-part chip for the percussion_lab section
+  shape. Builds a music21 Part with `bars` Measure objects, each
+  carrying hits at the given offsets (in quarterLengths within the
+  bar, 0-indexed: beat 1 = offset 0.0). Measure 1 carries the
+  TimeSignature + MetronomeMark; subsequent bars inherit.
+
+  Args:
+    instrument: percussion factory output (kick(), snare(), etc.) —
+      Part-level instrument for channel-10 routing.
+    offsets: either
+      (a) flat list [0, 2] — same pattern every bar, OR
+      (b) list of lists [[0, 2], [0, 1, 2]] — per-bar variation,
+          cycled when `bars` exceeds `len(offsets)`.
+    duration: per-hit quarterLength (default 0.25 = 16th note).
+    bars: total bars in this Part.
+    time_signature: e.g. '4/4'. Inserted on measure 1.
+    tempo_bpm: MetronomeMark BPM on measure 1.
+    velocity: int (1-127) for fixed velocity, OR string profile name
+      ('human', 'crescendo', 'decrescendo', etc.) — wraps with_velocity.
+      None = leave velocities at music21 defaults.
+    mark_dynamics: when True and velocity is set, insert a visible
+      dynamic mark on the first note (per v0.3.8 with_velocity contract).
+
+  Returns:
+    music21.stream.Part with the instrument + bars measures of hits.
+    Notes' pitch.midi normalized to instrument.percMapPitch so MIDI
+    export lands on the correct channel-10 drum slot (per v0.2.159).
+  """
+  # Normalize offsets to a per-bar list (list of lists).
+  if not offsets:
+    bar_patterns = [[]] * bars
+  else:
+    is_nested = isinstance(offsets[0], (list, tuple))
+    if is_nested:
+      # Cycle the pattern if bars > len(offsets); truncate if bars < len.
+      bar_patterns = [
+        list(offsets[i % len(offsets)]) for i in range(bars)
+      ]
+    else:
+      bar_patterns = [list(offsets)] * bars
+
+  ts_obj = meter.TimeSignature(time_signature)
+  mm_obj = tempo.MetronomeMark(number=tempo_bpm)
+  bar_ql = ts_obj.barDuration.quarterLength
+  pmp = getattr(instrument, 'percMapPitch', None)
+
+  part = stream.Part()
+  part.append(instrument)
+  built_notes = []
+  for bar_idx in range(bars):
+    m = stream.Measure(number=bar_idx + 1)
+    if bar_idx == 0:
+      m.append(copy.deepcopy(ts_obj))
+      m.append(copy.deepcopy(mm_obj))
+    cursor = 0.0
+    sorted_offs = sorted(bar_patterns[bar_idx])
+    for off in sorted_offs:
+      if off > cursor:
+        m.append(note.Rest(quarterLength=off - cursor))
+        cursor = off
+      n = note.Note('C4', quarterLength=duration)
+      if pmp is not None:
+        try:
+          n.pitch.midi = pmp
+        except Exception:
+          pass
+      m.append(n)
+      built_notes.append(n)
+      cursor += duration
+    if cursor < bar_ql:
+      m.append(note.Rest(quarterLength=bar_ql - cursor))
+    part.append(m)
+
+  # Velocity post-processing.
+  if velocity is not None and built_notes:
+    with_velocity(built_notes, velocity, mark_dynamics=mark_dynamics)
+
+  return part
 
 
 def snare():

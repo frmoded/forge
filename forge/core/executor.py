@@ -53,6 +53,10 @@ try:
     # v2-spike — V2 high-level chips per v2-spec §16
     "play_at_beats": _music_lib.play_at_beats,
     "show_score": _music_lib.show_score,
+    # v2-migration §3 Phase 1 — composite percussion-section chip
+    "play_at_offsets": _music_lib.play_at_offsets,
+    # v2-migration §3 — variadic-list wrapper for sequence()
+    "sequence_list": _music_lib.sequence_list,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}
@@ -508,11 +512,13 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False):
   try:
     from forge.e_minus_minus_v2 import detect_v2_shape as _v2_detect
     from forge.e_minus_minus_v2 import extract_emm_body as _v2_extract
+    from forge.e_minus_minus_v2 import extract_inputs_declarations as _v2_inputs
     from forge.e_minus_minus_v2 import parse as _v2_parse
     from forge.e_minus_minus_v2 import transpile as _v2_transpile
     if _v2_detect(snippet["body"]):
       emm = _v2_extract(snippet["body"])
-      return _v2_transpile(_v2_parse(emm))
+      inputs = _v2_inputs(snippet["body"])
+      return _v2_transpile(_v2_parse(emm), inputs=inputs)
   except ImportError:
     pass
 

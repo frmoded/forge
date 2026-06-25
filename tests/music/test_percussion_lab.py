@@ -327,10 +327,16 @@ def test_wake_has_brief_peak_relative_to_fade(run_music_block):
     wake_path = os.path.join(vault, "percussion_lab", "wake.md")
     with open(wake_path, "r", encoding="utf-8") as fh:
         body = fh.read()
-    # Pattern: context.compute("name", bars=N)
+    # Pattern: V1 `context.compute("name", bars=N)` OR V2 `Call [[name]] with bars=N.`
+    # Post-V2-migration the file uses the V2 dialect; keep both regexes so the
+    # test remains stable across the migration arc.
     matches = dict(
         re.findall(r'context\.compute\(\s*"([a-z_]+)"\s*,\s*bars=(\d+)', body)
     )
+    if not matches:
+        matches = dict(
+            re.findall(r'Call\s+\[\[([a-z_]+)\]\]\s+with\s+bars=(\d+)', body)
+        )
     assert matches.get("peak") == "2", (
         f"wake's peak section should be bars=2 (brief recall); "
         f"got bars={matches.get('peak')}"
