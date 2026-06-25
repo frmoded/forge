@@ -70,6 +70,30 @@ try:
 except ImportError:
   _FORGE_MODA_NAMES = {}
 
+# V2 moda chip library (parallel to _FORGE_MUSIC_LIB_NAMES). Cohort V2
+# snippets `Call [[advance_positions]] with ...` etc; the transpiler
+# emits direct function calls that resolve against these names.
+try:
+  from forge.moda import lib as _moda_lib
+  _FORGE_MODA_LIB_NAMES = {
+    "temperature_to_speed": _moda_lib.temperature_to_speed,
+    "create_chamber": _moda_lib.create_chamber,
+    "create_water_particles": _moda_lib.create_water_particles,
+    "create_ink_particles": _moda_lib.create_ink_particles,
+    "advance_positions": _moda_lib.advance_positions,
+    "bounce_off_walls": _moda_lib.bounce_off_walls,
+    "bounce_off_pairs": _moda_lib.bounce_off_pairs,
+    "detect_collisions": _moda_lib.detect_collisions,
+    "set_speed_for_type": _moda_lib.set_speed_for_type,
+    "set_mass_for_type": _moda_lib.set_mass_for_type,
+    "group_clicks_by_tick": _moda_lib.group_clicks_by_tick,
+    "apply_clicks_at_tick": _moda_lib.apply_clicks_at_tick,
+    "random_name": _moda_lib.random_name,
+    "show_simulation": _moda_lib.show_simulation,
+  }
+except ImportError:
+  _FORGE_MODA_LIB_NAMES = {}
+
 # Domain-scoped global injection (constitution B9 / domain-scoping).
 # Each domain's pre-injected names register under its domain key,
 # mirroring the prompt-fragment registry. The base names (random,
@@ -77,7 +101,7 @@ except ImportError:
 # only these domain bundles are gated.
 _DOMAIN_GLOBALS = {
   "music": {**_MUSIC21_NAMES, **_FORGE_MUSIC_LIB_NAMES},
-  "moda": _FORGE_MODA_NAMES,
+  "moda": {**_FORGE_MODA_NAMES, **_FORGE_MODA_LIB_NAMES},
 }
 
 
@@ -97,7 +121,7 @@ def _domain_globals_for(domains):
   because pyodide's wheel mount happens AFTER executor.py's top-level
   try/except already cached an empty bundle.
   """
-  global _FORGE_MUSIC_LIB_NAMES, _DOMAIN_GLOBALS
+  global _FORGE_MUSIC_LIB_NAMES, _FORGE_MODA_LIB_NAMES, _DOMAIN_GLOBALS
   if not _FORGE_MUSIC_LIB_NAMES:
     # Catch the BROAD set of exceptions (not just ImportError) — pyodide
     # often surfaces partial-wheel issues as AttributeError, ModuleNotFoundError,
@@ -132,6 +156,51 @@ def _domain_globals_for(domains):
       import traceback as _tb
       print(
         f"Forge: music-domain lazy hydration FAILED — "
+        f"{type(e).__name__}: {e}",
+        file=_sys.stderr,
+      )
+      _tb.print_exc(file=_sys.stderr)
+
+  # Parallel lazy hydration for moda. Same root cause: forge.moda.lib
+  # imports numpy at top-level, and pyodide's numpy wheel mount can
+  # happen *after* executor.py's module-load try/except runs.
+  if not _FORGE_MODA_LIB_NAMES:
+    try:
+      from forge.moda import lib as _moda_lib_lazy
+      from forge.moda.types import (
+        Particle as _ModaParticleLazy,
+        ParticleState as _ModaParticleStateLazy,
+      )
+      _FORGE_MODA_LIB_NAMES = {
+        name: getattr(_moda_lib_lazy, name)
+        for name in (
+          "temperature_to_speed",
+          "create_chamber", "create_water_particles", "create_ink_particles",
+          "advance_positions", "bounce_off_walls", "bounce_off_pairs",
+          "detect_collisions",
+          "set_speed_for_type", "set_mass_for_type",
+          "group_clicks_by_tick", "apply_clicks_at_tick",
+          "random_name", "show_simulation",
+        )
+        if hasattr(_moda_lib_lazy, name)
+      }
+      _DOMAIN_GLOBALS = dict(_DOMAIN_GLOBALS)
+      _DOMAIN_GLOBALS["moda"] = {
+        "Particle": _ModaParticleLazy,
+        "ParticleState": _ModaParticleStateLazy,
+        **_FORGE_MODA_LIB_NAMES,
+      }
+      import sys as _sys
+      print(
+        f"Forge: moda chips hydrated lazily — "
+        f"{len(_FORGE_MODA_LIB_NAMES)} chips registered",
+        file=_sys.stderr,
+      )
+    except Exception as e:
+      import sys as _sys
+      import traceback as _tb
+      print(
+        f"Forge: moda-domain lazy hydration FAILED — "
         f"{type(e).__name__}: {e}",
         file=_sys.stderr,
       )
