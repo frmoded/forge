@@ -347,7 +347,11 @@ def read_data_snippet(snippet):
   )
   meta = snippet["meta"]
   snippet_id = snippet["snippet_id"]
-  content_type = meta.get("content_type")
+  # v2-spec §3.4 — V2 data notes declare format via `body_format:`.
+  # V1 used `content_type:`. Honor both so V1 + V2 notes coexist; the
+  # tutorial migration to V2 (v0.2.167) hit this gap because data
+  # notes' `body_format: json` previously raised "no content_type".
+  content_type = meta.get("content_type") or meta.get("body_format")
   if not content_type:
     raise ValueError(
       f"data snippet '{snippet_id}' has no content_type in frontmatter")
