@@ -108,6 +108,55 @@ _DOMAIN_GLOBALS = {
 
 _music_hydration_logged = False
 _moda_hydration_logged = False
+_music_chips_diagnostic_logged = False
+
+
+def _diagnose_music_chips_empty(domains, where: str) -> None:
+  """Called when music_active but _FORGE_MUSIC_LIB_NAMES is empty during
+  exec — surfaces the runtime state to console.error so the cause of the
+  empty bundle is visible without having to capture the pyodide bootstrap
+  log. Fires at most ONCE per session via the diagnostic-logged sentinel.
+
+  Logged state covers the wheel-mount layer (filesystem state) AND the
+  Python import layer (whether music21 imports cleanly + whether
+  forge.music.lib imports + whether play_at_offsets is reachable),
+  so a glance at the output identifies the broken hop.
+  """
+  global _music_chips_diagnostic_logged
+  if _music_chips_diagnostic_logged:
+    return
+  _music_chips_diagnostic_logged = True
+  import sys, os
+  out = sys.stderr
+  print("=== Forge music-chip-empty diagnostic ===", file=out)
+  print(f"  triggered from: {where}", file=out)
+  print(f"  active domains: {domains!r}", file=out)
+  print(f"  hydration logged (suppresses further logs): {_music_hydration_logged}", file=out)
+  print(f"  _FORGE_MUSIC_LIB_NAMES count: {len(_FORGE_MUSIC_LIB_NAMES)}", file=out)
+  print(f"  /bundle/wheels exists: {os.path.isdir('/bundle/wheels')}", file=out)
+  if os.path.isdir("/bundle/wheels"):
+    contents = sorted(os.listdir("/bundle/wheels"))
+    print(f"    /bundle/wheels: {len(contents)} entries; first 5: {contents[:5]}", file=out)
+  print(f"  /bundle/site-packages exists: {os.path.isdir('/bundle/site-packages')}", file=out)
+  if os.path.isdir("/bundle/site-packages"):
+    sp = sorted(os.listdir("/bundle/site-packages"))
+    print(f"    /bundle/site-packages: {len(sp)} entries; first 5: {sp[:5]}", file=out)
+    print(f"    music21 dir in site-packages: {'music21' in sp}", file=out)
+  print(f"  sys.path[:3]: {sys.path[:3]}", file=out)
+  try:
+    import music21
+    v = getattr(music21, "VERSION_STR", None) or getattr(music21, "__version__", "?")
+    print(f"  `import music21` → OK (version={v})", file=out)
+  except Exception as e:
+    print(f"  `import music21` → FAILED: {type(e).__name__}: {e}", file=out)
+  try:
+    from forge.music import lib as _probe_lib
+    print(f"  `from forge.music import lib` → OK", file=out)
+    print(f"    has play_at_offsets: {hasattr(_probe_lib, 'play_at_offsets')}", file=out)
+    print(f"    has kick: {hasattr(_probe_lib, 'kick')}", file=out)
+  except Exception as e:
+    print(f"  `from forge.music import lib` → FAILED: {type(e).__name__}: {e}", file=out)
+  print("=== end Forge music-chip-empty diagnostic ===", file=out)
 
 
 def _domain_globals_for(domains):
@@ -248,6 +297,13 @@ def _domain_globals_for(domains):
           file=_sys.stderr,
         )
         _tb.print_exc(file=_sys.stderr)
+
+  # v0.2.181 — if music is active but the chip dict is STILL empty after
+  # the retry above, fire a one-shot diagnostic so the cause shows up in
+  # the snippet's stderr trace at the moment of failure (no need to scroll
+  # back to the pyodide bootstrap log to find it).
+  if music_active and not _FORGE_MUSIC_LIB_NAMES:
+    _diagnose_music_chips_empty(domains, where="_domain_globals_for")
 
   if domains is None:
     selected = _DOMAIN_GLOBALS.values()
