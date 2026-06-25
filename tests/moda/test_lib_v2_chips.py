@@ -401,6 +401,24 @@ def test_random_name_default_length():
 
 
 # ---------------------------------------------------------------------------
+# tick_range
+# ---------------------------------------------------------------------------
+
+def test_tick_range_returns_list():
+    assert lib.tick_range(5) == [0, 1, 2, 3, 4]
+
+
+def test_tick_range_zero_empty():
+    assert lib.tick_range(0) == []
+
+
+def test_tick_range_accepts_float_n():
+    # E-- numeric literals may transpile to float; tick_range should
+    # tolerate that without breaking the For-each loop.
+    assert lib.tick_range(3.0) == [0, 1, 2]
+
+
+# ---------------------------------------------------------------------------
 # show_simulation
 # ---------------------------------------------------------------------------
 
@@ -429,7 +447,7 @@ def test_moda_chips_registered_in_executor_domain_globals():
         "detect_collisions",
         "set_speed_for_type", "set_mass_for_type",
         "group_clicks_by_tick", "apply_clicks_at_tick",
-        "random_name", "show_simulation",
+        "random_name", "show_simulation", "tick_range",
         # Existing names from _FORGE_MODA_NAMES still present.
         "Particle", "ParticleState",
     ):

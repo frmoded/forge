@@ -90,6 +90,7 @@ try:
     "apply_clicks_at_tick": _moda_lib.apply_clicks_at_tick,
     "random_name": _moda_lib.random_name,
     "show_simulation": _moda_lib.show_simulation,
+    "tick_range": _moda_lib.tick_range,
   }
 except ImportError:
   _FORGE_MODA_LIB_NAMES = {}
@@ -180,7 +181,7 @@ def _domain_globals_for(domains):
           "detect_collisions",
           "set_speed_for_type", "set_mass_for_type",
           "group_clicks_by_tick", "apply_clicks_at_tick",
-          "random_name", "show_simulation",
+          "random_name", "show_simulation", "tick_range",
         )
         if hasattr(_moda_lib_lazy, name)
       }

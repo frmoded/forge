@@ -371,6 +371,17 @@ def random_name(n=5):
     return "".join(random.choices(string.ascii_lowercase, k=int(n)))
 
 
+def tick_range(n):
+    """Return `[0, 1, ..., n-1]` as a plain Python list. Workaround for
+    V2 parser's missing `range(N)` support — used as the iterable in
+    `For each tick in Call [[tick_range]] with n=300:` constructions.
+
+    Returning a list (not a range) keeps the For-each transpiler happy
+    and keeps the iteration eager-evaluated; simulation.md's 300-tick
+    loop is trivially small."""
+    return list(range(int(n)))
+
+
 def show_simulation(state):
     """Render the simulation iframe with the given final ParticleState.
 
