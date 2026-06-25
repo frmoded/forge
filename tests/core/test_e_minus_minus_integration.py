@@ -41,19 +41,26 @@ def _snippet(body, snippet_id="test/sample"):
 
 # --- resolve_action_code ---
 
-def test_python_facet_present_returns_verbatim():
-    """When `# Python` is present AND english_hash matches (or no
-    english_hash + no # English to hash), the engine returns the
-    cached Python directly. This test has no english_hash to
-    validate against and no English heading; the cached Python is
-    returned because edit_mode is `english` (default) but
-    stored_hash is None so the cache check falls through and the
-    transpile path takes over — but since there's no English, the
-    transpile path also returns None... actually this exercises a
-    different branch.
+def test_python_facet_without_english_hash_returns_verbatim():
+    """When `# Python` is present AND no `english_hash` is stored
+    (legacy snippet or hand-authored Python from before the
+    english_hash invalidation contract), the engine returns the
+    cached Python directly per the v0.2.121 legacy preservation
+    rule. See `resolve_action_code` docstring: "If english_hash
+    is ABSENT → no invalidation contract on this snippet; return
+    the cached code."
 
-    For the cache-hit semantic test, use a body with both # English
-    and matching english_hash. See test_cache_hit_with_matching_hash.
+    This preserves backward compatibility for snippets predating
+    the english_hash mechanism. Modern snippets use one of:
+      - `english_hash` for cache-validated freshness (see
+        test_cache_hit_when_english_hash_matches)
+      - `edit_mode: python` for explicit author-canonical Python
+      - V2 `# E--` facet for transpiled-recipe authoring
+
+    Pre-v0.2.182 this test had a stale assertion (`code is None`)
+    inherited from a docstring that admitted it was "exercising a
+    different branch." Fixed to match the documented + implemented
+    legacy preservation behavior.
     """
     body = (
         "# Python\n"
@@ -62,15 +69,9 @@ def test_python_facet_present_returns_verbatim():
         '  print("hi")\n'
         '```\n'
     )
-    # No # English → engine falls through to transpile path which
-    # then returns None (no English to transpile).
     code = resolve_action_code(_snippet(body))
-    # With v0.2.121 semantics + no english_hash + no # English,
-    # the engine cannot validate cache and cannot transpile, so it
-    # returns None. The plugin falls back to /generate. (This is a
-    # documentary test of the new behavior; the practical case is
-    # covered by the cache-hit + transpile tests below.)
-    assert code is None
+    assert code is not None
+    assert 'print("hi")' in code
 
 
 def test_cache_hit_when_english_hash_matches():
