@@ -88,7 +88,37 @@ def _domain_globals_for(domains):
                        not declare `domains` in forge.toml).
   domains is []    -> {} (core-only: just the base names).
   domains is [...] -> only those domains' bundles.
+
+  v0.2.170 — when the music bundle is empty (because forge.music.lib
+  failed to import at executor-load time, typically because music21
+  wheels hadn't been mounted into pyodide yet), retry the import here
+  at call time. Driver smoke v0.2.169: murmuration crashed inside a
+  nested snippet exec with `NameError: play_at_offsets is not defined`
+  because pyodide's wheel mount happens AFTER executor.py's top-level
+  try/except already cached an empty bundle.
   """
+  global _FORGE_MUSIC_LIB_NAMES, _DOMAIN_GLOBALS
+  if not _FORGE_MUSIC_LIB_NAMES:
+    try:
+      from forge.music import lib as _music_lib_lazy
+      _FORGE_MUSIC_LIB_NAMES = {
+        name: getattr(_music_lib_lazy, name)
+        for name in (
+          "bar", "voices", "voices_canonical", "sequence", "repeat",
+          "minor_pentatonic", "major_pentatonic", "with_velocity",
+          "closed_hihat", "open_hihat", "pedal_hihat",
+          "low_tom", "mid_tom", "high_tom",
+          "crash_cymbal", "ride_cymbal", "kick", "snare",
+          "play_at_beats", "show_score",
+          "play_at_offsets", "sequence_list",
+        )
+        if hasattr(_music_lib_lazy, name)
+      }
+      _DOMAIN_GLOBALS = dict(_DOMAIN_GLOBALS)
+      _DOMAIN_GLOBALS["music"] = {**_MUSIC21_NAMES, **_FORGE_MUSIC_LIB_NAMES}
+    except ImportError:
+      pass
+
   if domains is None:
     selected = _DOMAIN_GLOBALS.values()
   else:
