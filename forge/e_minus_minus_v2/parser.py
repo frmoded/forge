@@ -125,8 +125,20 @@ class NoneLit:
   pass
 
 
+@dataclass
+class SlotExpr:
+  """`{{free english here}}` — an LLM-resolved single expression slot
+  (v2-spec §5.2). Parser produces SlotExpr; transpiler renders it by
+  calling an injected `resolve_slot(text)` callable. The resolver
+  returns a Python expression string that gets substituted at
+  transpile time. Mirrors V1 vendored E--'s `LlmSlot` shape so V2 can
+  reuse the same caching machinery (`forge.core.slot_cache` +
+  `forge-transpile /resolve-slot`)."""
+  text: str   # the free text between {{ and }}, stripped
+
+
 Stmt = Union[LetStmt, ReturnStmt, CallStmt, RepeatStmt, ForEachStmt, IfStmt]
-Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit, BinaryOp]
+Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit, BinaryOp, SlotExpr]
 
 
 # --- Tokenizer ---------------------------------------------------------
@@ -163,6 +175,36 @@ def _tokenize(src: str) -> List[Tok]:
       i += 1; col += 1; continue
     if ch == "\n":
       i += 1; line += 1; col = 1; continue
+    # Slot — `{{ free english here }}`. Greedy-match content between the
+    # opening `{{` and the next `}}`. Empty slot (`{{}}`) is a parse
+    # error (no expression to resolve). Single-line only; newlines
+    # inside a slot raise. Mirrors V1 vendored E--'s LlmSlot lex shape.
+    if src[i:i+2] == "{{":
+      j = i + 2
+      while j < len(src) - 1:
+        if src[j:j+2] == "}}":
+          break
+        if src[j] == "\n":
+          raise ParseError(
+            f"unterminated slot (no closing '}}}}' on line) at line {line}, col {col}"
+          )
+        j += 1
+      else:
+        # Reached end without finding `}}`.
+        raise ParseError(
+          f"unterminated slot (no closing '}}}}') at line {line}, col {col}"
+        )
+      text = src[i+2:j].strip()
+      if not text:
+        raise ParseError(
+          f"empty slot '{{{{}}}}' at line {line}, col {col}"
+        )
+      if "{{" in text:
+        raise ParseError(
+          f"nested slot '{{{{...{{{{...}}}}...}}}}' at line {line}, col {col}"
+        )
+      toks.append(Tok("SLOT", text, line, col))
+      col += j + 2 - i; i = j + 2; continue
     # Wikilink — strict `[[IDENT]]` so `[[0,2,3], [0]]` (nested list
     # literal as a kwarg value) isn't greedy-matched as a single
     # wikilink. Bail to two separate OP `[` tokens if the content
@@ -518,6 +560,10 @@ def _parse_primary(toks: List[Tok]) -> Expr:
     for chunk in _split_top_level(inner, ","):
       items.append(_parse_expr(chunk))
     return ListLit(items=items)
+  # LLM slot — `{{free english}}` resolves to a Python expression at
+  # transpile time via the executor's injected resolve_slot callable.
+  if head.kind == "SLOT" and len(toks) == 1:
+    return SlotExpr(text=head.value)
   # Number
   if head.kind == "NUMBER" and len(toks) == 1:
     return NumberLit(value=_coerce_number(head.value))

@@ -27,6 +27,7 @@ from .parser import (
     NumberLit,
     RepeatStmt,
     ReturnStmt,
+    SlotExpr,
     StringLit,
 )
 
@@ -34,7 +35,18 @@ from .parser import (
 INDENT = "  "
 
 
-def transpile(module: Module, inputs=None) -> str:
+# Module-scoped state for the active resolve_slot callable + an unresolved-
+# slot collector. transpile() sets/clears these around _render_expr so the
+# leaf renderers can reach the resolver without threading it through every
+# call. Mirrors V1 vendored E--'s emitter shape (which passes resolve_slot
+# through every _emit_expr call directly — V2 picks the module-state pattern
+# instead for shorter signatures, since the dialect AST is larger).
+_active_resolve_slot = None
+_active_slot_collector = None
+
+
+def transpile(module: Module, inputs=None, resolve_slot=None,
+              collect_slots=None) -> str:
   """Render a Module as Python source wrapped in `def compute(context, ...):`.
 
   Args:
@@ -43,7 +55,29 @@ def transpile(module: Module, inputs=None) -> str:
       When provided, each input becomes a kwarg on the compute signature
       (with its declared default). The V1 executor passes inputs as
       kwargs in the same way, so V2 reuses V1's calling convention.
+    resolve_slot: optional callable `(slot_text: str) -> str` that returns
+      a Python expression for an LLM-resolved `{{...}}` slot. When None,
+      SlotExpr renders as a placeholder string literal `"<unresolved
+      slot: TEXT>"` so the snippet still parses + transpiles cleanly
+      (the placeholder is the cohort-visible "still needs LLM" marker).
+      When provided, SlotExpr renders to whatever the callable returns
+      — typically a Python literal (`60`, `"red"`, `[1, 2, 3]`).
+    collect_slots: optional list. When provided, every SlotExpr encountered
+      during transpile appends `(slot_text, rendered_python_expr)` to this
+      list — lets callers inventory what slots a recipe needs without
+      having to walk the AST themselves.
   """
+  global _active_resolve_slot, _active_slot_collector
+  _active_resolve_slot = resolve_slot
+  _active_slot_collector = collect_slots
+  try:
+    return _transpile_inner(module, inputs)
+  finally:
+    _active_resolve_slot = None
+    _active_slot_collector = None
+
+
+def _transpile_inner(module: Module, inputs) -> str:
   if inputs:
     kwargs = ", ".join(
       f"{d.name}={_render_default(d.default)}" if d.has_default else d.name
@@ -131,6 +165,17 @@ def _render_expr(expr) -> str:
     return "True" if expr.value else "False"
   if isinstance(expr, NoneLit):
     return "None"
+  if isinstance(expr, SlotExpr):
+    if _active_resolve_slot is not None:
+      rendered = _active_resolve_slot(expr.text)
+    else:
+      # Placeholder shape: a string literal that surfaces clearly in
+      # output if execution proceeds with an unresolved slot. Mirrors
+      # V1 vendored E--'s "resolve at emit time or fail loudly" stance.
+      rendered = repr(f"<unresolved slot: {expr.text}>")
+    if _active_slot_collector is not None:
+      _active_slot_collector.append((expr.text, rendered))
+    return rendered
   if isinstance(expr, BinaryOp):
     return f"({_render_expr(expr.left)} {expr.op} {_render_expr(expr.right)})"
   raise TypeError(f"unknown expression type: {type(expr).__name__}")
