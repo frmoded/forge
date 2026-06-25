@@ -790,6 +790,17 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
     "numpy": numpy,
     **_domain_globals_for(domains),
   }
+  # v0.2.172 diagnostic — ALWAYS print scope summary before exec so we can
+  # see exactly what's available when nested calls fail. Stdout (which we
+  # know is captured by pyodide and shows in DevTools). Removed in v0.2.173+
+  # once root cause is identified.
+  _music_globals = _domain_globals_for(domains)
+  print(
+    f"[Forge scope] snippet_id={snippet_id!r} domains={domains!r} "
+    f"music_globals_count={len(_music_globals)} "
+    f"has_play_at_offsets={'play_at_offsets' in _music_globals} "
+    f"FORGE_MUSIC_LIB_NAMES_count={len(_FORGE_MUSIC_LIB_NAMES)}"
+  )
   old_stdout = sys.stdout
   sys.stdout = buf
   try:
