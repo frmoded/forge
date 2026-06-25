@@ -67,6 +67,20 @@ class ForEachStmt:
 
 
 @dataclass
+class IfStmt:
+  condition: "Expr"
+  then_body: List["Stmt"]
+  else_body: List["Stmt"]   # empty if no Otherwise
+
+
+@dataclass
+class BinaryOp:
+  op: str   # one of '+', '-', '*', '/', '<=', '<', '>=', '>', '==', '!='
+  left: "Expr"
+  right: "Expr"
+
+
+@dataclass
 class ChipCall:
   """Inline call expression: Call [[name]] with k=v, ... — or a bare
   wikilink (when used in expression position) which is `Call [[name]]`
@@ -111,15 +125,16 @@ class NoneLit:
   pass
 
 
-Stmt = Union[LetStmt, ReturnStmt, CallStmt, RepeatStmt, ForEachStmt]
-Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit]
+Stmt = Union[LetStmt, ReturnStmt, CallStmt, RepeatStmt, ForEachStmt, IfStmt]
+Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit, BinaryOp]
 
 
 # --- Tokenizer ---------------------------------------------------------
 
 # Token kinds: KEYWORD, IDENT, NUMBER, STRING, WIKILINK, OP, NEWLINE, INDENT, DEDENT, EOF.
 # Keywords are lexed as IDENT then matched against this set:
-_KEYWORDS = {"Let", "Return", "Call", "with", "Repeat", "times", "For", "each", "in"}
+_KEYWORDS = {"Let", "Return", "Call", "with", "Repeat", "times", "For", "each", "in",
+             "If", "Otherwise"}
 
 
 class ParseError(SyntaxError):
@@ -196,8 +211,12 @@ def _tokenize(src: str) -> List[Tok]:
       kind = "KEYWORD" if word in _KEYWORDS else "IDENT"
       toks.append(Tok(kind, word, line, col))
       col += j - i; i = j; continue
-    # Single-char ops: = , . [ ] :
-    if ch in "=,.[]:":
+    # Multi-char comparison ops: <=, >=, ==, !=
+    if src[i:i+2] in ("<=", ">=", "==", "!="):
+      toks.append(Tok("OP", src[i:i+2], line, col))
+      i += 2; col += 2; continue
+    # Single-char ops: = , . [ ] : + - * / < >
+    if ch in "=,.[]:+-*/<>":
       toks.append(Tok("OP", ch, line, col))
       i += 1; col += 1; continue
     raise ParseError(f"unexpected char {ch!r} at line {line}, col {col}")
@@ -279,6 +298,10 @@ class _Parser:
       self.pos += 1
       header_indent = indent
       return self._parse_foreach_body(toks, header_indent)
+    if head.kind == "KEYWORD" and head.value == "If":
+      self.pos += 1
+      header_indent = indent
+      return self._parse_if_body(toks, header_indent)
     if head.kind == "WIKILINK":
       self.pos += 1
       return self._parse_shorthand_call_body(toks)
@@ -330,6 +353,33 @@ class _Parser:
     body = self._parse_block(base_indent=header_indent + 1)
     return RepeatStmt(count=count, body=body)
 
+  def _parse_if_body(self, toks: List[Tok], header_indent: int) -> IfStmt:
+    # If <expr> :
+    # <indented then-block>
+    # [Otherwise:
+    #   <indented else-block>]
+    if not (toks[-1].kind == "OP" and toks[-1].value == ":"):
+      raise ParseError("expected ':' at end of If header")
+    condition = _parse_expr(toks[1:-1])
+    then_body = self._parse_block(base_indent=header_indent + 1)
+    else_body: List[Stmt] = []
+    # Look-ahead: does the next line at header_indent start with `Otherwise:`?
+    if self.pos < len(self.lines):
+      next_indent, next_text = self.lines[self.pos]
+      if next_indent == header_indent:
+        next_toks = _tokenize(next_text)
+        # strip EOF
+        if next_toks and next_toks[-1].kind == "EOF":
+          next_toks = next_toks[:-1]
+        if (next_toks and next_toks[0].kind == "KEYWORD"
+            and next_toks[0].value == "Otherwise"
+            and len(next_toks) >= 2
+            and next_toks[1].kind == "OP" and next_toks[1].value == ":"):
+          self.pos += 1
+          else_body = self._parse_block(base_indent=header_indent + 1)
+    return IfStmt(condition=condition, then_body=then_body, else_body=else_body)
+
+
   def _parse_foreach_body(self, toks: List[Tok], header_indent: int) -> ForEachStmt:
     # For each IDENT in expr :
     if not (toks[-1].kind == "OP" and toks[-1].value == ":"):
@@ -365,17 +415,76 @@ def _find_keyword(toks: List[Tok], kw: str) -> Optional[int]:
 
 # --- Expression parser -------------------------------------------------
 
-def _parse_expr(toks: List[Tok]) -> Expr:
-  """Parse a single expression from a flat token list. The token list must
-  cover EXACTLY the expression (no trailing terminator).
+_BINOP_PRECEDENCE = {
+  "==": 1, "!=": 1, "<": 1, "<=": 1, ">": 1, ">=": 1,
+  "+": 2, "-": 2,
+  "*": 3, "/": 3,
+}
 
-  Supported forms (greedy, leftmost-first):
-    - Call WIKILINK with kwargs   (chip call)
-    - WIKILINK                    (bare = chip call with no args)
-    - [ ... ]                     (list literal)
-    - NUMBER                      (number literal)
-    - STRING                      (string literal)
-    - IDENT                       (variable reference)
+
+def _parse_expr(toks: List[Tok]) -> Expr:
+  """Parse a single expression from a flat token list. Handles binary
+  operators (arithmetic + comparisons) via precedence climbing — primary
+  expressions (chip calls, literals, identifiers, lists) parse via
+  `_parse_primary` and are then composed with `+`, `-`, `*`, `/`, `==`,
+  `<=`, etc.
+
+  Special case: `Call [[name]] with k=v, k=v` consumes ALL remaining
+  tokens — no top-level binop split. Internal kwarg values can have
+  their own binops; `_parse_kwargs` handles those per-kwarg via
+  `_parse_expr` recursively.
+  """
+  if not toks:
+    raise ParseError("empty expression")
+  if toks[0].kind == "KEYWORD" and toks[0].value == "Call":
+    return _parse_primary(toks)
+  # When a chip call appears later in the expression (e.g.
+  # `n * Call [[f]] with x=1`), the `Call` consumes ALL tokens after it
+  # — internal binops in kwarg values are handled by _parse_kwargs
+  # recursing back into _parse_expr. So when scanning for top-level
+  # binops, we stop at the first `Call` keyword.
+  call_pos = None
+  for i, t in enumerate(toks):
+    if t.kind == "KEYWORD" and t.value == "Call":
+      call_pos = i
+      break
+  binop_scan_end = call_pos if call_pos is not None else len(toks)
+  # Split at the LOWEST-precedence top-level binary operator (right-to-left
+  # so leftmost-grouping wins on equal precedence). Stops at `[` / `]`
+  # nesting depth tracking so list literals' internal commas + comparisons
+  # don't get split.
+  best_idx = -1
+  best_prec = 999
+  depth = 0
+  for i in range(binop_scan_end):
+    t = toks[i]
+    if t.kind == "OP" and t.value == "[":
+      depth += 1; continue
+    if t.kind == "OP" and t.value == "]":
+      depth -= 1; continue
+    if depth > 0:
+      continue
+    if t.kind == "OP" and t.value in _BINOP_PRECEDENCE:
+      # Skip leading `-` (unary negation handled by lexer/primary path).
+      if i == 0 and t.value == "-":
+        continue
+      prec = _BINOP_PRECEDENCE[t.value]
+      if prec <= best_prec:
+        best_idx = i
+        best_prec = prec
+  if best_idx > 0:
+    left = _parse_expr(toks[:best_idx])
+    right = _parse_expr(toks[best_idx+1:])
+    return BinaryOp(op=toks[best_idx].value, left=left, right=right)
+  return _parse_primary(toks)
+
+
+def _parse_primary(toks: List[Tok]) -> Expr:
+  """Parse a primary (non-binary-op) expression. Covers:
+    - Call WIKILINK with kwargs
+    - WIKILINK (bare = parameterless call)
+    - [ ... ] (list literal)
+    - NUMBER / STRING / IDENT / True / False / None
   """
   if not toks:
     raise ParseError("empty expression")

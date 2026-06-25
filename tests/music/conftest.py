@@ -12,7 +12,7 @@ here. Mirrors the moda partition's layout.
 import pytest
 
 from forge.core.registry import SnippetRegistry, GraphResolver
-from forge.core.executor import extract_python, exec_python
+from forge.core.executor import resolve_action_code, exec_python
 
 from tests.music._helpers import _find_vault
 
@@ -41,10 +41,14 @@ def run_music_block(music_resolver):
 
     def _run(snippet_id, *args, **inputs):
         snip = res.resolve(snippet_id)
-        code = extract_python(snip["body"])
+        # Use resolve_action_code so V2 notes (# E-- heading) get parsed
+        # + transpiled via forge.e_minus_minus_v2. V1 notes (# Python or
+        # # English heading) fall through to the legacy path unchanged.
+        code = resolve_action_code(snip)
         _, result = exec_python(
             code, inputs, res, args=args,
             vault_path=vault, registry=reg, snippet_id=snip["snippet_id"],
+            domains=["music"],
         )
         return result
 

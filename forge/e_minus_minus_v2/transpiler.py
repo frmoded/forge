@@ -12,11 +12,13 @@ Indentation: 2 spaces per level (matches Forge codebase style).
 """
 
 from .parser import (
+    BinaryOp,
     BoolLit,
     CallStmt,
     ChipCall,
     ForEachStmt,
     IdentRef,
+    IfStmt,
     Kwarg,
     LetStmt,
     ListLit,
@@ -96,6 +98,16 @@ def _render_stmt(stmt, depth):
       f"{pad}for {stmt.var} in {_render_expr(stmt.iterable)}:",
       *inner,
     ]
+  if isinstance(stmt, IfStmt):
+    then_inner = _render_block(stmt.then_body, depth + 1)
+    if not then_inner:
+      then_inner = [INDENT * (depth + 1) + "pass"]
+    out = [f"{pad}if {_render_expr(stmt.condition)}:", *then_inner]
+    if stmt.else_body:
+      else_inner = _render_block(stmt.else_body, depth + 1)
+      out.append(f"{pad}else:")
+      out.extend(else_inner)
+    return out
   raise TypeError(f"unknown statement type: {type(stmt).__name__}")
 
 
@@ -119,4 +131,6 @@ def _render_expr(expr) -> str:
     return "True" if expr.value else "False"
   if isinstance(expr, NoneLit):
     return "None"
+  if isinstance(expr, BinaryOp):
+    return f"({_render_expr(expr.left)} {expr.op} {_render_expr(expr.right)})"
   raise TypeError(f"unknown expression type: {type(expr).__name__}")
