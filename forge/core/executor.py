@@ -106,8 +106,8 @@ _DOMAIN_GLOBALS = {
 }
 
 
-_music_hydration_tried = False
-_moda_hydration_tried = False
+_music_hydration_logged = False
+_moda_hydration_logged = False
 
 
 def _domain_globals_for(domains):
@@ -134,21 +134,26 @@ def _domain_globals_for(domains):
   second click→ink lag):
   1. Only attempt music hydration when `"music"` is in active domains
      (skip entirely for moda-only or tutorial-only vaults — music21
-     wheels are huge and probing them when the vault never needs music
+     wheels are huge and probing when the vault never needs music
      is pure waste).
-  2. Cache the attempt outcome via `_music_hydration_tried` /
-     `_moda_hydration_tried` sentinels. First call attempts hydration;
-     subsequent calls bypass even if the prior attempt failed. The
-     stderr trace appears ONCE per session, not per chip call.
+  2. Cache the stderr LOG (not the attempt) per domain. v0.2.177 also
+     cached the attempt itself, but that turned out too aggressive:
+     bluh vault's simulation hit a wheel-mount race where music21
+     wasn't ready yet on the first chip call, the failure cached, and
+     a subsequent Forge-click on murmuration (run minutes later, after
+     wheels had mounted) silently used the empty music chip dict →
+     `NameError: play_at_offsets is not defined`. v0.2.178 reverts
+     the attempt-cache and keeps only the log-cache: every call re-
+     attempts the import (so wheel-mount races resolve on their own),
+     but the failure trace prints to stderr at most ONCE per session.
   """
   global _FORGE_MUSIC_LIB_NAMES, _FORGE_MODA_LIB_NAMES, _DOMAIN_GLOBALS
-  global _music_hydration_tried, _moda_hydration_tried
+  global _music_hydration_logged, _moda_hydration_logged
 
   music_active = domains is None or "music" in domains
   moda_active = domains is None or "moda" in domains
 
-  if music_active and not _FORGE_MUSIC_LIB_NAMES and not _music_hydration_tried:
-    _music_hydration_tried = True
+  if music_active and not _FORGE_MUSIC_LIB_NAMES:
     # Catch the BROAD set of exceptions (not just ImportError) — pyodide
     # often surfaces partial-wheel issues as AttributeError, ModuleNotFoundError,
     # or other shapes. v0.2.170's narrow `except ImportError` silently swallowed
@@ -178,21 +183,28 @@ def _domain_globals_for(domains):
         file=_sys.stderr,
       )
     except Exception as e:
-      import sys as _sys
-      import traceback as _tb
-      print(
-        f"Forge: music-domain lazy hydration FAILED — "
-        f"{type(e).__name__}: {e}",
-        file=_sys.stderr,
-      )
-      _tb.print_exc(file=_sys.stderr)
+      # Log the failure trace at most ONCE per session — subsequent
+      # retries (wheel-mount race recovery) stay silent so a 1500-
+      # chip-call simulation doesn't flood the console with duplicate
+      # tracebacks. The retry itself still runs every call until it
+      # succeeds (or the session ends).
+      if not _music_hydration_logged:
+        _music_hydration_logged = True
+        import sys as _sys
+        import traceback as _tb
+        print(
+          f"Forge: music-domain lazy hydration FAILED — "
+          f"{type(e).__name__}: {e} "
+          f"(retries will run silently until music21 is mountable)",
+          file=_sys.stderr,
+        )
+        _tb.print_exc(file=_sys.stderr)
 
   # Parallel lazy hydration for moda. Same root cause: forge.moda.lib
   # imports numpy at top-level, and pyodide's numpy wheel mount can
   # happen *after* executor.py's module-load try/except runs. Same
-  # per-session "try once" + "active-domain gate" guards as music.
-  if moda_active and not _FORGE_MODA_LIB_NAMES and not _moda_hydration_tried:
-    _moda_hydration_tried = True
+  # active-domain gate + log-once-on-failure pattern as music.
+  if moda_active and not _FORGE_MODA_LIB_NAMES:
     try:
       from forge.moda import lib as _moda_lib_lazy
       from forge.moda.types import (
@@ -225,14 +237,17 @@ def _domain_globals_for(domains):
         file=_sys.stderr,
       )
     except Exception as e:
-      import sys as _sys
-      import traceback as _tb
-      print(
-        f"Forge: moda-domain lazy hydration FAILED — "
-        f"{type(e).__name__}: {e}",
-        file=_sys.stderr,
-      )
-      _tb.print_exc(file=_sys.stderr)
+      if not _moda_hydration_logged:
+        _moda_hydration_logged = True
+        import sys as _sys
+        import traceback as _tb
+        print(
+          f"Forge: moda-domain lazy hydration FAILED — "
+          f"{type(e).__name__}: {e} "
+          f"(retries will run silently until numpy is mountable)",
+          file=_sys.stderr,
+        )
+        _tb.print_exc(file=_sys.stderr)
 
   if domains is None:
     selected = _DOMAIN_GLOBALS.values()
