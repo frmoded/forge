@@ -662,6 +662,62 @@ def ride_cymbal():
   return _force_perc_channel(inst, 'Ride Cymbal', 'RD')
 
 
+# v2-spike Phase 1 — high-level chip primitives for E-- recipes (per
+# v2-spec §16). play_at_beats lets a cohort author write `Call
+# [[play_at_beats]] with instrument=kick(), beats=[1, 3]` and get back
+# a music21 Part whose MIDI export lands at the correct channel-10
+# drum slot (kick=35, snare=38, etc.) without relying on the
+# serialization.py percMapPitch normalization downstream.
+
+def play_at_beats(instrument, beats):
+  """Build a music21 Part with one quarter-note hit per beat position.
+
+  Args:
+    instrument: a music21 Instrument (typically from one of the percussion
+      factories above — kick(), snare(), closed_hihat(), etc.). When
+      the instrument has a `percMapPitch` attribute, every note's
+      pitch.midi is set to that value so streamToMidiFile emits the
+      correct drum slot on channel 10 (per the v0.2.159 lesson: music21
+      uses each NOTE's spelled pitch, not the Part instrument's
+      percMapPitch). For non-percussion instruments without percMapPitch,
+      notes default to C4 (spec doesn't pin this; cohort can override
+      via more specialized chips in V2.1).
+    beats: a list of beat positions, 1-indexed (beat 1 = first beat of
+      the bar = offset 0.0). Floats are supported for sub-beat
+      positions ([1, 1.5, 2, 2.5] is straight eighths). An empty list
+      returns a Part with just the instrument attached.
+
+  Returns:
+    music21.stream.Part with the instrument inserted at offset 0 and
+    one quarterLength=1 Note per beat position. Note pitch normalized
+    for percussion as described above.
+  """
+  part = stream.Part()
+  part.insert(0, instrument)
+  pmp = getattr(instrument, 'percMapPitch', None)
+  for beat in beats:
+    offset = float(beat) - 1.0
+    n = note.Note('C4', quarterLength=1.0)
+    if pmp is not None:
+      try:
+        n.pitch.midi = pmp
+      except Exception:
+        pass
+    part.insert(offset, n)
+  return part
+
+
+def show_score(score):
+  """Side-effect chip — surfaces a Score for the plugin to render in
+  Forge Output. For the spike this is a passthrough: the plugin's
+  auto-render fallback (v2-spec §15.4) catches Score returns and
+  renders them, so explicit `[[show_score]]` is for V2.1's multi-
+  destination orchestration. Returns the input unchanged so cohort
+  recipes can write `Let s = build_score. [[show_score]] s. Return s.`
+  without losing the value."""
+  return score
+
+
 def snare():
   """Snare drum. GM note 38 (Acoustic Snare) on channel 10. music21's
   default instrumentName for SnareDrum is 'Snare Drum'; factory keeps

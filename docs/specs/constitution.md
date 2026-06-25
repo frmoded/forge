@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v9)
+# Forge — Core Invariants and Discipline (V2a v10)
 
 ## Mission
 
@@ -233,6 +233,33 @@ declared. Registry-fetched distribution per A5 remains the path
 for v1.1+ vaults not in the bundle. Bundled-vault content updates
 ship via plugin releases; user-edited copies in the vault root take
 precedence via A4 shadowing.
+
+**A5.4.** *Inlined-asset version stamping (added 2026-06-10 per
+v0.2.98; relocated from B10 to A5.4 in V2a v10 — this is a
+distribution/packaging guarantee, sibling to A5.1-A5.3, not engine
+compute behavior).* When the runtime distribution channel does not
+deliver the plugin's `assets/` tree alongside `main.js` (BRAT being
+the canonical example — it pulls only `main.js`, `manifest.json`,
+`styles.css`, `data.json`), the plugin MUST:
+
+1. Inline the required assets into `main.js` at build time and
+   ship a runtime restore step on plugin onload that writes any
+   missing files to disk under `<plugin-dir>/assets/`.
+2. Stamp each inlined-assets bundle with the plugin's manifest
+   version via a `.bundle-version` sentinel file written at the
+   end of every successful restore.
+3. Force-overwrite the entire inlined-asset tree on every plugin
+   onload where the sentinel version does not match the bundle's
+   embedded version. Skip-if-exists guards on individual files
+   are FORBIDDEN — they cause silent staleness when a BRAT update
+   replaces `main.js` but leaves the previously-restored asset
+   tree untouched.
+
+The skip-if-exists antipattern silently broke every plugin update
+between v0.2.91 (first inlined-assets ship) and v0.2.98 (sentinel
+introduction). Any future asset-bundling mechanism MUST follow
+this stamp + force-overwrite pattern; per-file existence checks
+are not a substitute.
 
 **A6.** The plugin renders structured output values by their tagged
 shape (`{type, content}`). Current formats: `musicxml` (rendered via
@@ -512,24 +539,6 @@ is plugin-side (engine never reads `english_hash` for cache
 purposes outside this contract); it shares the same field name as
 the engine's slot-resolution cache key by construction.
 
-**Symmetric facet-mutex invariant (added 2026-06-10 per v0.2.83
-gestural model + v0.2.87 collapse-active completion).** When a
-snippet's `# English` and `# Python` headings are both present in
-the body, the facet-mutex maintains the invariant *exactly one
-facet visible at any time*. Two gestures trigger a flip:
-
-- *Expand inactive*: unfolding the currently-hidden facet flips
-  `edit_mode` to that facet and folds the other.
-- *Collapse active*: folding the currently-visible facet flips
-  `edit_mode` to the OTHER facet and expands it.
-
-Both gestures produce identical post-mutex state. Both-folded and
-both-visible are invalid states; the plugin asserts the invariant
-in a 100ms settle-window watchdog and surfaces violations via
-`console.warn`. The invariant applies only to snippet files whose
-body contains BOTH headings; slot-free canonical snippets (English
-+ Dependencies only, no Python heading) are exempt.
-
 **B8.** Action snippets carry an `edit_mode` (`english` or `python`,
 defaulting to `english`). In `english` mode, the Python facet is
 read-only in the editor and regenerated from English when Forge runs
@@ -557,6 +566,30 @@ predates the B7.3 unification; both happen to hash the English facet
 but serve different consumers. A future consolidation may unify them
 under a single field with two consumers; until then, snippets in
 `edit_mode: python` may carry both fields with the same value.
+
+**Symmetric facet-mutex invariant (added 2026-06-10 per v0.2.83
+gestural model + v0.2.87 collapse-active completion; relocated from
+B7.3 to B8 in V2a v10 — the invariant governs `edit_mode` facet
+visibility, which is B8's concern, not B7.3 slot-caching).** When a
+snippet's `# English` and `# Python` headings are both present in
+the body, the facet-mutex maintains the invariant *exactly one
+facet visible at any time*. Two gestures trigger a flip:
+
+- *Expand inactive*: unfolding the currently-hidden facet flips
+  `edit_mode` to that facet and folds the other.
+- *Collapse active*: folding the currently-visible facet flips
+  `edit_mode` to the OTHER facet and expands it.
+
+Both gestures produce identical post-mutex state. Both-folded and
+both-visible are invalid states; the plugin asserts the invariant
+in a 100ms settle-window watchdog and surfaces violations via
+`console.warn`. This watchdog is a proactive, self-healing invariant
+check — not a caught runtime error — so `console.warn` is intentional
+here and sits outside the scope of the console.error-for-caught-errors
+discipline (cc-prompt-queue.md Hard rules). The invariant applies only
+to snippet files whose body contains BOTH headings; slot-free
+canonical snippets (English + Dependencies only, no Python heading)
+are exempt.
 
 **B9.** *Snippet execution namespace and declared domains.* The
 runtime sandbox blocks `import` statements; snippets cannot pull in
@@ -595,31 +628,6 @@ declared domains govern the whole execution including nested calls;
 per-callee-vault re-scoping is a recoverable future refinement, not a
 v1 guarantee. `forge-core`'s built-in vault is domain-neutral and
 available regardless of declared domains.
-
-**B10.** *Inlined-asset version stamping (added 2026-06-10 per
-v0.2.98).* When the runtime distribution channel does not deliver
-the plugin's `assets/` tree alongside `main.js` (BRAT being the
-canonical example — it pulls only `main.js`, `manifest.json`,
-`styles.css`, `data.json`), the plugin MUST:
-
-1. Inline the required assets into `main.js` at build time and
-   ship a runtime restore step on plugin onload that writes any
-   missing files to disk under `<plugin-dir>/assets/`.
-2. Stamp each inlined-assets bundle with the plugin's manifest
-   version via a `.bundle-version` sentinel file written at the
-   end of every successful restore.
-3. Force-overwrite the entire inlined-asset tree on every plugin
-   onload where the sentinel version does not match the bundle's
-   embedded version. Skip-if-exists guards on individual files
-   are FORBIDDEN — they cause silent staleness when a BRAT update
-   replaces `main.js` but leaves the previously-restored asset
-   tree untouched.
-
-The skip-if-exists antipattern silently broke every plugin update
-between v0.2.91 (first inlined-assets ship) and v0.2.98 (sentinel
-introduction). Any future asset-bundling mechanism MUST follow
-this stamp + force-overwrite pattern; per-file existence checks
-are not a substitute.
 
 ## Data snippets
 
