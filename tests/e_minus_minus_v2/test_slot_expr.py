@@ -178,6 +178,44 @@ def test_transpile_state_cleared_between_calls():
 
 
 # ---------------------------------------------------------------------------
+# v0.2.185 — Top-level `Call [[name]] with ...` as ExprStmt
+# ---------------------------------------------------------------------------
+
+def test_call_at_statement_level_parses():
+  mod = p.parse("Call [[print]] with text=\"hi\".\nReturn.")
+  assert len(mod.statements) == 2
+  stmt = mod.statements[0]
+  assert isinstance(stmt, p.ExprStmt)
+  assert isinstance(stmt.expr, p.ChipCall)
+  assert stmt.expr.name == "print"
+
+
+def test_bare_call_at_statement_level():
+  mod = p.parse("Call [[hello]].\nReturn.")
+  assert isinstance(mod.statements[0], p.ExprStmt)
+  assert isinstance(mod.statements[0].expr, p.ChipCall)
+  assert mod.statements[0].expr.name == "hello"
+  assert mod.statements[0].expr.kwargs == []
+
+
+def test_repeated_call_statements_transpile():
+  """The exact shape the v0.2.184 V2 /generate LLM produced — three
+  side-effect Call statements ending with Return. Pre-v0.2.185 this
+  raised ParseError on 'Call' at statement position."""
+  src = "Call [[hello]].\nCall [[hello]].\nCall [[hello]].\nReturn."
+  out = t.transpile(p.parse(src))
+  assert "hello()" in out
+  assert out.count("hello()") == 3
+  assert "return None" in out
+
+
+def test_call_with_kwargs_at_statement_level_transpiles():
+  src = 'Call [[print]] with text="hi", end="\\n".\nReturn.'
+  out = t.transpile(p.parse(src))
+  assert "print(text='hi', end='\\\\n')" in out or "print(text=\"hi\"" in out
+
+
+# ---------------------------------------------------------------------------
 # Regression: non-slot transpile paths unchanged
 # ---------------------------------------------------------------------------
 

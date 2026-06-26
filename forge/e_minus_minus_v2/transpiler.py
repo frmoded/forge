@@ -16,6 +16,7 @@ from .parser import (
     BoolLit,
     CallStmt,
     ChipCall,
+    ExprStmt,
     ForEachStmt,
     IdentRef,
     IfStmt,
@@ -116,6 +117,10 @@ def _render_stmt(stmt, depth):
     if stmt.arg is None:
       return [f"{pad}{stmt.name}()"]
     return [f"{pad}{stmt.name}({_render_expr(stmt.arg)})"]
+  if isinstance(stmt, ExprStmt):
+    # Top-level `Call [[name]] with k=v.` — render as the expression
+    # on its own line, no assignment. Return value is discarded.
+    return [f"{pad}{_render_expr(stmt.expr)}"]
   if isinstance(stmt, RepeatStmt):
     inner = _render_block(stmt.body, depth + 1)
     if not inner:

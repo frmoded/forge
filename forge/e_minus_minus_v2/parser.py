@@ -54,6 +54,21 @@ class CallStmt:
 
 
 @dataclass
+class ExprStmt:
+  """A top-level expression evaluated for its side effect (typically a
+  `Call [[name]] with ...` whose return value is discarded). v0.2.185 —
+  added because the V2 /generate LLM produced
+      Call [[print]] with text="hi".
+      Call [[print]] with text="bye".
+      Return.
+  and the parser previously rejected `Call` at statement position,
+  forcing every side-effect call to be wrapped in `Let _ = ...`.
+  Transpiler renders ExprStmt as the expression on its own line, no
+  assignment."""
+  expr: "Expr"
+
+
+@dataclass
 class RepeatStmt:
   count: "Expr"
   body: List["Stmt"]
@@ -137,7 +152,7 @@ class SlotExpr:
   text: str   # the free text between {{ and }}, stripped
 
 
-Stmt = Union[LetStmt, ReturnStmt, CallStmt, RepeatStmt, ForEachStmt, IfStmt]
+Stmt = Union[LetStmt, ReturnStmt, CallStmt, ExprStmt, RepeatStmt, ForEachStmt, IfStmt]
 Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit, BinaryOp, SlotExpr]
 
 
@@ -347,6 +362,17 @@ class _Parser:
     if head.kind == "WIKILINK":
       self.pos += 1
       return self._parse_shorthand_call_body(toks)
+    if head.kind == "KEYWORD" and head.value == "Call":
+      # v0.2.185 — `Call [[name]] with k=v, k=v.` at top-level is a
+      # side-effect statement. Parse the whole line (minus trailing
+      # `.`) as a single expression and wrap as ExprStmt. The expr
+      # parser already handles `Call`-prefix chip calls correctly.
+      self.pos += 1
+      expr_toks, _tail = _split_at_terminator(toks, ".")
+      if not expr_toks:
+        raise ParseError("empty Call statement on line {head.line}")
+      expr = _parse_expr(expr_toks)
+      return ExprStmt(expr=expr)
     raise ParseError(f"unexpected start of statement: {head.value!r} on line {head.line}")
 
   # --- Statement bodies (toks is the tokenized form of a single line) ---
