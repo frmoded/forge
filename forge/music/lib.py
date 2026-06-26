@@ -680,6 +680,9 @@ def ride_cymbal():
 
 def play_at_beats(instrument, beats):
   """Build a music21 Part with one quarter-note hit per beat position.
+  `beats` is 1-INDEXED (beat 1 = first beat of the bar = offset 0.0;
+  there is no beat 0). For 0-indexed positions, multi-bar patterns,
+  or non-quarter-note durations, use [[play_at_offsets]] instead.
 
   Args:
     instrument: a music21 Instrument (typically from one of the percussion
@@ -700,7 +703,26 @@ def play_at_beats(instrument, beats):
     music21.stream.Part with the instrument inserted at offset 0 and
     one quarterLength=1 Note per beat position. Note pitch normalized
     for percussion as described above.
+
+  Raises:
+    ValueError: if any beat is < 1 (1-indexed convention). The error
+      message points cohort at [[play_at_offsets]] which IS 0-indexed.
+      Pre-v0.2.200 the catalog's first-paragraph introspection didn't
+      surface the 1-indexed convention, and the LLM happily generated
+      `beats=[0]` (programmer-natural 0-index). That produced
+      offset=-1, music21 raised a cryptic StreamException about a note
+      with start -1.0 not fitting any measure, and cohort hit a
+      traceback they couldn't act on.
   """
+  for beat in beats:
+    if float(beat) < 1:
+      raise ValueError(
+        f"play_at_beats: beats are 1-indexed (beat 1 = first beat of "
+        f"the bar = offset 0.0); got beat={beat!r} which is < 1. "
+        f"Either use beats=[1, ...] for the first beat, or switch to "
+        f"`Call [[play_at_offsets]] with instrument=..., offsets=[0, ...]` "
+        f"for 0-indexed offsets (offset 0 = first beat)."
+      )
   part = stream.Part()
   part.insert(0, instrument)
   pmp = getattr(instrument, 'percMapPitch', None)

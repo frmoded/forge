@@ -115,6 +115,88 @@ class TestPlayAtBeats:
     )
 
 
+class TestPlayAtBeatsZeroIndexGuard:
+  """v0.2.200 regression: bluh forge_music smoke generated
+  `play_at_beats(instrument=kick(), beats=[0])` because the introspector
+  surfaced only the docstring's FIRST PARAGRAPH and pre-fix that
+  paragraph didn't mention 1-indexed. offset became -1, music21 raised
+  `StreamException: cannot place element <Note B> with start/end
+  -1.0/0.0 within any measures` — a traceback cohort couldn't act on.
+
+  Post-v0.2.200 `play_at_beats` validates `beat >= 1` up front and
+  raises a clear ValueError pointing at `play_at_offsets` (the
+  0-indexed sibling)."""
+
+  def test_beat_zero_raises_value_error(self):
+    with pytest.raises(ValueError) as exc_info:
+      play_at_beats(kick(), [0])
+    msg = str(exc_info.value)
+    assert "1-indexed" in msg
+    assert "play_at_offsets" in msg
+
+  def test_negative_beat_raises_value_error(self):
+    with pytest.raises(ValueError) as exc_info:
+      play_at_beats(kick(), [1, -2, 3])
+    assert "1-indexed" in str(exc_info.value)
+
+  def test_beat_one_is_valid(self):
+    # The boundary: beat 1 = first beat = offset 0 = legal.
+    part = play_at_beats(kick(), [1])
+    notes = list(part.recurse().notes)
+    assert len(notes) == 1
+    assert notes[0].offset == 0.0
+
+  def test_float_beat_below_one_raises(self):
+    # Floats are normally valid (e.g. 1.5 for an offbeat), but anything
+    # < 1.0 trips the guard.
+    with pytest.raises(ValueError) as exc_info:
+      play_at_beats(kick(), [0.5])
+    assert "1-indexed" in str(exc_info.value)
+
+  def test_empty_beats_does_not_raise(self):
+    # Per the canonical contract, empty list returns a Part with just
+    # the instrument. The guard must not regress that.
+    part = play_at_beats(kick(), [])
+    assert part is not None
+
+
+class TestPlayAtBeatsDocstringFirstParagraphSurfacesConvention:
+  """v0.2.200 — engine_chip_introspector reads only the first paragraph
+  of the docstring (split on \\n\\n). That's load-bearing for the LLM
+  prompt: if the convention (1-indexed vs 0-indexed) isn't in paragraph
+  one, the LLM defaults to 0-indexed and crashes. Pin both the lib
+  source's first-paragraph content here so a future docstring edit
+  can't silently drop the teaching."""
+
+  def test_play_at_beats_first_paragraph_mentions_1_indexed(self):
+    import ast
+    import inspect
+    src = inspect.getsource(play_at_beats)
+    fn = ast.parse(src).body[0]
+    doc = ast.get_docstring(fn) or ""
+    first_para = doc.split("\n\n", 1)[0]
+    assert "1-indexed" in first_para.lower() or "1-INDEXED" in first_para, (
+      f"play_at_beats first paragraph must mention 1-indexed; got: "
+      f"{first_para!r}"
+    )
+    # Cross-reference to play_at_offsets so the LLM knows which chip
+    # to switch to when it really does want 0-indexed positions.
+    assert "play_at_offsets" in first_para
+
+  def test_play_at_offsets_first_paragraph_mentions_0_indexed(self):
+    import ast
+    import inspect
+    from forge.music.lib import play_at_offsets
+    src = inspect.getsource(play_at_offsets)
+    fn = ast.parse(src).body[0]
+    doc = ast.get_docstring(fn) or ""
+    first_para = doc.split("\n\n", 1)[0]
+    assert "0-indexed" in first_para.lower(), (
+      f"play_at_offsets first paragraph must mention 0-indexed; got: "
+      f"{first_para!r}"
+    )
+
+
 class TestShowScore:
   def test_returns_input(self):
     s = m21_stream.Score()
