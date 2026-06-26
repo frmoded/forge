@@ -42,7 +42,7 @@ def run_music_block(music_resolver):
     def _run(snippet_id, *args, **inputs):
         snip = res.resolve(snippet_id)
         # Use resolve_action_code so V2 notes (# E-- heading) get parsed
-        # + transpiled via forge.e_minus_minus_v2. V1 notes (# Python or
+        # + transpiled via forge.recipe. V1 notes (# Python or
         # # English heading) fall through to the legacy path unchanged.
         code = resolve_action_code(snip)
         _, result = exec_python(

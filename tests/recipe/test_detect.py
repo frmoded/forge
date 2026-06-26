@@ -1,5 +1,5 @@
 """V2-shape detection tests."""
-from forge.e_minus_minus_v2 import detect_v2_shape, extract_emm_body
+from forge.recipe import detect_recipe_shape, extract_recipe_body
 
 
 class TestDetectV2Shape:
@@ -12,11 +12,11 @@ type: action
 
 A test note.
 
-# E--
+# Recipe
 
 Return 1.
 """
-    assert detect_v2_shape(body) is True
+    assert detect_recipe_shape(body) is True
 
   def test_v1_note_not_detected(self):
     body = """---
@@ -34,22 +34,22 @@ def compute(context):
   return 1
 ```
 """
-    assert detect_v2_shape(body) is False
+    assert detect_recipe_shape(body) is False
 
   def test_emm_in_frontmatter_ignored(self):
     body = """---
 type: action
 note: |
-  # E-- snippet here for documentation
+  # Recipe snippet here for documentation
 ---
 
 # English
 
 Just a normal V1 note.
 """
-    assert detect_v2_shape(body) is False
+    assert detect_recipe_shape(body) is False
 
-  def test_extract_emm_body_simple(self):
+  def test_extract_recipe_body_simple(self):
     body = """---
 type: action
 ---
@@ -58,23 +58,23 @@ type: action
 
 A test.
 
-# E--
+# Recipe
 
 Let x = 1.
 Return x.
 """
-    emm = extract_emm_body(body)
+    emm = extract_recipe_body(body)
     assert "Let x = 1." in emm
     assert "Return x." in emm
-    assert "# E--" not in emm
+    assert "# Recipe" not in emm
     assert "# Description" not in emm
 
-  def test_extract_emm_body_stops_at_next_heading(self):
+  def test_extract_recipe_body_stops_at_next_heading(self):
     body = """---
 type: action
 ---
 
-# E--
+# Recipe
 
 Let x = 1.
 Return x.
@@ -83,7 +83,7 @@ Return x.
 
 Some trailing content.
 """
-    emm = extract_emm_body(body)
+    emm = extract_recipe_body(body)
     assert "Let x = 1." in emm
     assert "Some trailing" not in emm
 
@@ -91,4 +91,4 @@ Some trailing content.
     import pytest
     body = "# English\n\nNot a V2 note.\n"
     with pytest.raises(ValueError):
-      extract_emm_body(body)
+      extract_recipe_body(body)

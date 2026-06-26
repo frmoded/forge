@@ -8,8 +8,8 @@ conditional notes) migrate cleanly.
 
 import pytest
 
-from forge.e_minus_minus_v2 import parse, transpile
-from forge.e_minus_minus_v2.parser import (
+from forge.recipe import parse, transpile
+from forge.recipe.parser import (
     BinaryOp,
     ForEachStmt,
     IfStmt,
@@ -97,7 +97,7 @@ class TestTranspileAndExec:
 
   def test_factorial_executes(self):
     """End-to-end: V2 factorial migrates faithfully."""
-    from forge.e_minus_minus_v2 import InputDecl
+    from forge.recipe import InputDecl
     inputs = [InputDecl(name="n", default=5, has_default=True, doc="")]
     py = transpile(parse(
       "If n <= 1:\n"

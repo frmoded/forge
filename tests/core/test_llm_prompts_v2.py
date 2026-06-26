@@ -99,7 +99,7 @@ def test_build_user_prompt_v2_minimal_shape():
     deps=[],
   )
   assert out.startswith(
-    'Generate V2 E-- recipe code for the Forge action note '
+    'Generate V2 Recipe code for the Forge action note '
     '"forge-tutorial/hello_world".'
   )
   assert "Description: Print Hello, world!." in out

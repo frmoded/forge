@@ -3,12 +3,12 @@
 V2 differs from V1 (in `forge.core.llm_prompts`) at every layer:
 
 - **Target language**: the V1 LLM produces Python (`def compute(context):
-  ...`). The V2 LLM produces E-- recipe code (`Let x = Call [[chip]]
+  ...`). The V2 LLM produces Recipe code (`Let x = Call [[chip]]
   with ...`) that the V2 transpiler renders to Python at exec time.
 - **Available callable surface**: V1 calls are `context.compute("name",
   k=v)`. V2 calls are `Call [[name]] with k=v` — wikilink-shaped so the
   recipe stays prose-flavored.
-- **Few-shot examples**: V1's vocabulary (vendored E-- `Do/Set/give-
+- **Few-shot examples**: V1's vocabulary (vendored Recipe `Do/Set/give-
   back`) is gone; V2 examples use the canonical Let/Call/Return shape
   with If/Otherwise and For-each.
 
@@ -25,11 +25,11 @@ from typing import Dict, List, Optional
 
 BASE_SYSTEM_PROMPT_V2 = """You are a recipe generator for V2 Forge action notes.
 
-V2 Forge notes are written in E--, a small declarative dialect. You produce
-ONLY E-- recipe code; the Forge engine transpiles your output to Python
+V2 Forge notes are written in Recipe, a small declarative dialect. You produce
+ONLY Recipe code; the Forge engine transpiles your output to Python
 behind the scenes.
 
-V2 E-- has six statement shapes and a handful of expression shapes. That
+V2 Recipe has six statement shapes and a handful of expression shapes. That
 is the entire dialect — there is no class definition, function definition,
 import, list comprehension, dict comprehension, try/except, while loop, or
 mutation operator.
@@ -86,7 +86,7 @@ in your output.
 
 ## Output rules
 
-1. Output ONLY the body of the `# E--` facet — no fences, no markdown
+1. Output ONLY the body of the `# Recipe` facet — no fences, no markdown
    headings, no commentary, no Description text.
 2. End every statement with a period (`.`).
 3. End the recipe with a `Return ...` statement (or `Return.` if the
@@ -99,7 +99,7 @@ in your output.
 
 Description: Print "Hello, world!".
 
-E--:
+Recipe:
 Call [[print]] with text="Hello, world!".
 Return.
 
@@ -111,7 +111,7 @@ untouched.
 
 Inputs: state, temperature
 
-E--:
+Recipe:
 Let speed = Call [[speed_for_temperature]] with temperature=temperature.
 Let new_state = Call [[set_speed_for_type]] with state=state, particle_type="water", speed=speed.
 Return new_state.
@@ -124,7 +124,7 @@ set their speed for the temperature, set their mass to medium.
 
 Inputs: temperature (default "medium")
 
-E--:
+Recipe:
 Let state = Call [[create_chamber]] with width=800, height=600.
 Let state = Call [[create_water_particles]] with state=state.
 Let state = Call [[set_water_speed]] with state=state, temperature=temperature.
@@ -139,7 +139,7 @@ through unchanged.
 
 Inputs: state, temperature
 
-E--:
+Recipe:
 If temperature == "high":
   Let new_state = Call [[set_speed_high]] with state=state.
   Return new_state.
@@ -152,7 +152,7 @@ bar. mp dynamic (velocity 70). Snare, hi-hats, toms, crash stay silent.
 
 Inputs: bars (default 4)
 
-E--:
+Recipe:
 Let kp = Call [[play_at_offsets]] with instrument=[[kick]], offsets=[0, 2], duration=0.25, bars=bars, velocity=70, mark_dynamics=True.
 Return Call [[voices_canonical]] with kp=kp.
 
@@ -163,7 +163,7 @@ and advancing state each tick. Return the final state.
 
 Inputs: (none — constants live inline)
 
-E--:
+Recipe:
 Let state = Call [[setup]].
 Let clicks = Call [[sample_clicks]].
 Let clicks_by_tick = Call [[group_clicks_by_tick]] with clicks=clicks.
@@ -177,7 +177,7 @@ Return state.
 ## What NOT to do
 
 - Do NOT wrap the output in ```e-- ... ``` fences. Plain text only.
-- Do NOT include `# E--` heading. Just the body.
+- Do NOT include `# Recipe` heading. Just the body.
 - Do NOT use `def compute(context):` or any Python `def` form. V2 is
   declarative; the transpiler builds the compute() wrapper.
 - Do NOT use `context.compute(...)`. Use `Call [[name]] with ...`.
@@ -240,7 +240,7 @@ def build_user_prompt_v2(
   """Build the user-message body for V2 /generate.
 
   The shape mirrors V1's build_user_prompt but:
-  - Asks for E-- recipe code (not Python).
+  - Asks for Recipe code (not Python).
   - Renders dep snippets as `[[name]] with ...` chip-call signatures
     (not `context.compute(...)`).
   - Drops `english` + `generation_notes` (V2 source uses
@@ -254,7 +254,7 @@ def build_user_prompt_v2(
   description = (description or "").strip()
 
   lines = [
-    f'Generate V2 E-- recipe code for the Forge action note "{snippet_id}".'
+    f'Generate V2 Recipe code for the Forge action note "{snippet_id}".'
   ]
   if description:
     lines.append(f"Description: {description}")
@@ -278,7 +278,7 @@ def build_user_prompt_v2(
       )
 
   lines.append(
-    "Output ONLY the body of the # E-- facet (no fences, no headings)."
+    "Output ONLY the body of the # Recipe facet (no fences, no headings)."
   )
   return "\n".join(lines)
 

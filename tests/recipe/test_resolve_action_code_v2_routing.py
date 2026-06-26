@@ -21,7 +21,7 @@ type: action
 
 Return 42.
 
-# E--
+# Recipe
 
 Return 42.
 """
@@ -35,7 +35,7 @@ Return 42.
 type: action
 ---
 
-# E--
+# Recipe
 
 Let part = Call [[play_at_beats]] with instrument=[[kick]], beats=[1, 3].
 [[show_score]] part.

@@ -1,11 +1,11 @@
 """V2-shape detection — does this snippet body use the V2 dialect?
 
-Strategy per spike prompt §3.1 Pick A: auto-detect by presence of `# E--`
+Strategy per spike prompt §3.1 Pick A: auto-detect by presence of `# Recipe`
 heading. V1 notes (with `# English` + `# Python` facets) go through the
 legacy path. V2 notes get the new parser + transpiler.
 
 Frontmatter is stripped before checking so a note with body content
-including `# E--` strictly in frontmatter doesn't false-positive.
+including `# Recipe` strictly in frontmatter doesn't false-positive.
 
 v2-spec §4.7 — `## Inputs` subsection inside `# Description` declares
 the compute() kwargs. `extract_inputs_declarations` parses these so
@@ -19,7 +19,7 @@ from typing import List, Optional
 
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
-_EMM_HEADING_RE = re.compile(r"^#\s+E--\s*$", re.MULTILINE)
+_RECIPE_HEADING_RE = re.compile(r"^#\s+Recipe\s*$", re.MULTILINE)
 _DESCRIPTION_HEADING_RE = re.compile(r"^#\s+Description\s*$", re.MULTILINE)
 _INPUTS_HEADING_RE = re.compile(r"^##\s+Inputs\s*$", re.MULTILINE)
 # `- name (default value) — description`. The em-dash can also appear as
@@ -38,23 +38,23 @@ class InputDecl:
   doc: str
 
 
-def detect_v2_shape(snippet_body: str) -> bool:
-  """True iff the snippet body has a `# E--` heading (after frontmatter)."""
+def detect_recipe_shape(snippet_body: str) -> bool:
+  """True iff the snippet body has a `# Recipe` heading (after frontmatter)."""
   body = _strip_frontmatter(snippet_body)
-  return bool(_EMM_HEADING_RE.search(body))
+  return bool(_RECIPE_HEADING_RE.search(body))
 
 
-def extract_emm_body(snippet_body: str) -> str:
-  """Pull the lines after `# E--` and before the next `#`-level heading
-  (or end of body). Raises ValueError if no `# E--` heading is present.
+def extract_recipe_body(snippet_body: str) -> str:
+  """Pull the lines after `# Recipe` and before the next `#`-level heading
+  (or end of body). Raises ValueError if no `# Recipe` heading is present.
 
   Preserves indentation so the parser can use indent-based block
   structure for Repeat / For each / If.
   """
   body = _strip_frontmatter(snippet_body)
-  match = _EMM_HEADING_RE.search(body)
+  match = _RECIPE_HEADING_RE.search(body)
   if not match:
-    raise ValueError("No `# E--` heading found in snippet body")
+    raise ValueError("No `# Recipe` heading found in snippet body")
   start = match.end()
   # Find next heading at the same level (`# ...`) — strict prefix match so
   # `## Inputs` (a Description subsection) wouldn't trigger.

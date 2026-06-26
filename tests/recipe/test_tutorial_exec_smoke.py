@@ -125,5 +125,18 @@ class TestActionNotesExec:
     assert "120" in stdout
 
   def test_octopus_fact(self, tutorial_resolver):
-    stdout, _ = _run(tutorial_resolver, "octopus_fact")
-    assert "three hearts" in stdout
+    """octopus_fact uses `{{...}}` slot syntax. Pre-V2.1 (drain at
+    2026-06-28-2130) we asserted the resolved string was in stdout;
+    post-restore the resolution is LLM-driven (or cached in
+    frontmatter), so this exec-smoke test now just confirms that the
+    `{{...}}` slot triggers SlotCacheMissError (the expected first-
+    pass behavior). A full resolved-cache E2E lives in
+    `tests/core/test_v2_slot_resolution.py`."""
+    from forge.core.slot_cache import SlotCacheMissError
+    import pytest
+    with pytest.raises(SlotCacheMissError) as exc_info:
+      _run(tutorial_resolver, "octopus_fact")
+    assert any(
+      "octopus" in m["slot_text"].lower()
+      for m in exc_info.value.missing
+    )

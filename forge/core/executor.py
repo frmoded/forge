@@ -726,7 +726,7 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False):
     - SlotCacheMissError when slots can't be resolved (first pass).
   """
   # v2-spike — V2 shape detection. If the snippet body has a `# E--`
-  # heading (the V2 dialect), parse + transpile via forge.e_minus_minus_v2
+  # heading (the V2 dialect), parse + transpile via forge.recipe
   # and return the resulting Python. V1 notes (with `# English` + `# Python`)
   # fall through to the legacy path below unchanged.
   #
@@ -739,11 +739,11 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False):
   # (handleSlotCacheMiss in main.ts already does this for V1, no
   # plugin-side changes needed).
   try:
-    from forge.e_minus_minus_v2 import detect_v2_shape as _v2_detect
-    from forge.e_minus_minus_v2 import extract_emm_body as _v2_extract
-    from forge.e_minus_minus_v2 import extract_inputs_declarations as _v2_inputs
-    from forge.e_minus_minus_v2 import parse as _v2_parse
-    from forge.e_minus_minus_v2 import transpile as _v2_transpile
+    from forge.recipe import detect_recipe_shape as _v2_detect
+    from forge.recipe import extract_recipe_body as _v2_extract
+    from forge.recipe import extract_inputs_declarations as _v2_inputs
+    from forge.recipe import parse as _v2_parse
+    from forge.recipe import transpile as _v2_transpile
     if _v2_detect(snippet["body"]):
       emm = _v2_extract(snippet["body"])
       inputs = _v2_inputs(snippet["body"])

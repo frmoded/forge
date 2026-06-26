@@ -21,7 +21,7 @@ canonical V2 surface and the V1 snippet body becomes a thin
 context.compute shim until the note is migrated.
 
 Why a separate lib (parallel to `forge.music.lib`): keeping numpy out
-of vault content lets `forge.e_minus_minus_v2.transpile` emit a
+of vault content lets `forge.recipe.transpile` emit a
 chip-call expression without leaking implementation. Cohort sees
 `Call [[advance_positions]] with state=state, dt=0.0333.` instead of
 `state.xs + state.speeds * numpy.cos(state.headings) * dt`.

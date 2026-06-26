@@ -14,8 +14,8 @@ contract that wiring will plug into.
 
 import pytest
 
-from forge.e_minus_minus_v2 import parser as p
-from forge.e_minus_minus_v2 import transpiler as t
+from forge.recipe import parser as p
+from forge.recipe import transpiler as t
 
 
 # ---------------------------------------------------------------------------

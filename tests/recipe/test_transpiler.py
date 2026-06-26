@@ -2,7 +2,7 @@
 the generated Python and that it actually executes correctly with a
 chip registry."""
 
-from forge.e_minus_minus_v2 import parse, transpile
+from forge.recipe import parse, transpile
 
 
 def _wrap_and_exec(emm_src, chip_registry):

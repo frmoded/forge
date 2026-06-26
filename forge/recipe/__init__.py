@@ -4,15 +4,15 @@ module implements the V2 spec's Let/Call/Return dialect described in
 v2-spec.md §5-§6 and validated by the v2-spike-mini-solitary prompt.
 
 Public surface:
-  detect_v2_shape(snippet_body)  -> bool
+  detect_recipe_shape(snippet_body)  -> bool
   parse(emm_source)              -> Module AST
   transpile(module_ast)          -> str  (Python source)
 """
 
 from .detect import (
     InputDecl,
-    detect_v2_shape,
-    extract_emm_body,
+    detect_recipe_shape,
+    extract_recipe_body,
     extract_inputs_declarations,
 )
 from .parser import Module, parse
@@ -20,8 +20,8 @@ from .transpiler import transpile
 
 __all__ = [
     "InputDecl",
-    "detect_v2_shape",
-    "extract_emm_body",
+    "detect_recipe_shape",
+    "extract_recipe_body",
     "extract_inputs_declarations",
     "Module",
     "parse",

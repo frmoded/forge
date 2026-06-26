@@ -1,6 +1,6 @@
 """V2 `## Inputs` declaration parsing + transpile threading tests."""
 
-from forge.e_minus_minus_v2 import (
+from forge.recipe import (
     extract_inputs_declarations,
     parse,
     transpile,
@@ -65,14 +65,14 @@ class TestTranspileWithInputs:
     assert "def compute(context):" in py
 
   def test_input_becomes_kwarg(self):
-    from forge.e_minus_minus_v2 import InputDecl
+    from forge.recipe import InputDecl
     inputs = [InputDecl(name="bars", default=4, has_default=True, doc="")]
     py = transpile(parse("Return bars."), inputs=inputs)
     assert "def compute(context, bars=4):" in py
     assert "return bars" in py
 
   def test_input_accessible_in_body_at_exec(self):
-    from forge.e_minus_minus_v2 import InputDecl
+    from forge.recipe import InputDecl
     inputs = [InputDecl(name="bars", default=4, has_default=True, doc="")]
     py = transpile(parse("Let n = bars.\nReturn n."), inputs=inputs)
     scope = {}

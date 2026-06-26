@@ -27,7 +27,7 @@ def _make_v2_snippet(emm_body: str, snippet_id: str = "test/note"):
     "\n"
     "Test note.\n"
     "\n"
-    "# E--\n"
+    "# Recipe\n"
     "\n"
     f"{emm_body}\n"
   )

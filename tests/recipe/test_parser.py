@@ -1,8 +1,8 @@
 """V2 E-- parser tests — verify each spec §5 construct yields the expected AST."""
 
 import pytest
-from forge.e_minus_minus_v2 import parse
-from forge.e_minus_minus_v2.parser import (
+from forge.recipe import parse
+from forge.recipe.parser import (
     CallStmt,
     ChipCall,
     ForEachStmt,
