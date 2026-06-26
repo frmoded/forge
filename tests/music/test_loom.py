@@ -34,9 +34,14 @@ def _resolve_phase_shifter_compute(music_resolver):
     we replicate that here so each test can call compute(cell, **kwargs)
     directly without going through context.compute."""
     res, reg, vault = music_resolver
-    from forge.core.executor import extract_python, ForgeContext
+    # v0.2.196 housekeeping drain — V2-aware. resolve_action_code returns
+    # the V2-transpiled Python for `# Recipe` notes and falls through to
+    # extract_python's behavior for V1 notes. phase_shifter is currently
+    # V1 but this future-proofs the fixture against the percussion-lab
+    # V2 migration that ships alongside.
+    from forge.core.executor import resolve_action_code, ForgeContext
     snip = res.resolve("phase_shifter")
-    code = extract_python(snip["body"])
+    code = resolve_action_code(snip)
     ns = {}
     # The Python facet uses globals that the executor would normally pre-inject
     # via the music domain (meter, tempo, stream, note, instrument, with_velocity,

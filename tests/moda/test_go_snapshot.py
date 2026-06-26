@@ -24,7 +24,17 @@ def vault_copy(tmp_path):
     dst = tmp_path / "moda_vault"
     # Copy snippets + forge.toml; explicitly drop any .forge/ so each
     # test starts with zero snapshots (fresh-vault first-call path).
-    shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".forge"))
+    # v0.2.196 housekeeping drain — also drop `.obsidian` to avoid a
+    # symlink loop. The user's dev setup symlinks
+    # `.obsidian/plugins/forge-client-obsidian` → the plugin source
+    # repo, whose `obsidian_sandbox/sandbox/` subdir is itself a vault
+    # that links back, creating an infinite-recursion copy path that
+    # killed setup with `shutil.Error: file name too long`. Tests
+    # don't read `.obsidian` content, so dropping it is harmless.
+    shutil.copytree(
+        src, dst,
+        ignore=shutil.ignore_patterns(".forge", ".obsidian"),
+    )
     return str(dst)
 
 

@@ -15,7 +15,7 @@ fixtures below call the helpers internally.
 import pytest
 
 from forge.core.registry import SnippetRegistry, GraphResolver
-from forge.core.executor import extract_python, exec_python
+from forge.core.executor import extract_python, exec_python, resolve_action_code
 
 from tests.moda._helpers import _find_vault
 
@@ -44,7 +44,11 @@ def run_block(resolver):
 
     def _run(snippet_id, *args, **inputs):
         snip = res.resolve(snippet_id)
-        code = extract_python(snip["body"])
+        # v0.2.196 housekeeping drain — use resolve_action_code (V2-aware)
+        # so the migrated forge-moda V2 notes (with `# Recipe` headings) get
+        # transpiled to Python before exec. extract_python alone would
+        # return None for V2 notes and the exec would silently no-op.
+        code = resolve_action_code(snip)
         _, result = exec_python(
             code, inputs, res, args=args,
             vault_path=vault, registry=reg, snippet_id=snip["snippet_id"],
@@ -59,6 +63,7 @@ def block_source(resolver):
     res, _reg, _vault = resolver
 
     def _src(snippet_id):
-        return extract_python(res.resolve(snippet_id)["body"])
+        # v0.2.196 housekeeping drain — V2-aware (see `_run` above).
+        return resolve_action_code(res.resolve(snippet_id))
 
     return _src
