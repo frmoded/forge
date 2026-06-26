@@ -114,9 +114,10 @@ def _render_stmt(stmt, depth):
       return [f"{pad}return None"]
     return [f"{pad}return {_render_expr(stmt.value)}"]
   if isinstance(stmt, CallStmt):
+    name = _render_chip_name(stmt.name)
     if stmt.arg is None:
-      return [f"{pad}{stmt.name}()"]
-    return [f"{pad}{stmt.name}({_render_expr(stmt.arg)})"]
+      return [f"{pad}{name}()"]
+    return [f"{pad}{name}({_render_expr(stmt.arg)})"]
   if isinstance(stmt, ExprStmt):
     # Top-level `Call [[name]] with k=v.` — render as the expression
     # on its own line, no assignment. Return value is discarded.
@@ -150,14 +151,34 @@ def _render_stmt(stmt, depth):
   raise TypeError(f"unknown statement type: {type(stmt).__name__}")
 
 
+def _render_chip_name(name: str) -> str:
+  """Normalize a wikilink chip name to its Python-callable bare basename.
+
+  v0.2.186 — V2 wikilinks now accept path-shaped names like
+  `forge-music/percussion_lab/solitary`. The executor's snippet shims
+  (`_build_snippet_shims`) and domain globals (`_FORGE_MUSIC_LIB_NAMES`,
+  `_FORGE_MODA_LIB_NAMES`) are keyed by the **bare basename**
+  (`solitary`), so the transpiler strips the path prefix here. Hyphens
+  are also replaced with underscores because forge-music's domain is
+  the only repo with a hyphen in its name AND that hyphen never appears
+  in actual chip names (it's only in vault names like `forge-music`,
+  which becomes a path prefix that gets stripped). Defensive belt-and-
+  suspenders: if a future hyphenated chip name ever shows up, the
+  underscore rewrite keeps it Python-callable.
+  """
+  basename = name.rsplit("/", 1)[-1]
+  return basename.replace("-", "_")
+
+
 def _render_expr(expr) -> str:
   if isinstance(expr, ChipCall):
+    name = _render_chip_name(expr.name)
     if not expr.kwargs:
-      return f"{expr.name}()"
+      return f"{name}()"
     kw = ", ".join(
       f"{k.name}={_render_expr(k.value)}" for k in expr.kwargs
     )
-    return f"{expr.name}({kw})"
+    return f"{name}({kw})"
   if isinstance(expr, ListLit):
     return "[" + ", ".join(_render_expr(it) for it in expr.items) + "]"
   if isinstance(expr, NumberLit):

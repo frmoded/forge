@@ -220,19 +220,36 @@ def _tokenize(src: str) -> List[Tok]:
         )
       toks.append(Tok("SLOT", text, line, col))
       col += j + 2 - i; i = j + 2; continue
-    # Wikilink — strict `[[IDENT]]` so `[[0,2,3], [0]]` (nested list
-    # literal as a kwarg value) isn't greedy-matched as a single
-    # wikilink. Bail to two separate OP `[` tokens if the content
-    # between `[[` and the next char isn't a valid identifier start —
-    # the parser treats consecutive `[`s as opening a list-of-lists.
+    # Wikilink — accepts a hierarchical snippet path like
+    # `[[forge-music/percussion_lab/solitary]]`. First char must be a
+    # letter or `_` so `[[0,2,3], [0]]` (nested list literal as a
+    # kwarg value) doesn't greedy-match the leading `0` as the first
+    # wikilink char. Subsequent chars accept the broader Forge bare-id
+    # character set: alphanumeric + `_` + `/` (path separator) + `-`
+    # (hyphen, used in vault names like `forge-music`).
+    #
+    # v0.2.186 — pre-fix only accepted `[a-zA-Z0-9_]`, which made the
+    # V2 /generate LLM's natural `[[forge-music/percussion_lab/solitary]]`
+    # output unlexable (smoke 2 ParseError "expected wikilink after
+    # Call"). The widened character set matches the existing snippet
+    # bare-id format that `_build_snippet_shims` keys on; the
+    # transpiler's `_render_chip_name` strips the path prefix to the
+    # leaf basename for the actual Python call (matches shim convention).
     if src[i:i+2] == "[[":
       probe = i + 2
-      while probe < len(src) and (src[probe].isalnum() or src[probe] == "_"):
+      # First content char must be alpha or `_` (rules out numeric
+      # list literals that happen to look bracket-shaped).
+      if probe < len(src) and (src[probe].isalpha() or src[probe] == "_"):
         probe += 1
-      if probe > i + 2 and src[probe:probe+2] == "]]":
-        name = src[i+2:probe]
-        toks.append(Tok("WIKILINK", name, line, col))
-        col += probe + 2 - i; i = probe + 2; continue
+        while probe < len(src) and (
+          src[probe].isalnum()
+          or src[probe] in ("_", "/", "-")
+        ):
+          probe += 1
+        if src[probe:probe+2] == "]]":
+          name = src[i+2:probe]
+          toks.append(Tok("WIKILINK", name, line, col))
+          col += probe + 2 - i; i = probe + 2; continue
       # Not a valid wikilink — fall through and emit a single `[` OP.
       toks.append(Tok("OP", "[", line, col))
       i += 1; col += 1; continue
