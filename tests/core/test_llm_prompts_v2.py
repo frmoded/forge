@@ -33,9 +33,45 @@ def test_build_system_prompt_v2_contains_statement_inventory():
   assert "Let name = <expr>." in out
   assert "Return <expr>." in out
   assert "Call [[chip]] with k=v, k=v." in out
+  # v0.2.200 — shorthand-call statement form. Required for positional-
+  # only callables like the Python builtin `print` (takes `*objects`,
+  # NOT `text=` kwarg). Without this teaching the LLM defaulted to
+  # `Call [[print]] with text="..."` which transpiled to
+  # `print(text="...")` and crashed at runtime.
+  assert "[[chip]] <expr>." in out
+  assert "[[chip]]." in out
   assert "If <expr>:" in out
   assert "Otherwise:" in out
   assert "For each <name> in <expr>:" in out
+
+
+def test_build_system_prompt_v2_warns_about_print_kwarg_form():
+  """v0.2.200 regression guard: the prompt must explicitly tell the LLM
+  that `Call [[print]] with text="..."` crashes with TypeError. Without
+  this guard the LLM happily reproduced the bad form from Example 1
+  (since fixed) — a tutorial vault smoke caught it for hello_world."""
+  out = p.build_system_prompt_v2()
+  assert "print" in out
+  assert "TypeError" in out
+  assert "[[print]]" in out
+
+
+def test_build_system_prompt_v2_example_1_uses_print_shorthand():
+  """Example 1 (hello_world) must show the shorthand statement form,
+  not `Call [[print]] with text=...`. Pre-v0.2.200 Example 1 taught
+  the kwarg form and the LLM reproduced it verbatim — print(text=)
+  crashes. (The Statements section is allowed to MENTION the bad form
+  as a counterexample so the LLM knows what NOT to do — we only assert
+  on the Example 1 recipe body here.)"""
+  out = p.build_system_prompt_v2()
+  # Extract Example 1's Recipe block.
+  ex1_marker = "### Example 1: hello_world"
+  ex2_marker = "### Example 2:"
+  assert ex1_marker in out
+  assert ex2_marker in out
+  block = out[out.index(ex1_marker):out.index(ex2_marker)]
+  assert '[[print]] "Hello, world!".' in block
+  assert 'Call [[print]] with text=' not in block
 
 
 def test_build_system_prompt_v2_contains_few_shot_examples():

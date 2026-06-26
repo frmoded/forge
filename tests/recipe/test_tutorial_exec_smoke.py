@@ -140,3 +140,107 @@ class TestActionNotesExec:
       "octopus" in m["slot_text"].lower()
       for m in exc_info.value.missing
     )
+
+
+class TestAllTutorialActionNotesHaveCoverage:
+  """Coverage-guard: every `type: action` note in the tutorial vault
+  must have a corresponding `test_<basename>` method in
+  TestActionNotesExec. Pre-v0.2.200 the driver hit a forge-bluh smoke
+  failure on `hello_world` after generate produced
+  `Call [[print]] with text="..."` — but the canonical hello_world.md
+  uses the shorthand form so existing tests passed. This guard means
+  ANY new action note added to the vault gets pinned to an exec-smoke
+  immediately."""
+
+  def test_every_action_note_has_a_test(self, tutorial_resolver):
+    import os
+    _, _, vault = tutorial_resolver
+    action_notes = []
+    for root, _dirs, files in os.walk(vault):
+      for fn in files:
+        if not fn.endswith(".md"):
+          continue
+        path = os.path.join(root, fn)
+        try:
+          with open(path) as f:
+            head = f.read(200)
+        except OSError:
+          continue
+        # YAML frontmatter `type: action` check — same way the
+        # registry classifies notes.
+        if "\ntype: action" in head or head.startswith("---\ntype: action"):
+          action_notes.append(fn[:-len(".md")])
+    test_methods = {
+      m for m in dir(TestActionNotesExec) if m.startswith("test_")
+    }
+    missing = []
+    for basename in sorted(action_notes):
+      # Convention: test name contains the basename. Some tests have
+      # extra suffix (e.g. test_excited_returns_word_with_exclam).
+      if not any(basename in m for m in test_methods):
+        missing.append(basename)
+    assert not missing, (
+      f"Action notes missing exec-smoke coverage in "
+      f"TestActionNotesExec: {missing}. Add a test_<basename> method "
+      f"that runs the note and asserts on its observable output."
+    )
+
+
+class TestPrintShorthandVsKwargForm:
+  """v0.2.200 — lock the transpiler's handling of the two ways the LLM
+  might encode a print call. Pre-fix, the V2 prompt's Example 1 taught
+  `Call [[print]] with text="..."`; the LLM faithfully reproduced it,
+  the transpiler rendered `print(text="...")`, and the snippet crashed
+  at runtime with TypeError. The fix is upstream (prompt + service
+  catalog) but THIS test pins both the broken mapping (so a regression
+  surfaces as a documented expectation rather than a mystery) and the
+  working shorthand mapping."""
+
+  def test_shorthand_form_transpiles_to_positional_print(self):
+    from forge.recipe import parse, transpile
+    code = transpile(parse('[[print]] "hello, world".\nReturn.\n'))
+    # The shorthand-call statement becomes `print("hello, world")`.
+    assert 'print(\'hello, world\')' in code or 'print("hello, world")' in code
+    assert 'text=' not in code
+
+  def test_kwarg_form_transpiles_to_text_kwarg_which_would_crash_at_runtime(self):
+    """If the LLM regresses to `Call [[print]] with text=...`, this is
+    what the transpiler emits — Python's builtin `print` does NOT have
+    a `text` kwarg, so executing the result would raise
+    `TypeError: print() got an unexpected keyword argument 'text'`.
+    Test name documents the failure mode so future debuggers find this
+    fast.
+    """
+    from forge.recipe import parse, transpile
+    code = transpile(parse('Call [[print]] with text="hi".\nReturn.\n'))
+    # Verbatim kwarg passthrough — broken, but documented.
+    assert "print(text='hi')" in code or 'print(text="hi")' in code
+
+  def test_shorthand_form_executes_print_at_runtime(self):
+    """End-to-end positive: the shorthand form actually runs and
+    prints. Mirrors what an LLM-generated hello_world Recipe SHOULD
+    do post-v0.2.200."""
+    import io
+    import sys
+    from forge.recipe import parse, transpile
+    from forge.core.executor import exec_python
+    code = transpile(parse('[[print]] "hello, world".\nReturn.\n'))
+    stdout, _ = exec_python(
+      code, inputs={}, snippet_id="hello_world_synthetic",
+    )
+    assert "hello, world" in stdout
+
+  def test_kwarg_form_raises_typeerror_at_runtime(self):
+    """End-to-end negative: confirm the broken kwarg form actually
+    crashes with the documented TypeError. This is the user-visible
+    error that triggered the v0.2.200 bug report."""
+    import pytest
+    from forge.recipe import parse, transpile
+    from forge.core.executor import exec_python, SnippetExecError
+    code = transpile(parse('Call [[print]] with text="hi".\nReturn.\n'))
+    with pytest.raises(SnippetExecError) as exc_info:
+      exec_python(
+        code, inputs={}, snippet_id="hello_world_synthetic_broken",
+      )
+    assert "text" in str(exc_info.value)
+    assert "keyword argument" in str(exc_info.value)

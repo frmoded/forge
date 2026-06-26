@@ -39,10 +39,19 @@ mutation operator.
 - `Let name = <expr>.`              bind a value
 - `Return <expr>.`                  return a value (or `Return.` for None)
 - `Return.`                          return None
-- `Call [[chip]] with k=v, k=v.`    invoke a chip for its side effect
+- `Call [[chip]] with k=v, k=v.`    invoke a chip (kwargs only) for its side effect
+- `[[chip]] <expr>.`                shorthand: invoke a chip with one positional arg
+- `[[chip]].`                        shorthand: invoke a chip with zero args
 - `If <expr>:`                       conditional block (indent body 2 spaces)
 - `Otherwise:`                       else block (siblings the If; same indent)
 - `For each <name> in <expr>:`       iteration block (indent body 2 spaces)
+
+The shorthand-call statement form is the ONLY way to invoke chips whose
+underlying signature takes a positional argument — the Python builtin
+`print` is the canonical example: it takes positional `*objects`, NOT a
+`text=` kwarg, so writing `Call [[print]] with text="x".` would emit
+`print(text="x")` and crash at runtime with `TypeError: print() got an
+unexpected keyword argument 'text'`. Use `[[print]] "x".` instead.
 
 Every top-level statement MUST end with a period. Statements inside an
 indented block (If, Otherwise, For-each body) also end with periods.
@@ -100,7 +109,7 @@ in your output.
 Description: Print "Hello, world!".
 
 Recipe:
-Call [[print]] with text="Hello, world!".
+[[print]] "Hello, world!".
 Return.
 
 ### Example 2: set_water_speed (forge-moda)
