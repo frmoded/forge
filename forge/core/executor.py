@@ -729,6 +729,15 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False):
   # heading (the V2 dialect), parse + transpile via forge.e_minus_minus_v2
   # and return the resulting Python. V1 notes (with `# English` + `# Python`)
   # fall through to the legacy path below unchanged.
+  #
+  # v0.2.191 — V2.1 slot resolution Phase 2: wire the V2 transpile to the
+  # same `build_engine_slot_resolver` + SlotCacheMissError flow V1 uses
+  # below (line 805+). When the parsed module contains SlotExpr nodes,
+  # the resolver checks the snippet's slot_resolutions cache by
+  # (slot_text, snippet_id); cache miss → collector accumulates →
+  # SlotCacheMissError → plugin handles via /resolve-slot round-trip
+  # (handleSlotCacheMiss in main.ts already does this for V1, no
+  # plugin-side changes needed).
   try:
     from forge.e_minus_minus_v2 import detect_v2_shape as _v2_detect
     from forge.e_minus_minus_v2 import extract_emm_body as _v2_extract
@@ -738,7 +747,22 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False):
     if _v2_detect(snippet["body"]):
       emm = _v2_extract(snippet["body"])
       inputs = _v2_inputs(snippet["body"])
-      return _v2_transpile(_v2_parse(emm), inputs=inputs)
+      v2_snippet_id = snippet.get("snippet_id", "<unknown>")
+      from forge.core.slot_cache import (
+        build_engine_slot_resolver as _v2_slot_resolver_factory,
+        SlotCacheMissError as _V2SlotCacheMissError,
+      )
+      v2_slot_cache = slot_resolutions or {}
+      v2_missing = []
+      v2_resolver = _v2_slot_resolver_factory(
+        v2_snippet_id, v2_slot_cache, v2_missing,
+      )
+      v2_code = _v2_transpile(
+        _v2_parse(emm), inputs=inputs, resolve_slot=v2_resolver,
+      )
+      if v2_missing:
+        raise _V2SlotCacheMissError(v2_missing)
+      return v2_code
   except ImportError:
     pass
 
