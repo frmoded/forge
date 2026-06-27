@@ -9,7 +9,18 @@ _RECOGNIZED_TYPES = ("action", "data", "snapshot")
 # Forge-managed state directories that must not be walked as snippet sources.
 # .forge/edges/ holds auto-captured snapshots; if those leaked into the
 # registry they'd shadow the real snippets they were captured from.
-_RESERVED_DIRS = {".forge"}
+# .obsidian/ holds plugin storage. The forge-client-obsidian plugin keeps
+# bundled-vault SOURCE COPIES under `.obsidian/plugins/forge-client-
+# obsidian/assets/vaults/<library>/...` for re-extraction on version bump;
+# those copies have the same basenames as the freshly-extracted library
+# vaults at the user's vault top level. Without this prune the bundled
+# copies leak into the AUTHORING namespace and can shadow source-repo
+# edits — the exact pebble flagged in the v0.2.193 rename drain
+# ("stale bundled copy can mask a freshly edited source note").
+# .git/ + .stfolder/ + .DS_Store (latter handled by the `.md` filter)
+# are belt-and-suspenders: no .md files anyway, but the os.walk doesn't
+# need to descend.
+_RESERVED_DIRS = {".forge", ".obsidian", ".git", ".stfolder"}
 # v0.2.78 — `<library>.bak.<old-version>/` directories created by the
 # v0.2.38 auto-re-extract mechanism are user-facing backups of stale
 # library content. They retain an intact forge.toml (literal directory
