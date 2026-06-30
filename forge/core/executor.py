@@ -61,6 +61,19 @@ try:
     "voices_list": _music_lib.voices_list,
     # v2-migration — variadic-list wrapper for bar()
     "bar_list": _music_lib.bar_list,
+    # v0.7.0 — forge-music library notes promoted from engineer-mode vault
+    # notes (drain 2026-07-01-1800). These ARE the chord/form/drum/melody
+    # primitives that song.md, chorus.md, solo_chorus.md, and loom.md
+    # compose. Pre-v0.7.0 they sat in vault as `.md` files with
+    # `edit_mode: python` + stub Recipes.
+    "form": _music_lib.form,
+    "drum_chorus": _music_lib.drum_chorus,
+    "drums_shuffle": _music_lib.drums_shuffle,
+    "guitar_solo_chorus": _music_lib.guitar_solo_chorus,
+    "vocal_phrase_a": _music_lib.vocal_phrase_a,
+    "vocal_phrase_b": _music_lib.vocal_phrase_b,
+    "phase_cell": _music_lib.phase_cell,
+    "phase_shifter": _music_lib.phase_shifter,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}
@@ -224,6 +237,8 @@ def _domain_globals_for(domains):
           "crash_cymbal", "ride_cymbal", "kick", "snare",
           "play_at_beats", "show_score",
           "play_at_offsets", "sequence_list", "voices_list", "bar_list",
+          "form", "drum_chorus", "drums_shuffle", "guitar_solo_chorus",
+          "vocal_phrase_a", "vocal_phrase_b", "phase_cell", "phase_shifter",
         )
         if hasattr(_music_lib_lazy, name)
       }

@@ -26,6 +26,33 @@ try:
 except ImportError:
   tempo = None
 
+# v0.7.0 — additional music21 submodules used by the promoted
+# forge-music library notes (form/chord, harmony for chord symbols,
+# duration for explicit Duration objects, roman for Roman-numeral
+# resolution). Each import is independent so a partial wheel doesn't
+# kill the rest of lib.
+try:
+  from music21 import chord
+except ImportError:
+  chord = None
+try:
+  from music21 import harmony
+except ImportError:
+  harmony = None
+try:
+  from music21 import duration
+except ImportError:
+  duration = None
+try:
+  from music21 import roman
+except ImportError:
+  roman = None
+
+# Standard-library random — needed by guitar_solo_chorus / vocal_phrase_*
+# library notes (v0.7.0 promotion). Imported under a private alias so
+# the public lib namespace doesn't shadow callers' own `random`.
+import random as _random
+
 StreamLike = Union[stream.Score, stream.Part, stream.Measure, stream.Stream]
 
 
@@ -1238,3 +1265,557 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
     output.append(kit_part)
 
   return output
+
+
+# ---------------------------------------------------------------------------
+# v0.7.0 — forge-music library notes promoted from engineer-mode vault notes
+# (per drain 2026-07-01-1800). The 8 functions below were vault `.md` files
+# with `edit_mode: python` + stub Recipe; they are now first-class library
+# notes callable from V2 Recipes via `Call [[name]] with k=v.` (the wikilink
+# resolves to a LibraryNoteView in the plugin).
+#
+# Each retains the music21 semantics it had as an engineer-mode note.
+# Cohort callers (song.md, chorus.md, solo_chorus.md, loom.md) now invoke
+# these directly from their Python facets rather than via
+# context.compute("name", ...).
+# ---------------------------------------------------------------------------
+
+
+DEFAULT_BLUES_PROGRESSION = ["I", "I", "I", "I", "IV", "IV", "I", "I", "V", "IV", "I", "V"]
+"""Standard 12-bar blues chord progression as roman numerals.
+Embedded default for `form()` so the function is self-contained — the
+prior vault stub fetched this from `twelve_bar_blues_progression` data
+note; cohort can still override via the `progression` kwarg if a
+different shape is needed."""
+
+
+def form(*, key_name="E", mode_name="major", tempo_bpm=70,
+         ts_str="12/8", progression=None):
+  """The harmonic skeleton of a standard 12-bar blues form.
+
+  Twelve bars in 12/8, slow (around 70 BPM, eighth-note triplet feel).
+  Roman-numeral progression resolves to concrete chords via
+  music21.roman in the given key. Returns a Score with chord symbols
+  and full triads, no melodic content — the tonal frame everything
+  else hangs from. Use Piano for this.
+
+  Defaults to E major + the standard 12-bar progression
+  (DEFAULT_BLUES_PROGRESSION). Pass `progression=[...]` to override.
+  """
+  import copy as _copy
+  prog = list(progression) if progression is not None else list(DEFAULT_BLUES_PROGRESSION)
+  k = key.Key(key_name, mode_name)
+  ts = meter.TimeSignature(ts_str)
+  bar_ql = ts.barDuration.quarterLength
+  mm = tempo.MetronomeMark(number=tempo_bpm, referent=duration.Duration(type="quarter", dots=1))
+
+  part = stream.Part()
+  part.append(instrument.Piano())
+
+  for i, numeral in enumerate(prog):
+    m = stream.Measure(number=i + 1)
+    if i == 0:
+      m.append(_copy.deepcopy(k))
+      m.append(_copy.deepcopy(ts))
+      m.append(_copy.deepcopy(mm))
+    rn = roman.RomanNumeral(numeral, k)
+    root_name = rn.root().name
+    quality_map = {
+      "major": "", "minor": "m",
+      "diminished": "dim", "augmented": "aug",
+      "dominant-seventh": "7", "major-seventh": "maj7",
+      "minor-seventh": "m7",
+    }
+    suffix = quality_map.get(rn.quality, "")
+    cs_figure = root_name + suffix
+    cs = harmony.ChordSymbol(cs_figure)
+    m.insert(0, cs)
+    c = chord.Chord(list(rn.pitches), quarterLength=bar_ql)
+    m.insert(0, c)
+    part.append(m)
+
+  score = stream.Score()
+  score.append(part)
+  return score
+
+
+def drum_chorus(*, profile="standard"):
+  """One 12-bar drum chorus parameterized by a profile name (`'sparse'`,
+  `'standard'`, or `'driving'`). Used by `song.md` to give the 4-chorus
+  arc audible variety: sparse intro → standard mid → driving solo →
+  standard return. 12 bars in 12/8."""
+  import copy as _copy
+  ts = meter.TimeSignature("12/8")
+  bar_ql = ts.barDuration.quarterLength
+  eighth = 0.5
+  BEAT_1, BEAT_2, BEAT_3, BEAT_4 = 0.0, 1.5, 3.0, 4.5
+
+  def _drum_bar(hit_specs, bar_idx, attach_metadata):
+    m = stream.Measure(number=bar_idx + 1)
+    if attach_metadata:
+      m.append(ts)
+    notes_added = []
+    cursor = 0.0
+    for off, dur in sorted(hit_specs):
+      gap = off - cursor
+      if gap > 0:
+        m.append(note.Rest(quarterLength=gap))
+        cursor += gap
+      n = note.Note("C4", quarterLength=dur)
+      m.append(n)
+      notes_added.append(n)
+      cursor += dur
+    remaining = bar_ql - cursor
+    if remaining > 0:
+      m.append(note.Rest(quarterLength=remaining))
+    return m, notes_added
+
+  def build_part(inst_factory, per_bar_specs):
+    part = stream.Part()
+    part.append(inst_factory())
+    all_notes = []
+    for bar_idx in range(12):
+      m, notes_in_bar = _drum_bar(
+        per_bar_specs[bar_idx], bar_idx,
+        attach_metadata=(bar_idx == 0),
+      )
+      part.append(m)
+      all_notes.extend(notes_in_bar)
+    return part, all_notes
+
+  if profile == "sparse":
+    kick_specs   = [[(BEAT_1, 0.5), (BEAT_3, 0.5)]] * 12
+    snare_normal = [[(BEAT_2, 0.5), (BEAT_4, 0.5)]] * 12
+    snare_ghost  = [[(BEAT_3 + eighth, eighth)]] * 12
+    hh_specs     = [[(BEAT_1, 0.5), (BEAT_3, 0.5)]] * 12
+    kick_part,  kick_notes  = build_part(kick,         kick_specs)
+    snare_part, snare_notes = build_part(snare,        snare_normal)
+    ghost_part, ghost_notes = build_part(snare,        snare_ghost)
+    hh_part,    hh_notes    = build_part(closed_hihat, hh_specs)
+    anchor_first = kick_notes[:1]
+    with_velocity(anchor_first, 65, mark_dynamics=True)
+    with_velocity(kick_notes[1:],  65)
+    with_velocity(snare_notes,     65)
+    with_velocity(hh_notes,        65)
+    with_velocity(ghost_notes,     "ghost")
+    parts = [kick_part, snare_part, ghost_part, hh_part]
+  elif profile == "driving":
+    kick_specs        = [[(BEAT_1, 0.5), (BEAT_2, 0.5),
+                          (BEAT_3, 0.5), (BEAT_4, 0.5)]] * 12
+    snare_backbeat    = [[(BEAT_2, 0.5), (BEAT_4, 0.5)]] * 12
+    ride_specs        = [[(BEAT_1, 0.5), (BEAT_2, 0.5),
+                          (BEAT_3, 0.5), (BEAT_4, 0.5)]] * 12
+    crash_specs       = [[(BEAT_1, 0.5)]] + [[]] * 11
+    kick_part,  kick_notes  = build_part(kick,         kick_specs)
+    snare_part, snare_notes = build_part(snare,        snare_backbeat)
+    ride_part,  ride_notes  = build_part(ride_cymbal,  ride_specs)
+    crash_part, crash_notes = build_part(crash_cymbal, crash_specs)
+    anchor_first = kick_notes[:1]
+    with_velocity(anchor_first, "human", mark_dynamics=True)
+    with_velocity(kick_notes[1:], "human")
+    with_velocity(snare_notes,    "accent")
+    with_velocity(ride_notes,     "human")
+    with_velocity(crash_notes,    100)
+    parts = [kick_part, snare_part, ride_part, crash_part]
+  else:  # 'standard'
+    kick_specs    = [[(BEAT_1, 0.5), (BEAT_3, 0.5)]] * 12
+    snare_normal  = [[(BEAT_2, 0.5), (BEAT_4, 0.5)]] * 12
+    snare_ghost   = [[(BEAT_4 + eighth, eighth)]] * 12
+    hh_specs      = [[(BEAT_1, 0.5), (BEAT_2, 0.5),
+                      (BEAT_3, 0.5), (BEAT_4, 0.5)]] * 12
+    kick_part,  kick_notes  = build_part(kick,         kick_specs)
+    snare_part, snare_notes = build_part(snare,        snare_normal)
+    ghost_part, ghost_notes = build_part(snare,        snare_ghost)
+    hh_part,    hh_notes    = build_part(closed_hihat, hh_specs)
+    anchor_first = kick_notes[:1]
+    with_velocity(anchor_first, "human", mark_dynamics=True)
+    with_velocity(kick_notes[1:], "human")
+    with_velocity(snare_notes,    "human")
+    with_velocity(hh_notes,       "human")
+    with_velocity(ghost_notes,    "ghost")
+    parts = [kick_part, snare_part, ghost_part, hh_part]
+
+  return voices(*parts)
+
+
+def drums_shuffle():
+  """A 12-bar shuffle drum pattern in 12/8 — kick on beats 1+3, snare
+  on 2+4, hi-hat on every dotted-quarter beat. The rhythmic backbone
+  of a slow blues. Returns a Score with three parts (kick, snare,
+  hihat). 12 bars in 12/8."""
+  ts = meter.TimeSignature("12/8")
+  bar_ql = ts.barDuration.quarterLength
+  KICK_BEATS  = [0, 6]
+  SNARE_BEATS = [3, 9]
+  HIHAT_BEATS = [0, 3, 6, 9]
+
+  def make_drum_part(inst, hit_positions):
+    part = stream.Part()
+    part.append(inst)
+    for bar_idx in range(12):
+      m = stream.Measure(number=bar_idx + 1)
+      if bar_idx == 0:
+        m.append(ts)
+      cursor = 0.0
+      for pos in sorted(hit_positions):
+        gap = pos * 0.5 - cursor
+        if gap > 0:
+          m.append(note.Rest(quarterLength=gap))
+          cursor += gap
+        hit = note.Note("C4")
+        hit.duration = duration.Duration(0.5)
+        m.append(hit)
+        cursor += 0.5
+      remaining = bar_ql - cursor
+      if remaining > 0:
+        m.append(note.Rest(quarterLength=remaining))
+      part.append(m)
+    return part
+
+  k_part = make_drum_part(instrument.BassDrum(),    KICK_BEATS)
+  s_part = make_drum_part(instrument.SnareDrum(),   SNARE_BEATS)
+  h_part = make_drum_part(instrument.HiHatCymbal(), HIHAT_BEATS)
+  return voices(k_part, s_part, h_part)
+
+
+def guitar_solo_chorus():
+  """A 12-bar instrumental solo chorus over the song's harmonic frame
+  on electric guitar. Twelve bars in 12/8, sitting in the key from
+  `form()`. Minor pentatonic with blue notes; chord-tone-aware bar
+  pattern picker that breathes with the underlying progression
+  (I/IV/V turnaround). Improvisational within each bar."""
+  import copy as _copy
+  src = form()
+
+  found_key = next((el for el in src.flatten() if isinstance(el, key.Key)), None)
+  found_ts = next((el for el in src.flatten() if isinstance(el, meter.TimeSignature)), None)
+  found_mm = next((el for el in src.flatten() if isinstance(el, tempo.MetronomeMark)), None)
+
+  tonic_name = found_key.tonic.name if found_key else "E"
+  key_mode = found_key.mode if found_key else "minor"
+  ts_str = found_ts.ratioString if found_ts else "12/8"
+  bpm = found_mm.number if found_mm else 70
+
+  ts = meter.TimeSignature(ts_str)
+  bar_ql = ts.barDuration.quarterLength
+
+  if found_ts and found_ts.beatDuration.quarterLength == 1.5:
+    mm_referent = duration.Duration(type="quarter", dots=1)
+  else:
+    mm_referent = duration.Duration("quarter")
+
+  ks = key.Key(tonic_name, key_mode)
+  scale_low = minor_pentatonic(ks, octave_range=(4, 5), include_blue=True)
+  scale_mid = minor_pentatonic(ks, octave_range=(4, 6), include_blue=True)
+  scale_high = minor_pentatonic(ks, octave_range=(5, 6), include_blue=True)
+
+  def chord_tones_for(root_name, quality, octave=4):
+    if quality == "minor":
+      intervals = [0, 3, 7]
+    else:
+      intervals = [0, 4, 7]
+    root_p = pitch.Pitch(root_name + str(octave))
+    return [pitch.Pitch(midi=root_p.midi + i) for i in intervals]
+
+  tonic_root = ks.tonic.name
+  iv_root = ks.pitchFromDegree(4).name
+  v_root = ks.pitchFromDegree(5).name
+  tonic_ct = chord_tones_for(tonic_root, "minor", 4)
+
+  def pick_from(pitches):
+    return _random.choice(pitches)
+
+  def make_note(p, ql):
+    n = note.Note()
+    n.pitch = _copy.deepcopy(p) if hasattr(p, "name") else pitch.Pitch(p)
+    n.quarterLength = ql
+    return n
+
+  def make_expressive_bar(bar_num, chord_tones, scale, number, density="high"):
+    m = stream.Measure(number=number)
+    if bar_num == 1:
+      m.append(key.Key(tonic_name, key_mode))
+      m.append(meter.TimeSignature(ts_str))
+      m.append(tempo.MetronomeMark(number=bpm, referent=_copy.deepcopy(mm_referent)))
+    dotted_q = 1.5
+    if density == "high":
+      pattern = [0.5] * 12
+    elif density == "medium":
+      pattern = [dotted_q, dotted_q, dotted_q, dotted_q]
+    else:
+      pattern = [2.0, dotted_q, dotted_q, 1.0]
+    total = sum(pattern)
+    if abs(total - bar_ql) > 0.001:
+      pattern = [dotted_q, dotted_q, dotted_q, dotted_q]
+    for i, ql in enumerate(pattern):
+      if i == 0:
+        p = pick_from(chord_tones)
+      elif i == len(pattern) - 1:
+        p = pick_from(chord_tones)
+      else:
+        r = _random.random()
+        if r < 0.65:
+          p = pick_from(scale)
+        elif r < 0.85:
+          p = pick_from(chord_tones)
+        else:
+          chromatic_candidates = []
+          for ct in chord_tones:
+            chromatic_candidates.append(pitch.Pitch(midi=ct.midi + 1))
+            chromatic_candidates.append(pitch.Pitch(midi=ct.midi - 1))
+          p = pick_from(chromatic_candidates) if chromatic_candidates else pick_from(scale)
+      m.append(make_note(p, ql))
+    return m
+
+  measures = []
+  bars_1_4_patterns = ["medium", "high", "high", "medium"]
+  for b in range(4):
+    sc = scale_mid if b < 2 else scale_high
+    measures.append(make_expressive_bar(b + 1, tonic_ct, sc, b + 1, density=bars_1_4_patterns[b]))
+
+  iv_ct_higher = chord_tones_for(iv_root, "minor", 5)
+  iv_scale = minor_pentatonic(ks, octave_range=(5, 6), include_blue=True)
+  for b in range(2):
+    density = "high" if b == 0 else "medium"
+    measures.append(make_expressive_bar(5 + b, iv_ct_higher, iv_scale, 5 + b, density=density))
+
+  for b in range(2):
+    density = "medium" if b == 0 else "high"
+    measures.append(make_expressive_bar(7 + b, tonic_ct, scale_high, 7 + b, density=density))
+
+  v_ct_mid = chord_tones_for(v_root, "minor", 4)
+  measures.append(make_expressive_bar(9, v_ct_mid, scale_high, 9, density="high"))
+  iv_ct_mid = chord_tones_for(iv_root, "minor", 4)
+  measures.append(make_expressive_bar(10, iv_ct_mid, scale_mid, 10, density="high"))
+  measures.append(make_expressive_bar(11, tonic_ct, scale_mid, 11, density="medium"))
+  measures.append(make_expressive_bar(12, v_ct_mid, scale_low, 12, density="medium"))
+
+  part = stream.Part()
+  part.append(instrument.ElectricGuitar())
+  for m in measures:
+    part.append(m)
+  score = stream.Score()
+  score.append(part)
+  return score
+
+
+def vocal_phrase_a():
+  """The first vocal phrase of a 12-bar blues lyric (the A line of
+  AAB). Four bars in 12/8 in the key from `form()`. A weary
+  descending line that leans on the flat-7 and settles on the tonic
+  — the setup of the lyric, not the punchline. Sparse, with lots of
+  rests, sighing through it."""
+  src = form()
+  found_key = next((el for el in src.flatten() if isinstance(el, key.Key)), None)
+  found_ts = next((el for el in src.flatten() if isinstance(el, meter.TimeSignature)), None)
+  found_mm = next((el for el in src.flatten() if isinstance(el, tempo.MetronomeMark)), None)
+  tonic_name = found_key.tonic.name if found_key else "E"
+  mode_str = found_key.mode if found_key else "minor"
+  ts_str = found_ts.ratioString if found_ts else "12/8"
+  bpm = found_mm.number if found_mm else 70
+
+  k = found_key if found_key else key.Key(tonic_name, mode_str)
+  tonic_p = pitch.Pitch(k.tonic.name + "4")
+  fifth_p = pitch.Pitch(k.pitchFromDegree(5).name + "4")
+  flat7_p = pitch.Pitch(k.pitchFromDegree(7).name + "4")
+  third_p = pitch.Pitch(k.pitchFromDegree(3).name + "4")
+  fourth_p = pitch.Pitch(k.pitchFromDegree(4).name + "4")
+  flat7_name = flat7_p.nameWithOctave
+
+  ks = key.Key(tonic_name, mode_str)
+  ts1 = meter.TimeSignature(ts_str)
+  mm = tempo.MetronomeMark(number=bpm, referent=duration.Duration(type="quarter", dots=1))
+
+  m1 = bar(
+    note.Rest(quarterLength=1.5),
+    note.Note(fifth_p.nameWithOctave, quarterLength=1.5),
+    note.Note(fourth_p.nameWithOctave, quarterLength=1.0),
+    note.Note(third_p.nameWithOctave, quarterLength=0.5),
+    note.Rest(quarterLength=1.5),
+    time_signature=ts1, number=1,
+  )
+  m1.insert(0, mm)
+  m1.insert(0, ks)
+
+  m2 = bar(
+    note.Rest(quarterLength=1.5),
+    note.Note(third_p.nameWithOctave, quarterLength=1.0),
+    note.Note(tonic_p.nameWithOctave, quarterLength=0.5),
+    note.Note(pitch.Pitch(k.pitchFromDegree(3).name + "4").nameWithOctave, quarterLength=1.5),
+    note.Rest(quarterLength=1.5),
+    time_signature=ts1, number=2,
+  )
+  m3 = bar(
+    note.Rest(quarterLength=1.5),
+    note.Note(flat7_name, quarterLength=2.0),
+    note.Note(fourth_p.nameWithOctave, quarterLength=1.0),
+    note.Rest(quarterLength=1.5),
+    time_signature=ts1, number=3,
+  )
+  m4 = bar(
+    note.Rest(quarterLength=1.5),
+    note.Note(third_p.nameWithOctave, quarterLength=1.0),
+    note.Note(tonic_p.nameWithOctave, quarterLength=2.0),
+    note.Rest(quarterLength=1.5),
+    time_signature=ts1, number=4,
+  )
+
+  part = stream.Part()
+  part.append(instrument.Vocalist())
+  part.append(m1); part.append(m2); part.append(m3); part.append(m4)
+  score = stream.Score()
+  score.append(part)
+  return score
+
+
+def vocal_phrase_b():
+  """The B line of the AAB blues lyric — the answer, the punchline,
+  the resolution. Four bars in 12/8 in the key from `form()`. Starts
+  higher than phrase A (around the octave above tonic), descends
+  through pentatonic, touches the blue note, lands on tonic by the
+  last bar. More notes, fewer rests than the A line."""
+  import copy as _copy
+  src = form()
+  found_key = next((el for el in src.flatten() if isinstance(el, key.Key)), None)
+  found_ts = next((el for el in src.flatten() if isinstance(el, meter.TimeSignature)), None)
+  found_mm = next((el for el in src.flatten() if isinstance(el, tempo.MetronomeMark)), None)
+  tonic_name = found_key.tonic.name if found_key else "E"
+  mode_str = found_key.mode if found_key else "minor"
+  ts_str = found_ts.ratioString if found_ts else "12/8"
+  bpm = found_mm.number if found_mm else 70
+
+  ts = meter.TimeSignature(ts_str)
+  bar_ql = ts.barDuration.quarterLength
+  ks = key.Key(tonic_name, mode_str)
+  k_scale = minor_pentatonic(ks, octave_range=(4, 6), include_blue=True)
+  tonic_midi_4 = pitch.Pitch(tonic_name + "4").midi
+  tonic_midi_5 = pitch.Pitch(tonic_name + "5").midi
+
+  def closest_scale_pitch(midi_target):
+    return min(k_scale, key=lambda p: abs(p.midi - midi_target))
+
+  entry = closest_scale_pitch(tonic_midi_5 + 3)
+  b7 = closest_scale_pitch(tonic_midi_5 - 2)
+  fifth = closest_scale_pitch(tonic_midi_5 - 5)
+  b5_candidates = [p for p in k_scale if abs(p.midi - (tonic_midi_4 + 6)) <= 1]
+  blue = b5_candidates[0] if b5_candidates else closest_scale_pitch(tonic_midi_4 + 6)
+  fourth = closest_scale_pitch(tonic_midi_4 + 5)
+  minor3 = closest_scale_pitch(tonic_midi_4 + 3)
+  tonic4 = closest_scale_pitch(tonic_midi_4)
+
+  def make_note(p, ql):
+    n = note.Note()
+    n.pitch = _copy.deepcopy(p)
+    n.quarterLength = ql
+    return n
+
+  part = stream.Part()
+  part.append(instrument.Vocalist())
+
+  m1 = stream.Measure(number=1)
+  m1.append(_copy.deepcopy(ks))
+  m1.append(meter.TimeSignature(ts_str))
+  m1.append(tempo.MetronomeMark(number=bpm, referent=duration.Duration(type="quarter", dots=1)))
+  n1 = make_note(entry, 3.0)
+  n2 = make_note(closest_scale_pitch(entry.midi - 2), 1.5)
+  n3 = make_note(closest_scale_pitch(b7.midi), 1.5)
+  m1.append(n1); m1.append(n2); m1.append(n3)
+  rem1 = bar_ql - (n1.quarterLength + n2.quarterLength + n3.quarterLength)
+  if rem1 > 0:
+    m1.append(note.Rest(quarterLength=rem1))
+
+  m2 = stream.Measure(number=2)
+  m2.append(make_note(_copy.deepcopy(b7), 1.5))
+  m2.append(make_note(fifth, 1.5))
+  m2.append(make_note(closest_scale_pitch(fifth.midi - 1), 1.5))
+  m2.append(make_note(fifth, 1.5))
+
+  m3 = stream.Measure(number=3)
+  m3.append(make_note(fourth, 1.5))
+  m3.append(make_note(blue, 1.5))
+  m3.append(make_note(minor3, 1.5))
+  m3.append(make_note(tonic4, 1.5))
+
+  m4 = stream.Measure(number=4)
+  m4.append(make_note(tonic4, 3.0))
+  m4.append(make_note(closest_scale_pitch(tonic_midi_4 - 1), 1.5))
+  m4.append(make_note(tonic4, 1.5))
+
+  part.append(m1); part.append(m2); part.append(m3); part.append(m4)
+  score = stream.Score()
+  score.append(part)
+  return score
+
+
+def phase_cell():
+  """The Reich 'Clapping Music' 12-eighth rhythmic cell as a plain dict
+  designed for consumption by `phase_shifter`. Carries: percussion
+  instrument factory (closed hi-hat — the FACTORY ref, not an
+  instance; the shifter calls it per voice), hit positions in eighth-
+  units within the cell (Reich's `[0, 1, 2, 4, 5, 7, 9, 10]` — 8 hits
+  across 12 positions), and the cell length in eighths (12)."""
+  return {
+    "instrument": closed_hihat,
+    "hits_in_eighths": [0, 1, 2, 4, 5, 7, 9, 10],
+    "length_eighths": 12,
+  }
+
+
+def phase_shifter(*, cell, num_voices=4, bars_per_section=4,
+                  total_sections=8, shift_per_section_eighths=1,
+                  ts_str="12/8", bpm=96, velocity_profile="human"):
+  """A parameterized phase-canon engine. Takes a rhythmic cell (from
+  `phase_cell()` or any compatible dict) plus shape parameters and
+  returns a Score with N stacked Parts playing the cell repeatedly,
+  each voice K (1-indexed) accumulating an integer eighth-note phase
+  shift per section. For defaults (4 voices, 1-eighth shift per
+  section, 12-eighth cell), voice 4 realigns with voice 1 at section
+  4; voice 3 realigns at section 6. Default shape: 12/8 at 96 BPM,
+  8 sections × 4 bars/section = 32 bars; eighth-note hits."""
+  ts = meter.TimeSignature(ts_str)
+  mm = tempo.MetronomeMark(number=bpm)
+  eighth_ql = 0.5
+  cell_length = cell["length_eighths"]
+  hits = list(cell["hits_in_eighths"])
+  inst_factory = cell["instrument"]
+
+  def build_bar(rotated_hits, measure_number, first_in_part):
+    m = stream.Measure(number=measure_number)
+    if first_in_part:
+      m.append(ts)
+      m.append(mm)
+    rotated = sorted(rotated_hits)
+    cursor_eighths = 0
+    non_rest_notes = []
+    for pos in rotated:
+      gap = pos - cursor_eighths
+      if gap > 0:
+        m.append(note.Rest(quarterLength=gap * eighth_ql))
+        cursor_eighths += gap
+      n = note.Note("C4", quarterLength=eighth_ql)
+      m.append(n)
+      non_rest_notes.append(n)
+      cursor_eighths += 1
+    remaining_eighths = cell_length - cursor_eighths
+    if remaining_eighths > 0:
+      m.append(note.Rest(quarterLength=remaining_eighths * eighth_ql))
+    return m, non_rest_notes
+
+  score = stream.Score()
+  for k in range(1, num_voices + 1):
+    part = stream.Part()
+    part.append(inst_factory())
+    all_notes_in_part = []
+    for s in range(total_sections):
+      offset = ((k - 1) * shift_per_section_eighths * s) % cell_length
+      rotated_hits = [(h + offset) % cell_length for h in hits]
+      for bar_in_section in range(bars_per_section):
+        measure_number = s * bars_per_section + bar_in_section + 1
+        first_in_part = (measure_number == 1)
+        m, notes_in_bar = build_bar(rotated_hits, measure_number, first_in_part)
+        part.append(m)
+        all_notes_in_part.extend(notes_in_bar)
+    if all_notes_in_part:
+      with_velocity(all_notes_in_part, velocity_profile)
+    score.insert(0, part)
+  return score
