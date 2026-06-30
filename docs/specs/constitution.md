@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v10)
+# Forge — Core Invariants and Discipline (V2a v11)
 
 ## Mission
 
@@ -7,58 +7,108 @@ their most meaningful work — by making artifacts they care about, in a
 medium that lets them tinker freely. The system exists to make that
 possible at every scale: a beginner making their first parametric
 greeting, a student composing a 12-bar blues, a researcher orchestrating
-a multi-snippet simulation.
+a multi-note simulation.
 
-The building blocks are **snippets**, and they must be:
+The building blocks are **notes** — markdown files with frontmatter
+and one or more facets. Notes come in two shapes: an **action note**
+that computes a result, and a **data note** that stores literal
+content. Both must be:
 
-- **Concrete** — every snippet produces a visible, immediately legible
+- **Concrete** — every note produces a visible, immediately legible
   artifact (text, score, image, simulation, computed value). The user
   sees what they made.
-- **Parametric** — every snippet exposes inputs the user can tweak and
+- **Parametric** — every note exposes inputs the user can tweak and
   re-run. Variation is cheap.
-- **Composable** — snippets call snippets; small things become bigger
+- **Composable** — notes call notes; small things become bigger
   things; the call graph is visible to author and reader, not hidden.
 - **Personally meaningful** — users author for what *they* want to
   build, not for a curriculum's prescribed exercises.
 
 The environment itself must have:
 
-- A **low floor** — the cost to author and run a first snippet is small.
+- A **low floor** — the cost to author and run a first note is small.
   A beginner can be productive within minutes.
-- A **high ceiling** — the cost to author the hundredth snippet stays
+- A **high ceiling** — the cost to author the hundredth note stays
   small. Complex work composes from simple parts without combinatorial
   pain.
 - **Wide walls** — many directions to play (music, simulation, math,
   image, text, anything code can do), not a single linear curriculum.
 
 **Every design decision is evaluated against the play loop.** Does this
-make adding a snippet cheaper or more expensive? Does this make tweaking
+make adding a note cheaper or more expensive? Does this make tweaking
 a value cheaper or more expensive? Does this make sharing a creation
 cheaper or more expensive? If a feature costs the user more than it
 gives, it is the wrong feature — even if it is elegant.
 
 **The LLM is in service of the play loop, not the other way around.**
-The LLM lowers the entry barrier (free English → canonical) and is
-allowed to be slow or fuzzy *at transpile time*. At runtime, the system
-is deterministic, debuggable, and cheap — so users iterate without
+The LLM lowers the entry barrier (free Description → structured Recipe)
+and is allowed to be slow or fuzzy *at transpile time*. At runtime, the
+system is deterministic, debuggable, and cheap — so users iterate without
 waiting and without per-click LLM cost. Architectural guarantees below
 serve this principle.
 
-**The canonical form is E--** (`~/projects/e--/`, vendored into the
-Forge engine package). The English facet of every snippet is — or is
-being normalized toward — canonical E--: a closed-vocabulary,
-deterministically-parseable subset of English with explicit markers
-for calls (`[[snippet]](args)`), assignments, returns, and value slots
-(`{{ ... }}`). The LLM is invoked only to normalize free English into
-canonical E-- (and to resolve `{{ slot }}` values) — never to decide
-program structure. After normalization, the deterministic E-- compiler
-emits Python; the LLM is out of the runtime path. This is the
-load-bearing implementation choice that makes the runtime determinism
-+ cheap-tweak properties above realizable.
+**The canonical form is Recipe** (V2 paradigm; supersedes the V1
+canonical-English / E-- design). Every V2 action note has a Description
+facet (free prose capturing intent + mechanics + inputs) and a Recipe
+facet (a structured grammar that compiles deterministically to Python).
+The Recipe uses chips ([[note]] references, control flow, `{{ ... }}`
+value slots) so the call graph is legible without specifying mechanism.
+The LLM is invoked only at `/generate` time (Description → Recipe) and
+at `/resolve-slot` time (`{{ ... }}` → Python expression) — never to
+decide program structure at runtime. After Recipe is in hand, the
+deterministic transpiler emits Python; the LLM is out of the runtime
+path. This is the load-bearing implementation choice that makes the
+runtime determinism + cheap-tweak properties above realizable. Legacy
+V1 action notes (English + Python facets) remain valid; the engine
+accepts both shapes during the V1 → V2 migration period.
 
 The clauses that follow (Purpose, Core abstractions, A/B/F/D/C-series)
 are the invariants and disciplines that make this mission realizable.
 When a decision is unclear, the mission is the yardstick.
+
+## Vocabulary
+
+Adopted from V2 specification §1, June 2026. These terms are
+authoritative throughout this document and the engine. Legacy
+"snippet" terminology in A-series, B-series, Data, and Snapshots
+sections is grandfathered pending the V2a v12 sweep amendment.
+
+1. **Note** — the file unit. A `.md` file with frontmatter and one or
+   more facets. The umbrella term covering both shapes below.
+2. **Action note** — a note that returns a computed result. Replaces
+   the V1 term "action snippet."
+3. **Data note** — a note that returns literal data. Replaces the V1
+   term "data snippet."
+4. **Description** — free-prose facet capturing intent + mechanics +
+   design notes + parameter documentation. Required on every V2 action
+   note. Replaces the V1 "English facet."
+5. **Recipe** — structured-recipe facet that compiles to Python.
+   Required on every V2 action note. Uses chip-call syntax
+   (`Let X = Y.`, `Call [[chip]] with k=v.`, `Return X.`,
+   `If/Otherwise`, `For each/Repeat`, `{{...}}` slots).
+6. **Python** — the compiled-from-Recipe Python facet. Always present
+   at compute time; visible to the cohort when toggled, editable by
+   engineers. The canonical facet (the one that actually runs) is
+   determined by which layer was last hand-edited; the implicit-
+   locking state machine (S9) routes accordingly.
+7. **Chip** — a callable primitive. Either an engine primitive (Python
+   in `forge/forge/<domain>/lib.py`) OR a vault note (Description +
+   Recipe). Both surface in the chip palette identically. Chips may
+   have side effects.
+8. **Chip palette** — the UI affordance for inserting chips +
+   control-flow into a Recipe. Not a model concept.
+9. **Library** — the union of engine primitives + vault notes that
+   are callable.
+10. **Cohort author** — composes notes from existing chips. Writes
+    Description + Recipe. Never writes Python directly.
+11. **Engineer** — extends the library by adding engine primitives in
+    `lib.py`.
+
+The terms above are the V2 paradigm. V1 vocabulary ("snippet,"
+"English facet") remains valid in the engine source and in legacy
+content (e.g., `forge-music/blues/*.md`) and SHOULD be migrated to V2
+on a per-vault basis. V1 and V2 notes coexist in the same vault; the
+engine accepts both shapes.
 
 ## Purpose
 
@@ -77,13 +127,18 @@ specific improvisations in place while the rest stays live.
 
 ## Core abstractions
 
-**S1.** A *snippet* is a markdown file with frontmatter and one of two
-shapes: an *action snippet* with English and Python facets, or a *data
-snippet* with stored content (either inline body or a sibling asset
-file referenced by `content_ref`). Identified by
-`<vault_name>/<snippet_id>`.
+**S1.** A *note* is a markdown file with frontmatter and one or more
+facets. Notes come in two shapes:
 
-**S2.** A *vault* is a directory containing snippets and a `forge.toml`
+- An **action note** (V2: Description + Recipe + optional Python;
+  V1: English + Python) returns a computed result.
+- A **data note** has stored content (either inline body or a sibling
+  asset file referenced by `content_ref`) and returns the deserialized
+  value.
+
+Identified by `<vault_name>/<note_id>`.
+
+**S2.** A *vault* is a directory containing notes and a `forge.toml`
 manifest declaring name, version, description, and optional dependencies
 on other vaults.
 
@@ -93,35 +148,78 @@ tarball URLs with SHA-256 integrity hashes.
 **S4.** The *built-in vault* (`forge`) is bundled inside the engine and
 contains platform machinery (install, registry/lookup, etc.).
 
-**S5.** A *data snippet* is a snippet whose stored content (rather
-than executable Python) is the value it represents. Content lives
-inline in the body for text content types, or in a sibling asset file
-referenced by `content_ref` for binary content types. Data snippets
-have no English facet. They may be hand-authored by users, captured
-from compute results, or system-generated by Forge as snapshots.
+**S5.** A *data note* is a note whose stored content (rather than
+executable Python) is the value it represents. Content lives inline in
+the body for text content types, or in a sibling asset file referenced
+by `content_ref` for binary content types. Data notes have no
+Description / Recipe / Python facets. They may be hand-authored by
+users, captured from compute results, or system-generated by Forge as
+snapshots.
 
-**S6.** A *snapshot* is a system-generated data snippet capturing the
+**S6.** A *snapshot* is a system-generated data note capturing the
 most recent computed value on a specific edge of the DAG (a
 caller-callee pair). Forge writes snapshots automatically; users do
 not author them directly. Snapshots are the storage mechanism Forge
 uses to implement edge-level freezing.
 
-**S7.** *Infrastructure files vs. snippets.* Markdown files whose
-basename starts with an underscore (`_`) are treated as vault
-**infrastructure files**, not snippets. They are excluded from
-snippet-registry discovery, from chip-palette auto-derivation, from
-the Forge-click compute surface, and from the static dependency
-analyzer. Examples: `_chips.md` (chip palette curation),
-`_meta/*.md` files (vault metadata), future `_config.md`,
-`_aliases.md`, etc. The `_` prefix is a syntactically-explicit
-convention so authors know which files are "real content" vs which
-are "tooling configuration" without reading frontmatter. Infrastructure
-files MAY still be valid data snippets in shape (with frontmatter +
-body), and may be read by tooling (engine, plugin, registry) via
-explicit-name lookups — they're simply not auto-discovered as part of
-the snippet inventory. Auto-discovery rules in registry-building,
-chip-palette construction, and any future discovery surfaces MUST
-honor this exclusion.
+**S7.** *Infrastructure files vs. notes.* Markdown files whose basename
+starts with an underscore (`_`) are treated as vault **infrastructure
+files**, not notes. They are excluded from note-registry discovery,
+from chip-palette auto-derivation, from the Forge-click compute
+surface, and from the static dependency analyzer. Examples:
+`_chips.md` (chip palette curation), `_meta/*.md` files (vault
+metadata), future `_config.md`, `_aliases.md`, etc. The `_` prefix is
+a syntactically-explicit convention so authors know which files are
+"real content" vs which are "tooling configuration" without reading
+frontmatter. Infrastructure files MAY still be valid data notes in
+shape (with frontmatter + body), and may be read by tooling (engine,
+plugin, registry) via explicit-name lookups — they're simply not
+auto-discovered as part of the note inventory. Auto-discovery rules in
+registry-building, chip-palette construction, and any future discovery
+surfaces MUST honor this exclusion.
+
+**S8.** *Facet structure for V2 action notes.* A V2 action note has
+three facets, in this order in the markdown body:
+
+1. `# Description` — required. Free prose describing intent +
+   mechanics + design notes. Optionally contains a `## Inputs`
+   sub-section listing parameters with descriptions. The Description
+   is the load-bearing facet for `/generate` (LLM reads it to produce
+   Recipe) and for cohort comprehension.
+2. `# Recipe` — required for V2 action notes. Structured grammar that
+   compiles to Python via the forge-transpile service. Uses chip-call
+   syntax (per Vocabulary item 5).
+3. `# Python` — optional in the source file (always exists at compute
+   time, may be hidden in source per author preference). When present
+   and hand-edited, takes precedence over Recipe per the implicit-
+   locking state machine (S9).
+
+A V1 action note has two facets (`# English` + `# Python`) and uses
+frontmatter `inputs: []` for parameter declaration. V1 notes remain
+valid; the engine accepts both shapes. New action notes SHOULD be
+authored as V2.
+
+**S9.** *Implicit-locking state machine for V2 action notes.* Three
+SHA-256 hashes in frontmatter (`description_hash`, `recipe_hash`,
+`python_hash`) track which facets have been hand-edited since the
+last synced state. The canonical facet — the one that runs on
+Forge-click — is whichever was most recently hand-edited:
+
+- All three hashes match stored: **synced** state; running Python
+  produces output matching all three facets.
+- Description hash drifted: cohort is editing Description; Recipe
+  regenerates from Description on next `/generate`.
+- Recipe hash drifted: cohort is editing Recipe; Python recompiles
+  from Recipe on next Forge-click.
+- Python hash drifted: engineer is editing Python directly; Python
+  runs as-is (no transpile), Recipe + Description treated as
+  documentation.
+
+CM6 decorations + status bar surface the canonical layer to the
+cohort. A confirmation modal protects against unintended overwrite
+when `/generate` would clobber a hand-edited Recipe. The hash-driven
+locking replaces the V1 explicit-lock mechanism (`lock` / `unlock`
+commands, removed v0.2.197).
 
 ## Architectural guarantees
 
@@ -891,6 +989,18 @@ via environment variable.
 **I6.** Snapshot storage is at
 `<vault>/.forge/edges/<caller_id>/<callee_id>.md`. Snapshot content is
 wire-format text in the body; metadata in frontmatter.
+
+**I7.** *V1 → V2 migration in progress.* As of V2a v11, the engine
+and plugin support both V1 (`# English` + `# Python` + frontmatter
+inputs) and V2 (`# Description` + `# Recipe` + `# Python` + facet
+hashes) action notes. Existing content is migrated per-vault:
+forge-tutorial fully V2; forge-moda fully V2; forge-music partially
+migrated (`percussion_lab/` fully V2; `murmuration.md` V2; `blues/*`
+and `percussion/{loom,phase_cell,phase_shifter}.md` still V1 pending
+content drain). New action notes SHOULD be authored as V2. V1 content
+is grandfathered indefinitely; the engine does not plan to drop V1
+support, though chip-palette UX defaults bias toward V2 keywords
+(Let / Return / Call) in V2-contextual editors.
 
 ## Deliberate non-commitments
 

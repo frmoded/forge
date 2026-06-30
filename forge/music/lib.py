@@ -758,6 +758,15 @@ def sequence_list(sections):
   return sequence(*sections)
 
 
+def voices_list(sections):
+  """v2 — composition chip. Parallel to `sequence_list` for `voices(*streams)`.
+  E-- has no `*args` syntax, so `voices(*xs)` isn't callable directly from E--.
+  `[[voices_list]] with sections=[s1, s2, ...]` unpacks the list and forwards
+  to the V1 `voices` builder. Returns a Score with the input streams overlaid
+  in parallel (each stream gets its own staff, durations preserved)."""
+  return voices(*sections)
+
+
 def play_at_offsets(
     instrument,
     offsets,

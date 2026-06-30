@@ -57,6 +57,8 @@ try:
     "play_at_offsets": _music_lib.play_at_offsets,
     # v2-migration §3 — variadic-list wrapper for sequence()
     "sequence_list": _music_lib.sequence_list,
+    # v2-migration — variadic-list wrapper for voices()
+    "voices_list": _music_lib.voices_list,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}
@@ -219,7 +221,7 @@ def _domain_globals_for(domains):
           "low_tom", "mid_tom", "high_tom",
           "crash_cymbal", "ride_cymbal", "kick", "snare",
           "play_at_beats", "show_score",
-          "play_at_offsets", "sequence_list",
+          "play_at_offsets", "sequence_list", "voices_list",
         )
         if hasattr(_music_lib_lazy, name)
       }

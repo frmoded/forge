@@ -35,6 +35,13 @@ def test_music_domain_globals_include_sequence_list():
   assert callable(globals_dict["sequence_list"])
 
 
+def test_music_domain_globals_include_voices_list():
+  from forge.core import executor
+  globals_dict = executor._domain_globals_for(["music"])
+  assert "voices_list" in globals_dict
+  assert callable(globals_dict["voices_list"])
+
+
 def test_music_domain_globals_lazily_pick_up_late_import(monkeypatch):
   """Simulate the pyodide ordering issue: at executor-import time the
   music21 wheels aren't there yet, _FORGE_MUSIC_LIB_NAMES gets cached
