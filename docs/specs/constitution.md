@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v11)
+# Forge — Core Invariants and Discipline (V2a v11.1)
 
 ## Mission
 
@@ -220,6 +220,56 @@ cohort. A confirmation modal protects against unintended overwrite
 when `/generate` would clobber a hand-edited Recipe. The hash-driven
 locking replaces the V1 explicit-lock mechanism (`lock` / `unlock`
 commands, removed v0.2.197).
+
+**S10.** *Engineer-mode action notes — third operational shape between
+V1 and full-V2.*
+
+Some action notes carry Python logic that V2 Recipe grammar cannot
+express: lambdas, comprehensions, music21 object construction with
+bound method references, complex try/except, dynamic attribute access,
+etc. These notes need to be authored as V2-shaped (so they participate
+in the V2 ecosystem — Description for cohort comprehension, Recipe
+heading for the chip palette + display contract) while remaining
+engineer-owned operationally (the canonical layer is Python, hand-
+authored, and runs as-is on Forge-click).
+
+The convention:
+
+1. **Frontmatter signal**: `edit_mode: python` MUST appear in the
+   frontmatter.
+2. **Facet structure**: Description + Recipe + Python all present
+   (V2-shaped per S8), where Recipe body is a single HTML comment
+   indicating engineer-mode (e.g., `<!-- engineer-mode: this snippet's
+   logic lives in # Python. The frontmatter carries edit_mode: python
+   so Forge-click runs the Python directly instead of transpiling
+   Recipe → Python. -->`).
+3. **Routing precedence**: the engine's action-code resolver MUST
+   check the `edit_mode: python` frontmatter signal BEFORE V2-shape
+   detection. The short-circuit ensures engineer-mode notes never
+   route through Recipe transpilation regardless of whether their
+   shape would otherwise classify as V2 (per v0.2.222 retrospective —
+   ordering bug had `resolve_action_code` hitting V2 detect first,
+   transpiling stub Recipes to empty Python and overwriting the
+   canonical).
+
+Engineer-mode is the legitimate operational shape for action notes
+whose Python uses constructs outside V2 Recipe's expressive range.
+It is NOT a workaround for V1 notes that haven't been migrated —
+those keep `# English` + `# Python` shape. It is NOT a Path Y escape
+hatch (Path Y delivery via v0.2.197-205 implicit-locking handles
+cohort-authored Python edits correctly per S9).
+
+Engineer-mode is engineer-authored. Cohort users can READ the
+Description but should not edit the Python; if they want behavior
+changes, the right path is to request engine work or fork the note
+with their own Python facet.
+
+The implicit-locking state machine (S9) is bypassed entirely for
+engineer-mode notes — the engine treats the Python facet as
+canonical without hash comparison. This is intentional: hash drift
+would surface false-positive "Python canonical" status when the
+Recipe is just a stub that the cohort might edit by accident; the
+short-circuit prevents the stale state machine from firing.
 
 ## Architectural guarantees
 
@@ -990,17 +1040,27 @@ via environment variable.
 `<vault>/.forge/edges/<caller_id>/<callee_id>.md`. Snapshot content is
 wire-format text in the body; metadata in frontmatter.
 
-**I7.** *V1 → V2 migration in progress.* As of V2a v11, the engine
-and plugin support both V1 (`# English` + `# Python` + frontmatter
-inputs) and V2 (`# Description` + `# Recipe` + `# Python` + facet
-hashes) action notes. Existing content is migrated per-vault:
-forge-tutorial fully V2; forge-moda fully V2; forge-music partially
-migrated (`percussion_lab/` fully V2; `murmuration.md` V2; `blues/*`
-and `percussion/{loom,phase_cell,phase_shifter}.md` still V1 pending
-content drain). New action notes SHOULD be authored as V2. V1 content
-is grandfathered indefinitely; the engine does not plan to drop V1
-support, though chip-palette UX defaults bias toward V2 keywords
-(Let / Return / Call) in V2-contextual editors.
+**I7.** *V1 → V2 migration in progress.* As of V2a v11.1, the engine
+and plugin support three operational shapes: V1 (`# English` +
+`# Python` + frontmatter inputs), full-V2 (`# Description` +
+`# Recipe` + `# Python` + facet hashes per S8-S9), and engineer-mode
+V2 (V2-shaped with stub Recipe + `edit_mode: python` per S10).
+Existing content is migrated per-vault: forge-tutorial fully V2;
+forge-moda fully V2; forge-music fully V2-shaped post-v0.6.0 — 4 of
+12 migrated as full-V2 (`song.md`, `chorus.md`, `solo_chorus.md`,
+`percussion/loom.md`), 8 of 12 as engineer-mode per S10 because their
+Python is not expressible in V2 Recipe grammar (`blues/drum_chorus.md`,
+`drums_shuffle.md`, `form.md`, `guitar_solo_chorus.md`,
+`vocal_phrase_a.md`, `vocal_phrase_b.md`, `percussion/phase_cell.md`,
+`phase_shifter.md`). All forge-music action notes now have
+Description + Recipe + Python facets present, even if engineer-mode
+notes have Recipe as a stub comment per S10. New action notes SHOULD
+be authored as full-V2 when their Python fits Recipe grammar, as
+engineer-mode V2 otherwise; V1 only for content that hasn't been
+touched since pre-V2a migration. V1 content is grandfathered
+indefinitely; the engine does not plan to drop V1 support, though
+chip-palette UX defaults bias toward V2 keywords (Let / Return /
+Call) in V2-contextual editors.
 
 ## Deliberate non-commitments
 
