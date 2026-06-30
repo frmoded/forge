@@ -767,6 +767,16 @@ def voices_list(sections):
   return voices(*sections)
 
 
+def bar_list(items, time_signature=None, number=None):
+  """v2 — composition chip. Parallel to `sequence_list`/`voices_list` for
+  `bar(*items, time_signature=None, number=None)`. V2 Recipe is kwarg-only;
+  variadic-positional `*items` isn't directly expressible. Pass the items
+  as a list:
+      Call [[bar_list]] with items=[n1, n2, n3], time_signature=ts.
+  Equivalent to `bar(n1, n2, n3, time_signature=ts)`."""
+  return bar(*items, time_signature=time_signature, number=number)
+
+
 def play_at_offsets(
     instrument,
     offsets,
