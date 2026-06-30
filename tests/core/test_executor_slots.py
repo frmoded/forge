@@ -214,6 +214,36 @@ def test_edit_mode_python_skips_hash_check_even_with_mismatch():
   assert "manual override" in code
 
 
+def test_edit_mode_python_bypasses_v2_recipe_parse():
+  # v0.2.222 — engineer-mode snippets with V2 shape (Description +
+  # Recipe + Python) and an unparseable Recipe stub (e.g. HTML comment)
+  # must NOT explode the V2 parser. The python facet wins.
+  #
+  # Regression: pre-v0.2.222 the engine's V2 detection fired BEFORE
+  # the edit_mode check, so a transitive `context.compute("X")` from
+  # another snippet's Python (which can't see the plugin-side
+  # python-mode routing) would call _v2_parse on
+  # `<!-- engineer-mode: ... -->` and ParseError on `!`.
+  body = (
+    "# Description\n\n"
+    "A complex snippet whose Python is canonical.\n\n"
+    "# Recipe\n\n"
+    "<!-- engineer-mode: this snippet's logic lives in # Python. -->\n\n"
+    "# Python\n\n"
+    "```python\n"
+    "def compute(context):\n"
+    "    return 'engineer-mode-wins'\n"
+    "```\n"
+  )
+  snip = {
+    "snippet_id": "forge-music/drum_chorus",
+    "meta": {"type": "action", "edit_mode": "python"},
+    "body": body,
+  }
+  code = resolve_action_code(snip)
+  assert "engineer-mode-wins" in code
+
+
 # --- 7. Legacy free-English regression --------------------------------
 
 

@@ -740,6 +740,19 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False):
   # SlotCacheMissError → plugin handles via /resolve-slot round-trip
   # (handleSlotCacheMiss in main.ts already does this for V1, no
   # plugin-side changes needed).
+  # v0.2.222 — engineer-mode short-circuit. When the snippet declares
+  # `edit_mode: python` the cohort is taking ownership of the # Python
+  # facet; the # Recipe section is documentation/comment only and may
+  # not be parseable E--. Return the extracted Python directly so
+  # transitive `context.compute("X")` calls (which can't see the
+  # plugin's python-mode routing) work the same way the top-level
+  # Forge-click does. Pre-v0.2.222 the engine tried V2 parse first
+  # and exploded on stub Recipes like `<!-- engineer-mode -->`.
+  if snippet["meta"].get("edit_mode") == "python":
+    code = extract_python(snippet["body"])
+    if code is not None:
+      return code
+
   try:
     from forge.recipe import detect_recipe_shape as _v2_detect
     from forge.recipe import extract_recipe_body as _v2_extract
