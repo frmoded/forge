@@ -376,3 +376,87 @@ def test_serialize_for_wire_still_round_trips_particle_state_losslessly():
   back = deserialize_from_wire(ct, body)
   assert isinstance(back, ParticleState)
   _assert_state_equal(back, ps)
+
+
+# v0.2.216 — multi-staff percussion display-pitch normalization
+
+def test_multi_staff_xml_lifts_kick_pitch_above_bass_staff():
+  """v0.2.216 — Driver smoke against v0.2.215 showed the murmuration
+  multi-staff score rendered "an octave or two too low" because lib.
+  play_at_beats stamps each Note's pitch.midi to the Part's
+  percMapPitch (kick=35=B1, snare=38=D2, etc.) for the v0.2.159
+  MIDI bongo-wall fix. Those literal pitches render way below the
+  bass staff.
+
+  Post-v0.2.216 the serialization helper builds a display copy with
+  percussion pitches lifted to the kit-notation positions (kick→F4
+  per _KIT_NOTATION_MAP). The multi_staff XML carries the lifted
+  pitches; original score keeps pmp for MIDI export.
+  """
+  from forge.music.lib import kick, play_at_offsets
+  from music21 import stream as m21_stream
+  s = m21_stream.Score()
+  s.append(play_at_offsets(kick(), [0, 2], bars=1))
+  out = serialize_result(s)
+  # serialize_result returns the input verbatim for stream-typed
+  # values (the music21 codec path), so call the tagger directly.
+  from forge.core.serialization import _try_serialize_music21
+  payload = _try_serialize_music21(s, snippet=None)
+  assert payload is not None
+  xml = payload["multi_staff_content"] if "multi_staff_content" in payload else payload["content"]
+  # B1 = MIDI 35; lifted display is F4 (MIDI 65). The multi_staff XML
+  # must NOT carry B1 as the note pitch — that's the symptom we're
+  # fixing. F4 (step=F + octave=4) is what kit_notation_map maps
+  # BassDrum to.
+  assert "<step>F</step>" in xml and "<octave>4</octave>" in xml, (
+    "multi_staff XML must carry the lifted display pitch (F4 for "
+    f"kick); got XML head: {xml[:1500]!r}"
+  )
+  # And it must NOT show the raw B1.
+  assert "<step>B</step>\n          <octave>1</octave>" not in xml, (
+    "multi_staff XML still has raw B1 pitch — v0.2.216 normalization "
+    "didn't fire"
+  )
+
+
+def test_multi_staff_normalization_does_not_mutate_original_score():
+  """The original score must keep its low percMapPitch values so the
+  downstream MIDI export still routes to channel-10 drum slots.
+  Verified by checking the original `value` after serialize."""
+  from forge.music.lib import kick, play_at_offsets
+  from music21 import note as m21_note, stream as m21_stream
+  s = m21_stream.Score()
+  s.append(play_at_offsets(kick(), [0, 2], bars=1))
+  # Capture original pitch.midi values BEFORE serialization.
+  before = [
+    n.pitch.midi for n in s.recurse().notes if isinstance(n, m21_note.Note)
+  ]
+  assert any(p == 35 for p in before), (
+    f"Pre-test sanity: original kick part should have pitch 35 (B1); "
+    f"got {before}"
+  )
+  from forge.core.serialization import _try_serialize_music21
+  _try_serialize_music21(s, snippet=None)
+  # After serialization, the original score's notes must still be at
+  # pmp (35 for kick) so MIDI export works.
+  after = [
+    n.pitch.midi for n in s.recurse().notes if isinstance(n, m21_note.Note)
+  ]
+  assert after == before, (
+    f"Original score was mutated: before={before}, after={after}. "
+    f"The display normalization must operate on a deep copy."
+  )
+
+
+def test_multi_staff_snare_lifted_to_middle_staff_position():
+  from forge.music.lib import snare, play_at_offsets
+  from music21 import stream as m21_stream
+  from forge.core.serialization import _try_serialize_music21
+  s = m21_stream.Score()
+  s.append(play_at_offsets(snare(), [1, 3], bars=1))
+  payload = _try_serialize_music21(s, snippet=None)
+  xml = payload["multi_staff_content"] if "multi_staff_content" in payload else payload["content"]
+  # Snare → C5 per the kit_notation map.
+  assert "<step>C</step>" in xml and "<octave>5</octave>" in xml, (
+    f"snare display pitch missing; xml head: {xml[:1200]!r}"
+  )
