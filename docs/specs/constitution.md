@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v11.1)
+# Forge — Core Invariants and Discipline (V2a v11.2)
 
 ## Mission
 
@@ -91,18 +91,39 @@ sections is grandfathered pending the V2a v12 sweep amendment.
    engineers. The canonical facet (the one that actually runs) is
    determined by which layer was last hand-edited; the implicit-
    locking state machine (S9) routes accordingly.
-7. **Chip** — a callable primitive. Either an engine primitive (Python
-   in `forge/forge/<domain>/lib.py`) OR a vault note (Description +
-   Recipe). Both surface in the chip palette identically. Chips may
-   have side effects.
+7. **Chip** — a palette UX construct. The chip palette displays
+   clickable entries that insert wikilinks + Recipe-grammar shapes
+   into the active note. Each chip in the palette references a note
+   (library note per §12, or vault note per §13). "Chip" is NOT the
+   model concept for callable primitives — the model concept is the
+   note that the chip references. Per V2a v11.2 amendment closing
+   the chip-as-model-concept conflation.
 8. **Chip palette** — the UI affordance for inserting chips +
    control-flow into a Recipe. Not a model concept.
 9. **Library** — the union of engine primitives + vault notes that
    are callable.
 10. **Cohort author** — composes notes from existing chips. Writes
     Description + Recipe. Never writes Python directly.
-11. **Engineer** — extends the library by adding engine primitives in
-    `lib.py`.
+11. **Engineer** — extends the library by adding library notes (per
+    §12) in `forge/forge/<domain>/lib.py`.
+12. **Library note** — a callable action note shipped by the engine.
+    The Python source lives in `forge/forge/<domain>/lib.py`; the
+    note's facets are served read-only via the plugin's library-note
+    view (Description from the function's docstring, Recipe from a
+    synthetic signature, Python from the function source). Library
+    notes are virtual at the vault level (no `.md` file materializes;
+    the view renders directly from the `lib.py` introspection). They
+    are callable from any Recipe via wikilink.
+13. **Vault note** — a callable action note authored by the cohort.
+    Full V2 shape (Description + Recipe + Python) with implicit-
+    locking state machine per S9. Callable from any Recipe via
+    wikilink. Distinct from library notes only in authorship (cohort
+    vs engine) and editability (read-write vs read-only).
+
+Every chip in the palette MUST correspond to a note (library or
+vault). There are no chips without backing notes. The conflation of
+chip-as-model-concept and chip-as-palette-entry shipped in V2a v11.0
+was the prior framing; V2a v11.2 separates them.
 
 The terms above are the V2 paradigm. V1 vocabulary ("snippet,"
 "English facet") remains valid in the engine source and in legacy
