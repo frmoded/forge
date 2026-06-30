@@ -1061,27 +1061,27 @@ via environment variable.
 `<vault>/.forge/edges/<caller_id>/<callee_id>.md`. Snapshot content is
 wire-format text in the body; metadata in frontmatter.
 
-**I7.** *V1 → V2 migration in progress.* As of V2a v11.1, the engine
-and plugin support three operational shapes: V1 (`# English` +
-`# Python` + frontmatter inputs), full-V2 (`# Description` +
-`# Recipe` + `# Python` + facet hashes per S8-S9), and engineer-mode
-V2 (V2-shaped with stub Recipe + `edit_mode: python` per S10).
-Existing content is migrated per-vault: forge-tutorial fully V2;
-forge-moda fully V2; forge-music fully V2-shaped post-v0.6.0 — 4 of
-12 migrated as full-V2 (`song.md`, `chorus.md`, `solo_chorus.md`,
-`percussion/loom.md`), 8 of 12 as engineer-mode per S10 because their
-Python is not expressible in V2 Recipe grammar (`blues/drum_chorus.md`,
-`drums_shuffle.md`, `form.md`, `guitar_solo_chorus.md`,
-`vocal_phrase_a.md`, `vocal_phrase_b.md`, `percussion/phase_cell.md`,
-`phase_shifter.md`). All forge-music action notes now have
-Description + Recipe + Python facets present, even if engineer-mode
-notes have Recipe as a stub comment per S10. New action notes SHOULD
-be authored as full-V2 when their Python fits Recipe grammar, as
-engineer-mode V2 otherwise; V1 only for content that hasn't been
-touched since pre-V2a migration. V1 content is grandfathered
-indefinitely; the engine does not plan to drop V1 support, though
-chip-palette UX defaults bias toward V2 keywords (Let / Return /
-Call) in V2-contextual editors.
+**I7.** *V1 → V2 migration status.* As of V2a v11.2, the engine and
+plugin support both V1 (`# English` + `# Python` + frontmatter inputs)
+and full-V2 (`# Description` + `# Recipe` + `# Python` + facet hashes
+per S8-S9) action notes. Existing content: forge-tutorial fully V2;
+forge-moda fully V2; forge-music fully full-V2 post-v0.7.0 — all 5
+vault action notes (`song.md`, `chorus.md`, `solo_chorus.md`,
+`percussion/loom.md`, `percussion/murmuration.md`) are full-V2 with
+Description + Recipe + Python and implicit-locking per S9. The 8
+prior engineer-mode files (drum_chorus, drums_shuffle, form,
+guitar_solo_chorus, vocal_phrase_a, vocal_phrase_b, phase_cell,
+phase_shifter) were promoted to library notes per S10 + per the
+2026-07-01 brainstorm consistency rule (every chip backs a note —
+library or vault; no second-class engineer-mode notes in vault).
+They now live as functions in `forge.music.lib` and serve via the
+LibraryNoteView read-only path. New action notes SHOULD be authored
+as full-V2. Engineer-mode V2 (S10) remains a documented operational
+shape for any future case where vault-authored content needs to
+escape V2 Recipe grammar, but no current vault notes use it. V1
+content is grandfathered indefinitely; the engine does not plan to
+drop V1 support, though chip-palette UX defaults bias toward V2
+keywords (Let / Return / Call) in V2-contextual editors.
 
 ## Deliberate non-commitments
 
