@@ -19,6 +19,17 @@ def _wrap_and_exec(emm_src, chip_registry):
 
 
 class TestTranspile:
+  def test_empty_recipe_emits_pass_body(self):
+    # Drain 2026-07-02-1900 regression: newly-created V2 notes ship
+    # with an empty Recipe body (per the v0.2.232 template). The
+    # transpile pipeline must handle this without throwing — empty
+    # module → `def compute(context): pass`. The plugin's
+    # togglePythonVisibility path uses this to materialize a stub
+    # Python facet on a fresh note.
+    py = transpile(parse(""))
+    assert "def compute(context):" in py
+    assert "pass" in py
+
   def test_let_return(self):
     py = transpile(parse("Let x = 1.\nReturn x."))
     assert "def compute(context):" in py

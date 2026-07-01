@@ -1,27 +1,31 @@
-"""Sanity tests for the blues `form` snippet shipped in forge-music v0.3.0.
+"""Sanity tests for the `form` library function shipped in
+forge.music.lib (promoted from a vault note in forge-music v0.7.0).
 
 `form` is the harmonic skeleton of a 12-bar blues in E: a Score with
-chord symbols, no melodic content. It calls a sibling data snippet
-(`twelve_bar_blues_progression`) for the I/IV/V roman-numeral
-progression and resolves to concrete chords in E major via
-`music21.roman`.
+chord symbols, no melodic content. It resolves the standard
+progression to concrete chords via music21.roman.
 
-These run through the engine's resolver + executor (same path the
-generic `/compute` endpoint uses internally), then assert on the
-returned `music21.stream.Score` and on the engine's wire serialization
-of it (`serialize_for_wire` → MusicXML). The Score itself is
-inspectable for chord counts and chord-symbol presence; the MusicXML
-serialization is the wire shape the Obsidian plugin's Verovio
-renderer eventually receives.
+Post-v0.7.0 migration (drain 2026-07-02-1930): these tests import
+`forge.music.lib.form` directly instead of resolving via a vault +
+GraphResolver. Pre-migration they silently skipped because the
+vault fixture probed a promoted-and-deleted path (`blues/form.md`).
+
+The progression data note (`twelve_bar_blues_progression`) is still
+a vault-only note. Its assertion moves into a separate music21-free
+check on `forge.music.lib.DEFAULT_BLUES_PROGRESSION`, which is now
+the source of truth for the standard 12-bar shape (form() uses it
+as its default).
 """
 from music21 import stream, chord, harmony
 
+from forge.music.lib import form, DEFAULT_BLUES_PROGRESSION
 
-def test_form_returns_score(run_music_block):
+
+def test_form_returns_score():
     """End-to-end happy path: form runs, returns a Score with 12
     measures (one per bar of the progression). The progression is
     I I I I IV IV I I V IV I V, so 12 chord events total."""
-    result = run_music_block("form")
+    result = form()
     assert isinstance(result, stream.Score), (
         f"expected stream.Score, got {type(result).__name__}"
     )
@@ -41,32 +45,30 @@ def test_form_returns_score(run_music_block):
     # (the label for the chord). Check both are present.
     for i, m in enumerate(measures):
         chords = list(m.getElementsByClass(chord.Chord))
-        # ChordSymbol is a subclass of Chord in music21; filter the raw
-        # list to actual non-symbol Chord objects.
         non_symbol = [c for c in chords if not isinstance(c, harmony.ChordSymbol)]
         symbols = list(m.getElementsByClass(harmony.ChordSymbol))
         assert non_symbol, f"measure {i+1} has no Chord (non-symbol)"
         assert symbols, f"measure {i+1} has no ChordSymbol"
 
 
-def test_form_serializes_to_musicxml(run_music_block, music_resolver):
+def test_form_serializes_to_musicxml():
     """serialize_for_wire on the returned Score yields the wire shape
     the plugin's Verovio renderer expects: ('musicxml', <xml string>).
-    The string must be well-formed MusicXML — root element
-    <score-partwise> per MusicXML 3.x partwise convention (music21's
-    default exporter)."""
+
+    Post-v0.7.0: form is a lib function, so we don't have a Snippet
+    dict to pass to serialize_for_wire. Feed a minimal stub with the
+    fields serialize_for_wire actually reads.
+    """
     from forge.core.serialization import serialize_for_wire
 
-    res, _reg, _vault = music_resolver
-    form_snippet = res.resolve("form")
-    result = run_music_block("form")
+    result = form()
+    stub_snippet = {"meta": {"type": "action"}, "snippet_id": "form"}
 
-    content_type, body = serialize_for_wire(result, form_snippet)
+    content_type, body = serialize_for_wire(result, stub_snippet)
     assert content_type == "musicxml", (
         f"expected musicxml content_type, got {content_type!r}"
     )
     assert isinstance(body, str) and body, "musicxml body is empty"
-    # Well-formedness: XML declaration + score-partwise root.
     assert body.startswith("<?xml"), (
         f"missing XML declaration; body starts: {body[:60]!r}"
     )
@@ -75,19 +77,11 @@ def test_form_serializes_to_musicxml(run_music_block, music_resolver):
     )
 
 
-def test_twelve_bar_blues_progression_returns_data(music_resolver):
-    """The data snippet returns the canonical 12-bar roman-numeral list.
-    Asserts shape (12 strings) and the well-known sequence so the
-    progression doesn't drift silently across vault edits. Reads via
-    `read_data_snippet` rather than `run_music_block` because the
-    block-runner fixture is action-only (data snippets don't have a
-    Python facet to exec)."""
-    from forge.core.executor import read_data_snippet
-
-    res, _reg, _vault = music_resolver
-    snip = res.resolve("twelve_bar_blues_progression")
-    progression = read_data_snippet(snip)
-    assert progression == [
+def test_default_blues_progression_is_canonical():
+    """The default progression baked into lib.form matches the
+    well-known 12-bar blues sequence. Pins the shape so it can't
+    drift silently across lib edits."""
+    assert DEFAULT_BLUES_PROGRESSION == [
         "I", "I", "I", "I",
         "IV", "IV", "I", "I",
         "V", "IV", "I", "V",

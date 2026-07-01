@@ -19,18 +19,21 @@ _CANDIDATES = [
 
 
 def _find_vault():
-    # v0.7.0 promoted 8 vault notes to forge.music.lib; the
-    # corresponding tests in test_blues_form.py + test_loom.py still
-    # look up the deleted vault notes via the resolver and would fail
-    # if find_vault returned a real path. They have been silently
-    # skipping since v0.7.0 (the previous probe `blues/form.md` was
-    # promoted-and-deleted). Pinned to a non-existent path here to
-    # preserve that silent-skip behavior until a dedicated test-
-    # migration drain rewrites those tests to call lib functions
-    # directly.
-    # v0.8.0: blues/ → slow_burn/ rename; this no-op-probe remains.
-    return None
-    for c in _CANDIDATES:  # pragma: no cover  (kept for future revival)
+    # Probe a stable canonical note that has survived every rename +
+    # promotion so far:
+    # - v0.3.3: form.md moved into blues/.
+    # - v0.7.0: form.md promoted to forge.music.lib.form (deleted).
+    # - v0.8.0: blues/ → slow_burn/.
+    # The 12-bar blues progression data note has moved along with the
+    # directory renames but has never been promoted to a lib function
+    # (data notes stay in the vault by design).
+    #
+    # Drain 2026-07-02-1930 migrated test_blues_form + test_loom to
+    # call forge.music.lib functions directly, so those tests no
+    # longer need this helper. It stays for any future test that
+    # legitimately needs vault-level integration (registry resolution,
+    # snapshot capture, edge cases).
+    for c in _CANDIDATES:
         if c and Path(c, "slow_burn", "twelve_bar_blues_progression.md").is_file():
             return c
     return None
