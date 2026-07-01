@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v11.2)
+# Forge — Core Invariants and Discipline (V2a v11.3)
 
 ## Mission
 
@@ -210,10 +210,12 @@ three facets, in this order in the markdown body:
 2. `# Recipe` — required for V2 action notes. Structured grammar that
    compiles to Python via the forge-transpile service. Uses chip-call
    syntax (per Vocabulary item 5).
-3. `# Python` — optional in the source file (always exists at compute
-   time, may be hidden in source per author preference). When present
-   and hand-edited, takes precedence over Recipe per the implicit-
-   locking state machine (S9).
+3. `# Python` — required in the source file. All three facets are
+   always visible + always editable per the S9 uniform-visibility
+   contract (V2a v11.3). When hand-edited, takes precedence over
+   Recipe per the implicit-locking state machine (S9). New V2
+   templates seed Python with `def compute(context): return None` so
+   the section is populated from note creation.
 
 A V1 action note has two facets (`# English` + `# Python`) and uses
 frontmatter `inputs: []` for parameter declaration. V1 notes remain
@@ -223,18 +225,55 @@ authored as V2.
 **S9.** *Implicit-locking state machine for V2 action notes.* Three
 SHA-256 hashes in frontmatter (`description_hash`, `recipe_hash`,
 `python_hash`) track which facets have been hand-edited since the
-last synced state. The canonical facet — the one that runs on
-Forge-click — is whichever was most recently hand-edited:
+last synced state. The **canonical facet** — the source-of-truth
+facet, the one whose content actually drives what Forge-click runs —
+is whichever was most recently hand-edited:
 
 - All three hashes match stored: **synced** state; running Python
   produces output matching all three facets.
 - Description hash drifted: cohort is editing Description; Recipe
-  regenerates from Description on next `/generate`.
+  regenerates from Description on next `/generate`; Python then
+  recompiles from Recipe on next Forge-click.
 - Recipe hash drifted: cohort is editing Recipe; Python recompiles
-  from Recipe on next Forge-click.
+  from Recipe on next Forge-click; Description stays as documentation
+  of the prior intent.
 - Python hash drifted: engineer is editing Python directly; Python
   runs as-is (no transpile), Recipe + Description treated as
-  documentation.
+  documentation (they no longer drive runtime; the engineer's Python
+  is authoritative).
+
+**Uniform-visibility contract (V2a v11.3).** All three facets
+(`# Description`, `# Recipe`, `# Python`) are always visible and
+always editable in the source markdown — there is no toggle to hide
+Python and no default that presents fewer than three sections. The
+V2a v11.0 "Toggle Python visibility" command is retired; new-note
+templates seed Python with a `def compute(context): return None`
+stub so the section is populated from creation. Rationale: Python
+IS what the engine runs; hiding it from cohort by default was a
+false-modesty design choice that made "which layer is running?"
+harder to answer at a glance. Cohort authoring stays through the
+Description/Recipe path; Python's visibility does not push cohort
+into engineer mode.
+
+**Stale-facet communication (V2a v11.3).** Non-canonical facets
+signal their stale/documentation-only state via TWO cues:
+
+1. **Section title suffix.** The heading gets a terse suffix
+   describing its current role — `# Description — reference`,
+   `# Recipe — reference` — when Python is canonical; similarly for
+   Recipe when Recipe-canonical would leave Description as
+   reference. The suffix is auto-rendered by the plugin (CM6 view
+   plugin), NOT stored in the file body; on-disk `# Description` /
+   `# Recipe` / `# Python` heading text stays clean.
+2. **Grayscale dimming.** Non-canonical facet body gets a subtle
+   opacity reduction (matches the prior CM6 stale-facet decoration).
+
+The two cues together (suffix + dimming) are defense-in-depth —
+colorblind cohort still see the suffix change; low-contrast displays
+still communicate via dimming. The moment cohort edits a stale
+facet, its hash drifts + it becomes the new canonical → suffix
+disappears + dimming clears + the previously-canonical facet gains
+the "— reference" suffix.
 
 CM6 decorations + status bar surface the canonical layer to the
 cohort. A confirmation modal protects against unintended overwrite
@@ -1065,10 +1104,12 @@ wire-format text in the body; metadata in frontmatter.
 plugin support both V1 (`# English` + `# Python` + frontmatter inputs)
 and full-V2 (`# Description` + `# Recipe` + `# Python` + facet hashes
 per S8-S9) action notes. Existing content: forge-tutorial fully V2;
-forge-moda fully V2; forge-music fully full-V2 post-v0.7.0 — all 5
-vault action notes (`song.md`, `chorus.md`, `solo_chorus.md`,
-`percussion/loom.md`, `percussion/murmuration.md`) are full-V2 with
-Description + Recipe + Python and implicit-locking per S9. The 8
+forge-moda fully V2; forge-music fully full-V2 post-v0.7.0 (renamed
+`blues/` → `slow_burn/` + `song.md` → `slow_burn.md` in v0.8.0) —
+all 5 vault action notes (`slow_burn.md`, `chorus.md`,
+`solo_chorus.md`, `percussion/loom.md`, `percussion/murmuration.md`)
+are full-V2 with Description + Recipe + Python and implicit-locking
+per S9. The 8
 prior engineer-mode files (drum_chorus, drums_shuffle, form,
 guitar_solo_chorus, vocal_phrase_a, vocal_phrase_b, phase_cell,
 phase_shifter) were promoted to library notes per S10 + per the
