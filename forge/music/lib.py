@@ -1341,9 +1341,9 @@ def form(*, key_name="E", mode_name="major", tempo_bpm=70,
 
 def drum_chorus(*, profile="standard"):
   """One 12-bar drum chorus parameterized by a profile name (`'sparse'`,
-  `'standard'`, or `'driving'`). Used by `song.md` to give the 4-chorus
-  arc audible variety: sparse intro → standard mid → driving solo →
-  standard return. 12 bars in 12/8."""
+  `'standard'`, or `'driving'`). Used by `slow_burn.md` to give the
+  4-chorus arc audible variety: sparse intro → standard mid → driving
+  solo → standard return. 12 bars in 12/8."""
   import copy as _copy
   ts = meter.TimeSignature("12/8")
   bar_ql = ts.barDuration.quarterLength
