@@ -522,17 +522,35 @@ def _set_score_title(stream_, snippet):
   Title precedence: explicit `title:` in frontmatter, else the bare snippet
   ID (filename). Description is intentionally not used — it's for docs, not
   display, and renaming a snippet should change the rendered title.
+
+  Also strips music21's default composer + software credits so MuseScore
+  (and other renderers) don't display a "Music21" watermark in the top-
+  right of the rendered score. Cohort-facing scores should show the
+  cohort's title alone.
   """
-  if snippet is None:
-    return
-  meta = snippet.get("meta") or {}
-  title = meta.get("title") or _bare_id(snippet.get("snippet_id"))
-  if not title:
-    return
   import music21
   if stream_.metadata is None:
     stream_.insert(0, music21.metadata.Metadata())
-  stream_.metadata.title = str(title).strip()
+
+  # Set title if we have snippet metadata.
+  if snippet is not None:
+    meta = snippet.get("meta") or {}
+    title = meta.get("title") or _bare_id(snippet.get("snippet_id"))
+    if title:
+      stream_.metadata.title = str(title).strip()
+
+  # Scrub music21's default self-attribution. `composer` renders as a
+  # top-right credit in MuseScore + Verovio; `software` renders as a
+  # footer in some SVG paths. Either can look like "Music21" in the
+  # output. Setting to empty string suppresses both cleanly.
+  try:
+    stream_.metadata.composer = ""
+  except Exception:
+    pass
+  try:
+    stream_.metadata.software = []
+  except Exception:
+    pass
 
 
 def _bare_id(snippet_id):
