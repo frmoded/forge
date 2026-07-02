@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v11.4)
+# Forge — Core Invariants and Discipline (V2a v12)
 
 ## Mission
 
@@ -69,9 +69,12 @@ When a decision is unclear, the mission is the yardstick.
 ## Vocabulary
 
 Adopted from V2 specification §1, June 2026. These terms are
-authoritative throughout this document and the engine. Legacy
-"snippet" terminology in A-series, B-series, Data, and Snapshots
-sections is grandfathered pending the V2a v12 sweep amendment.
+authoritative throughout this document and the engine. The V2a v12
+sweep amendment (2026-07-03) migrated remaining "snippet" occurrences
+in A-series, B-series, Data, Snapshots, and Cultural sections to V2
+vocabulary. `snippet_id` and `AmbiguousSnippetResolutionError` retain
+V1 naming as engine-code identifiers; source-side renames are
+tracked separately.
 
 1. **Note** — the file unit. A `.md` file with frontmatter and one or
    more facets. The umbrella term covering both shapes below.
@@ -314,7 +317,7 @@ The convention:
    frontmatter.
 2. **Facet structure**: Description + Recipe + Python all present
    (V2-shaped per S8), where Recipe body is a single HTML comment
-   indicating engineer-mode (e.g., `<!-- engineer-mode: this snippet's
+   indicating engineer-mode (e.g., `<!-- engineer-mode: this note's
    logic lives in # Python. The frontmatter carries edit_mode: python
    so Forge-click runs the Python directly instead of transpiling
    Recipe → Python. -->`).
@@ -349,14 +352,14 @@ short-circuit prevents the stale state machine from firing.
 ## Architectural guarantees
 
 These are structural and behavioral properties the engine guarantees by
-construction (independent of what users write inside their snippets).
+construction (independent of what users write inside their notes).
 
-**A1.** Every action snippet has an English facet (intent) and a
-Python facet. Every data snippet has a `content_type` declaration and
+**A1.** Every action note has an English facet (intent) and a
+Python facet. Every data note has a `content_type` declaration and
 either an inline body (text content types) or a `content_ref`
 pointing to a sibling asset file (binary content types).
 
-**A2.** Action snippet Python facets define a top-level `compute`
+**A2.** Action note Python facets define a top-level `compute`
 function whose first parameter is `context`. Additional parameters
 are bound by name from the engine's input dict at compute time; the
 engine invokes the function as `fn(context, *args, **inputs)` where
@@ -364,19 +367,19 @@ engine invokes the function as `fn(context, *args, **inputs)` where
 shapes are valid: `def compute(context)`, `def compute(context, x, y)`,
 `def compute(context, name)`, `def compute(context, *args, **kwargs)`,
 etc. The function returns a value, which must be wire-serializable
-per C7 unless the snippet declares `snapshot_capture: false`.
+per C7 unless the note declares `snapshot_capture: false`.
 
 **A3.** `context.compute(snippet_id, *args, **kwargs)` invokes another
-snippet and returns its value. For action snippets, this runs Python;
-for data snippets, this deserializes the body. The caller does not
+note and returns its value. For action notes, this runs Python;
+for data notes, this deserializes the body. The caller does not
 need to know which.
 
-**A4.** Snippet resolution order: authoring vault → declared library
+**A4.** Note resolution order: authoring vault → declared library
 vaults (in manifest order) → built-in vault. Bare references match by
-this order; qualified references (`vault/snippet`) dispatch directly.
+this order; qualified references (`vault/note`) dispatch directly.
 
 **A4.1.** *Caller-scoped sibling resolution.* When
-`context.compute(bare_id)` runs from a snippet whose qualified ID
+`context.compute(bare_id)` runs from a note whose qualified ID
 has a subdirectory component (e.g. `forge-music/blues/song`), the
 resolver applies the following ordered probes:
 
@@ -385,7 +388,7 @@ resolver applies the following ordered probes:
 2. **Sibling subdirs within the caller's vault**: `{caller_vault}/*/{bare_id}`,
    excluding the caller's own directory probed in (1). If exactly one
    sibling subdir contains `{bare_id}`, match wins. If two or more
-   sibling subdirs each contain a `{bare_id}` snippet, the resolver
+   sibling subdirs each contain a `{bare_id}` note, the resolver
    raises `AmbiguousSnippetResolutionError(bare_id, [candidates...])`,
    naming every candidate qualified path; the author must qualify
    the call explicitly to disambiguate.
@@ -393,7 +396,7 @@ resolver applies the following ordered probes:
    match.
 
 Qualified references (per A4) are unaffected — they dispatch directly
-to the named vault. This refinement lets snippets within one library
+to the named vault. This refinement lets notes within one library
 subdirectory reference siblings in the same vault by bare ID (e.g.
 `[[chorus]]` from `forge-music/blues/song` resolves to
 `forge-music/blues/chorus` via probe 1; `[[solitary]]` from
@@ -406,9 +409,9 @@ are an authoring error to be resolved by explicit qualification.
 **Rationale for probe 2** (added V2a v8 per forge-music v0.3.9
 percussion-lab decomposition): authors commonly refactor a single
 subdir into a content cluster + lab cluster (e.g. `percussion/`
-holds shipping pieces, `percussion_lab/` holds the section snippets
+holds shipping pieces, `percussion_lab/` holds the section notes
 the pieces compose from). Without probe 2, every cross-cluster
-call must be qualified or every lab snippet must live in the same
+call must be qualified or every lab note must live in the same
 directory as its caller — both raise the cost of intra-vault
 composability against the Mission's "composable" property. Probe 2
 preserves bare-ID composability across same-vault siblings while
@@ -422,23 +425,23 @@ fetches a library vault into a user's vault, it places it at
 `<user-vault>/<library-name>/` — the subdirectory name matches the
 library's manifest `name`. The engine treats any top-level
 subdirectory of a vault that contains its own `forge.toml` as a
-library vault, indexes its snippets under the library's namespace,
+library vault, indexes its notes under the library's namespace,
 and walks them in the parent vault's declared `dependencies` order
 when resolving bare references (per A4). This is a fixed convention,
 not user-configurable: renaming the subdirectory breaks resolution
 because the engine looks up the library by directory name + manifest.
-Shadow files (a same-bare-id snippet at the user-vault root) override
+Shadow files (a same-bare-id note at the user-vault root) override
 the library version by A4 order; deleting the shadow restores the
 library version with no copy needed.
 
-**A5.2.** *Role tagging on library snippets.* Library snippets carry
+**A5.2.** *Role tagging on library notes.* Library notes carry
 an optional `role: root | leaf` frontmatter field that the installer
 consumes at install-time, not at view-time or compute-time. `root`
-marks a snippet that the installer should copy to the user-vault root
+marks a note that the installer should copy to the user-vault root
 as the user's editable entry point (e.g. `setup`, `go`, an event
-handler); `leaf` marks a library-internal snippet that stays in the
+handler); `leaf` marks a library-internal note that stays in the
 subdirectory and only becomes user-editable if the user explicitly
-customizes it (creating a shadow). Snippets without a role field
+customizes it (creating a shadow). Notes without a role field
 default to library-internal behavior (no auto-copy). The engine does
 not consult `role` for resolution — A4 alone determines which copy
 wins. `role` is purely an installer affordance.
@@ -488,14 +491,14 @@ are not a substitute.
 shape (`{type, content}`). Current formats: `musicxml` (rendered via
 Verovio inline). Future formats added as needed.
 
-**A7.** For every edge (caller_snippet, callee_snippet) traversed
+**A7.** For every edge (caller_note, callee_note) traversed
 during a compute, Forge automatically captures the value the caller
 received and stores it as a snapshot. If a snapshot already exists for
 that edge, it is overwritten with the latest. Capture is automatic;
 users do not invoke it. Capture requires the return value to be
 wire-serializable per F3. A non-serializable return on a
-capture-eligible snippet raises at return time, naming the snippet
-and the offending type. Snippets that declare `snapshot_capture:
+capture-eligible note raises at return time, naming the note
+and the offending type. Notes that declare `snapshot_capture:
 false` (per C7) are not captured; the edge has no snapshot and
 cannot be frozen.
 
@@ -516,64 +519,64 @@ perspective.
 These are how the engine behaves; behavior depends on what the user
 writes.
 
-**B1.** `compute(snippet, args)` runs the snippet's Python facet (for
-action snippets) or returns the deserialized body (for data snippets).
+**B1.** `compute(note, args)` runs the note's Python facet (for
+action notes) or returns the deserialized body (for data notes).
 Whatever Python the author wrote runs. The engine does not verify,
 sandbox, or constrain behavior beyond Python's own semantics.
 
-**B2.** Action snippet Python has the full powers of Python: imports,
+**B2.** Action note Python has the full powers of Python: imports,
 network calls, file I/O, randomness without explicit seeds, LLM calls,
 mutation of inputs, side effects on the world. The author chooses what
-their snippet does and accepts the consequences.
+their note does and accepts the consequences.
 
 **B3.** Compute is **not** guaranteed to be deterministic. Same inputs
-may produce different outputs, especially for snippets that call LLMs,
+may produce different outputs, especially for notes that call LLMs,
 sample randomly, or read external state. This is a feature for
 exploratory and improvisational work.
 
-**B4.** Snapshot capture (A7) happens regardless of the snippet's
-determinism. For non-deterministic snippets, the most recent
+**B4.** Snapshot capture (A7) happens regardless of the note's
+determinism. For non-deterministic notes, the most recent
 computation is what's captured. Repeat invocations may overwrite the
 snapshot with successively different values until the edge is frozen.
 
 **B5.** Generation: `/generate` produces a Python facet from the
-snippet's English facet, augmented by read-only access to the vault's
-snippet inventory. For each snippet in scope, the LLM may consult the
-snippet's name, signature, and either its English facet (action
-snippets) or its `description` and `content_type` (data snippets).
+note's English facet, augmented by read-only access to the vault's
+note inventory. For each note in scope, the LLM may consult the
+note's name, signature, and either its English facet (action
+notes) or its `description` and `content_type` (data notes).
 
-The LLM may use this information either to call snippets explicitly
-referenced in the English facet of the snippet being authored, or to
-call snippets it discovers while implementing the Python facet. Other
-snippets are treated as black boxes characterized by their declared
-intent and signature; the LLM does not see other snippets' Python
+The LLM may use this information either to call notes explicitly
+referenced in the English facet of the note being authored, or to
+call notes it discovers while implementing the Python facet. Other
+notes are treated as black boxes characterized by their declared
+intent and signature; the LLM does not see other notes' Python
 facets or their computed outputs at authoring time.
 
-Generation does not execute snippets at authoring time. The LLM's
-decisions about which snippets to call are based on what's documented
-(English) and declared (signatures), not on what the snippets actually
+Generation does not execute notes at authoring time. The LLM's
+decisions about which notes to call are based on what's documented
+(English) and declared (signatures), not on what the notes actually
 compute.
 
-**B5.1.** *`generation_notes` frontmatter field.* A snippet's
+**B5.1.** *`generation_notes` frontmatter field.* A note's
 frontmatter may carry a `generation_notes` field — a free-text block
 consumed by `/generate` as additional authoring context for that
-specific snippet. The field captures machine-targeted guidance (data
+specific note. The field captures machine-targeted guidance (data
 shapes the LLM should expect, idiomatic patterns specific to the
 domain, carve-out semantics, edge cases) that would clutter the English
 facet if written there. The English facet stays human-readable; the
 machine-targeted hints live in `generation_notes`.
 
-`generation_notes` is part of the snippet's authoring contract with
+`generation_notes` is part of the note's authoring contract with
 the LLM, not part of its public interface. It is visible to `/generate`
-only when authoring *that* snippet's Python facet; it is not exposed
-when the snippet appears in another snippet's authoring inventory (per
-B5). Consumers of the snippet see only its name, signature, and
-English facet (or `description` for data snippets) — implementation
+only when authoring *that* note's Python facet; it is not exposed
+when the note appears in another note's authoring inventory (per
+B5). Consumers of the note see only its name, signature, and
+English facet (or `description` for data notes) — implementation
 hints stay implementation-side. The runtime ignores the field; the
 plugin's rendered view does not display it prominently.
 
 **B5.2.** *Input derivation.* The engine determines which inputs to
-request from the user at compute time by parsing the snippet's
+request from the user at compute time by parsing the note's
 Python signature and taking the union of (frontmatter-declared
 `inputs`) and (positional / keyword-only params other than
 `context`). The Python signature is the source of truth for what
@@ -581,7 +584,7 @@ Python signature and taking the union of (frontmatter-declared
 hint that informs `/generate`'s authoring context (per B5) and
 provides UI ordering. When the LLM produces Python with params not
 declared in frontmatter, the engine still surfaces them to the
-user via the input modal — the snippet's runtime contract
+user via the input modal — the note's runtime contract
 self-describes via its signature, not its frontmatter. Inputs are
 delivered to `compute` as kwargs (via `**inputs` unpacking, per
 A2); declared parameters bind by name. The `context` parameter is
@@ -594,8 +597,8 @@ mechanism.
 
 **B7.** After /generate produces a Python facet, Forge performs static
 analysis on the result to extract direct dependencies (calls to
-`context.compute(...)` with literal-string snippet IDs). These
-dependencies are written as a `Dependencies` section in the snippet's
+`context.compute(...)` with literal-string note IDs). These
+dependencies are written as a `Dependencies` section in the note's
 body, formatted as wikilinks. The section is delimited by a
 clearly-marked header indicating it is system-maintained. The section
 is updated at /generate time and on explicit user command; drift
@@ -604,9 +607,9 @@ edits the Python directly. Drift is detected and surfaced by clients
 but not automatically resolved by Forge.
 
 **B7.1.** *Canonical E-- call syntax in English facets.* When an
-action snippet's English facet is in canonical E-- form (the
+action note's English facet is in canonical E-- form (the
 canonical form per the Mission preamble; the post-migration default,
-opt-in during the migration), calls to other snippets are written as
+opt-in during the migration), calls to other notes are written as
 `[[<snippet_id>]](<arg-list>)`, where:
 
 - `<snippet_id>` is a wikilink target identifying the callee
@@ -646,7 +649,7 @@ During the migration from free-English to canonical-E-- facet form
 (see Anticipated extensions), free-English facets may still describe
 calls in prose. The LLM normalizer translates such prose into canonical
 form before the deterministic compiler runs. Post-migration, the
-canonical form is the only authored form for new snippets, and B5/B6/B7
+canonical form is the only authored form for new notes, and B5/B6/B7
 will be rewritten atomically to describe the new compilation pipeline.
 
 **B7.2.** *Builtin references in canonical form.* Canonical E-- uses
@@ -655,7 +658,7 @@ will be rewritten atomically to describe the new compilation pipeline.
 known Python builtin, the Forge plugin intercepts the Obsidian
 wikilink-click and suppresses the default "create unresolved file"
 behavior. The user sees a tooltip or Notice naming the builtin; no
-stray file lands in the vault. Builtins are NOT Forge snippets and
+stray file lands in the vault. Builtins are NOT Forge notes and
 do not require backing `.md` files; the bundled engine knows the
 Python globals.
 
@@ -665,46 +668,46 @@ the common Python globals (`print`, `len`, `range`, `str`, `int`,
 `zip`, `map`, `filter`, `sorted`, `reversed`, `min`, `max`, `sum`,
 `abs`, `round`, `type`, `isinstance`, `getattr`, `setattr`, `hasattr`,
 `open`, `input`). Calls to NON-listed names follow the existing
-wikilink resolution per A4 + A4.1 — the link is treated as a snippet
+wikilink resolution per A4 + A4.1 — the link is treated as a note
 reference. Authors who want to use a less-common builtin can either
 qualify it (`[[python:builtin_name]]` or similar — TBD per the
-implementation drain) or ship a sibling snippet that wraps it.
+implementation drain) or ship a sibling note that wraps it.
 
 **Rationale**: per the Mission's "low floor" property, every stray
 file the user has to clean up raises cost-to-tweak. Canonical
-snippets that contain `print` references shouldn't pollute the
+notes that contain `print` references shouldn't pollute the
 vault when the user clicks the rendered wikilink. The Forge plugin
 knows it's running inside Obsidian and can mediate the click
 behavior; the engine's transpile path is unaffected.
 
 **B7.3.** *Value-slot resolution.*
 
-When a snippet's canonical E-- facet contains a `{{ free-text }}`
+When a note's canonical E-- facet contains a `{{ free-text }}`
 value slot, the engine resolves the slot to a Python expression at
 **transpile time** via a Forge-hosted `/resolve-slot` endpoint
 (parallel to `/generate`, same bearer-token auth). The resolved
-expression is spliced into the snippet's transpiled Python; the
-result lands in the snippet's `# Python` heading — the same cache
-surface that legacy free-English snippets use. **There is no
+expression is spliced into the note's transpiled Python; the
+result lands in the note's `# Python` heading — the same cache
+surface that legacy free-English notes use. **There is no
 separate slot-cache structure visible to users.** `# Python` IS the
 cache. The hash-keyed bookkeeping that links a slot text to its
 resolution lives transiently in memory during transpile and is
 never persisted as a user-facing artifact.
 
 **Cache only when the cache pays for itself.** Slot-free canonical
-snippets continue transpiling fresh on every compute and DO NOT
+notes continue transpiling fresh on every compute and DO NOT
 write `# Python` — E-- transpile is deterministic, fast, and free,
 so caching adds file noise without saving cost. Only slot-bearing
-canonical snippets persist `# Python` (because the LLM resolution
+canonical notes persist `# Python` (because the LLM resolution
 cost must be amortized). This means in practice: a tutorial that
-introduces canonical snippets in early chapters ships snippets
+introduces canonical notes in early chapters ships notes
 with `# English` + `# Dependencies` and no `# Python`; the moment
-a chapter introduces `{{ }}` slots, those snippets begin growing
+a chapter introduces `{{ }}` slots, those notes begin growing
 a `# Python` heading on first compute. The discontinuity is
 pedagogically meaningful — the heading appears precisely because
 the LLM's answer needs to be remembered.
 
-Cache semantics for slot-bearing canonical snippets follow B8
+Cache semantics for slot-bearing canonical notes follow B8
 (`edit_mode`). In `english` mode (default), the engine detects
 English-facet changes via an `english_hash` frontmatter field
 written when `# Python` was last generated, and re-transpiles +
@@ -719,7 +722,7 @@ explicitly advanced affordance — the low-floor headline stays at
 "write English → get a working value."
 
 **At runtime, the engine MUST NOT hit the LLM.** This is a HARD
-RULE per E-- spec §1.2. If a snippet's `# Python` is missing and
+RULE per E-- spec §1.2. If a note's `# Python` is missing and
 its English contains slots, the engine raises a cache-miss
 exception envelope; the plugin batches the missing slots into one
 `/resolve-slot` call, the engine splices the resolutions into the
@@ -731,15 +734,15 @@ write-back are internal.
 The resolver is hosted-side responsibility: the engine sees only
 the resolved Python expression, never the LLM. Per the Mission's
 "low floor" property, students never see an API key or per-
-snippet LLM cost.
+note LLM cost.
 
-**Cache invalidation granularity is snippet-level.** Editing any
+**Cache invalidation granularity is note-level.** Editing any
 character of the English facet triggers a full re-transpile (and
 re-resolution of all slots) on the next compute. Region-level
 invalidation (re-resolving only the slot whose text changed,
 preserving other slot resolutions) is a deliberate non-commitment
 — see Anticipated extensions. The rationale is V1 cohort scale:
-snippets are short per the Mission preamble, slot counts are
+notes are short per the Mission preamble, slot counts are
 small (1-2 typical), and haiku-pinned slot resolutions are cheap;
 the architectural simplification of a single cache surface is
 worth more than the marginal cost of re-resolving unchanged slots
@@ -752,7 +755,7 @@ transpile-time resolver.
 **Cache invalidation on switch-to-English (added 2026-06-10 per
 v0.2.90 + v0.2.119 arc).** When the user toggles `edit_mode` from
 `python` back to `english` (B8), the plugin MUST delete the
-snippet's `english_hash` frontmatter field as part of the
+note's `english_hash` frontmatter field as part of the
 transition. This forces a cache miss + re-transpile on the next
 Forge-click, restoring the engine's English-as-source-of-truth
 contract. Without this rule, manual Python edits made during
@@ -762,10 +765,10 @@ is plugin-side (engine never reads `english_hash` for cache
 purposes outside this contract); it shares the same field name as
 the engine's slot-resolution cache key by construction.
 
-**B8.** Action snippets carry an `edit_mode` (`english` or `python`,
+**B8.** Action notes carry an `edit_mode` (`english` or `python`,
 defaulting to `english`). In `english` mode, the Python facet is
 read-only in the editor and regenerated from English when Forge runs
-the snippet. In `python` mode, the Python facet is editable and
+the note. In `python` mode, the Python facet is editable and
 regeneration is skipped; the English facet remains as the canonical
 record. An explicit "Sync English to Python" action canonicalizes
 English from current Python via a one-shot LLM call (the inverse
@@ -787,14 +790,14 @@ engine uses for slot-resolution cache invalidation). The two fields
 coexist by accident of feature timing: `locked_english_hash`
 predates the B7.3 unification; both happen to hash the English facet
 but serve different consumers. A future consolidation may unify them
-under a single field with two consumers; until then, snippets in
+under a single field with two consumers; until then, notes in
 `edit_mode: python` may carry both fields with the same value.
 
 **Symmetric facet-mutex invariant (added 2026-06-10 per v0.2.83
 gestural model + v0.2.87 collapse-active completion; relocated from
 B7.3 to B8 in V2a v10 — the invariant governs `edit_mode` facet
 visibility, which is B8's concern, not B7.3 slot-caching).** When a
-snippet's `# English` and `# Python` headings are both present in
+note's `# English` and `# Python` headings are both present in
 the body, the facet-mutex maintains the invariant *exactly one
 facet visible at any time*. Two gestures trigger a flip:
 
@@ -810,14 +813,14 @@ in a 100ms settle-window watchdog and surfaces violations via
 check — not a caught runtime error — so `console.warn` is intentional
 here and sits outside the scope of the console.error-for-caught-errors
 discipline (cc-prompt-queue.md Hard rules). The invariant applies only
-to snippet files whose body contains BOTH headings; slot-free
-canonical snippets (English + Dependencies only, no Python heading)
+to note files whose body contains BOTH headings; slot-free
+canonical notes (English + Dependencies only, no Python heading)
 are exempt.
 
-**B9.** *Snippet execution namespace and declared domains.* The
-runtime sandbox blocks `import` statements; snippets cannot pull in
+**B9.** *Note execution namespace and declared domains.* The
+runtime sandbox blocks `import` statements; notes cannot pull in
 modules at compute time. Instead, the engine pre-injects a fixed set
-of names as globals into each snippet's execution namespace. The base
+of names as globals into each note's execution namespace. The base
 set — always injected regardless of domain — includes `random`,
 `math`, and `numpy`. Domain layers register additional names and
 `/generate` prompt fragments under a domain key (e.g. `music`:
@@ -852,9 +855,9 @@ per-callee-vault re-scoping is a recoverable future refinement, not a
 v1 guarantee. `forge-core`'s built-in vault is domain-neutral and
 available regardless of declared domains.
 
-## Data snippets
+## Data notes
 
-**D1.** A data snippet has frontmatter (`type: data`,
+**D1.** A data note has frontmatter (`type: data`,
 `content_type: <format>`, optional `description`, optional
 `read_only` flag, optional structural signature). It has no English
 facet. For text content types, the body contains the serialized value
@@ -867,17 +870,17 @@ type is a config error.
 **D2.** Content types fall into two families:
 
 - *Text* content types (`json`, `yaml`, `text`, `markdown`, `svg`,
-  `musicxml`) store the value inline in the snippet body. Future
+  `musicxml`) store the value inline in the note body. Future
   additions: `ifc`, custom DSLs.
 - *Binary* content types (`image/jpeg`, `image/png`, `audio/mpeg`,
   `audio/wav`, `video/mp4`) store the value in a sibling asset file
   referenced by `content_ref`.
 
-A data snippet's `content_type` must be one for which Forge has the
+A data note's `content_type` must be one for which Forge has the
 appropriate handler. The bare name `jpeg` is preserved as a
 back-compat alias for `image/jpeg`.
 
-**D3.** When `context.compute(...)` resolves to a data snippet:
+**D3.** When `context.compute(...)` resolves to a data note:
 
 - For text content types, the runtime reads the body, deserializes
   per `content_type`, and returns the native Python value (dict for
@@ -892,45 +895,45 @@ are indistinguishable to the caller; binary-data calls require the
 unpack idiom by convention. The system prompt teaches the LLM this
 idiom directly so generated code uses the right shape.
 
-**D4.** Data snippets have signatures expressed in frontmatter — at
+**D4.** Data notes have signatures expressed in frontmatter — at
 minimum, the content type. Optionally, structural metadata (e.g., for
 music: tempo, key, instrumentation; for IFC: building level count).
 The LLM consumes these as part of B5's authoring context.
 
-**D5.** Data snippets are categorized by origin:
+**D5.** Data notes are categorized by origin:
 
-- **Hand-authored data snippets** are user-created. For text content,
+- **Hand-authored data notes** are user-created. For text content,
   the user writes the file directly. For binary content, the user
-  drags the asset into the New Snippet modal; Forge copies the file
+  drags the asset into the New Note modal; Forge copies the file
   to `_assets/` and writes the wrapper `.md` with `content_ref`. They
   live in the user's authoring vault. Forge's runtime does not write
   to them; modifications happen via the user editing the markdown
   file (or replacing the asset file).
-- **Captured data snippets** are created via the "Save as data
-  snippet" action on a compute result. Forge writes the snippet
+- **Captured data notes** are created via the "Save as data
+  note" action on a compute result. Forge writes the note
   initially (auto-detecting `content_type`, writing body or sibling
   asset as appropriate), but the artifact is user-owned thereafter.
   This is the standard path from a transient compute result to a
   durable, addressable artifact.
-- **System-generated data snippets** (snapshots) are written by Forge
+- **System-generated data notes** (snapshots) are written by Forge
   as part of edge capture. They live in `<vault>/.forge/edges/`. Users
   do not author these directly; Forge maintains them automatically.
 
-**D6.** *(Optional / deferred)* Runtime-writable data snippets — where
-snippet code mutates the body of another data snippet at compute time
+**D6.** *(Optional / deferred)* Runtime-writable data notes — where
+note code mutates the body of another data note at compute time
 — are not currently supported. They are mentioned here as a possible
 future extension. The architectural cost (concurrency, vault file
 rewriting, generated-vs-hand-authored ambiguity) is real and the use
 case has not yet justified it.
 
-**D7.** Hand-authored or captured data snippets may be marked
+**D7.** Hand-authored or captured data notes may be marked
 `read_only: true` in frontmatter. When set, the editor surfaces a
 read-only badge and edits require explicit toggle-off. This is a UI
 guard against accidental edits to canonical references that
-downstream snippets structurally depend on (e.g., a JSON list whose
+downstream notes structurally depend on (e.g., a JSON list whose
 shape consumers parse). It does not affect runtime behavior. It is
 distinct from edge freezing (F1–F9), which operates on caller→callee
-edges rather than on snippets themselves.
+edges rather than on notes themselves.
 
 ## Snapshots and freezing
 
@@ -947,7 +950,7 @@ this directly. (See A7.)
   captured value's wire format.
 - Body: the wire-format serialization of the captured value.
 
-Snippet IDs containing slashes (e.g., `forge-core/hello_registry`)
+Note IDs containing slashes (e.g., `forge-core/hello_registry`)
 become subdirectory paths in the storage hierarchy.
 
 **F3.** A snapshot's body is the wire-format serialization of whatever
@@ -977,7 +980,7 @@ edge has been traversed at least once in a previous compute).
 **F6.** Unfreezing an edge returns it to the live state. Subsequent
 computes recompute and overwrite the snapshot. The previously-frozen
 value is not preserved unless the user has copied it elsewhere (e.g.,
-created a hand-authored data snippet from it).
+created a hand-authored data note from it).
 
 **F7.** Per-edge granularity: freezing the C→A edge does not affect
 B→A. Different callers of the same callee can have different freeze
@@ -985,7 +988,7 @@ states.
 
 **F8.** Transitive freezing: if X→Y is frozen, Y is not invoked when
 called from X. The snapshot is returned directly. Any dependencies Y
-has on other snippets are not traversed for this call. Freezing one
+has on other notes are not traversed for this call. Freezing one
 edge cuts off the entire subgraph below it from that caller's
 perspective.
 
@@ -997,32 +1000,32 @@ tools land.
 
 These are properties Forge encourages but cannot enforce.
 
-**C1.** Snippets intended to be reproducible should be written as pure
+**C1.** Notes intended to be reproducible should be written as pure
 Python — no LLM calls, no randomness without explicit seeds, no
 hidden side effects. The author opts into reproducibility by
 disciplining their code.
 
-**C2.** Snippets intended to be exploratory or improvisational may
+**C2.** Notes intended to be exploratory or improvisational may
 freely use LLM calls, randomness, and full Python expressivity. The
 author opts into non-determinism deliberately.
 
-**C3.** English facets (on action snippets) are most useful when they
-are self-describing about operations — what the snippet does and how
-it uses any references. For data snippets, the same role is played by
+**C3.** English facets (on action notes) are most useful when they
+are self-describing about operations — what the note does and how
+it uses any references. For data notes, the same role is played by
 the optional `description` field in frontmatter — what value is held
 and what shape. Thinner English (or thinner descriptions) produces
-snippets that are harder to regenerate, harder for the LLM to use as
+notes that are harder to regenerate, harder for the LLM to use as
 building blocks, and harder for collaborators to understand. The
 author chooses how much detail to articulate.
 
-**C4.** External tools that produce snippets (Claude Code in a vault,
+**C4.** External tools that produce notes (Claude Code in a vault,
 domain-specific generators, future tooling) are encouraged to follow
 the same English-thickness convention. The system does not enforce
 this; community practice does.
 
 **C5.** Authors are encouraged to be intentional about side effects in
 compute. Network calls, file writes, LLM calls during compute should
-be deliberate choices serving the snippet's purpose, not accidents of
+be deliberate choices serving the note's purpose, not accidents of
 code that should have been pure.
 
 **C6.** Freezing is a tool for stabilizing finished sub-DAGs. Authors
@@ -1032,52 +1035,52 @@ yet evaluated; over-eager unfreezing loses captured states the author
 might want to return to. Both extremes are user-controllable; the
 system does not enforce timing.
 
-**C7.** Action snippets must return wire-serializable values from
+**C7.** Action notes must return wire-serializable values from
 `compute`. The engine attempts capture per A7; failure to serialize
-raises a clear error at return time naming the snippet and the
+raises a clear error at return time naming the note and the
 offending Python type. Authors who deliberately need a non-capturable
 return must declare `snapshot_capture: false` in frontmatter — the
-engine then skips capture for that snippet (silently, no warning) and
+engine then skips capture for that note (silently, no warning) and
 the edge has no snapshot, no freeze, no replay. The default (field
-omitted) is `snapshot_capture: true`. When a snippet's natural return
+omitted) is `snapshot_capture: true`. When a note's natural return
 type isn't yet wire-serializable, the cleaner move is to extend the
 engine's codec (see [`wire-format.md`](./wire-format.md)) rather than
 reshape the return or opt out. Domain return types are first-class
 once their wire encoding lands.
 
-**C8.** Snippets that depend on execution history — by reading their
+**C8.** Notes that depend on execution history — by reading their
 own prior snapshots, accumulating state across invocations, or any
 mechanism beyond their declared inputs — opt out of the
 reproducibility and purity discipline of C1. This is intentional and
 valuable for exploratory or iterative work (simulation steppers,
-conversational state, iterative refinement) but means the snippet is
+conversational state, iterative refinement) but means the note is
 no longer a pure function: repeated calls with identical inputs may
 return different values because history is part of the computation.
 Use deliberately. Document the history-dependency in the English
 facet so future readers — and the LLM during regeneration — know
-the snippet's output depends on more than its declared inputs.
+the note's output depends on more than its declared inputs.
 
 The concrete runtime mechanism is `context.read_snapshot()`: it
-returns the latest snapshot this snippet itself produced (a scan of
-the snippet's own outbound edge directory,
+returns the latest snapshot this note itself produced (a scan of
+the note's own outbound edge directory,
 `<vault>/.forge/edges/<self_id>/`), or `None` if none exists. It is
 a read-only runtime helper and is **independent of edge freezing
 (F1–F9)** — it returns the stored snapshot whatever the edge state,
 and never writes. Self-only by deliberate scope: it takes no
-callee argument (reading *other* snippets' snapshots is deferred
+callee argument (reading *other* notes' snapshots is deferred
 until a non-moda use case justifies it). Because Forge captures
-snapshots per *edge* keyed by the callee, an entry-point snippet
+snapshots per *edge* keyed by the callee, an entry-point note
 (never a callee) reads its *outbound* captures; for a pass-through
-snippet whose return equals its terminal callee's return this is
-exactly "my last output", and a snippet that post-processes before
+note whose return equals its terminal callee's return this is
+exactly "my last output", and a note that post-processes before
 returning must account for the one-tick lag in its English facet.
 
 **C9.** *Vault-driven authoring affordances.* Vaults may ship data
-snippets (conventionally prefixed `_*.md` at the vault root or in
+notes (conventionally prefixed `_*.md` at the vault root or in
 installed domain subdirectories) that the plugin reads to surface
 domain-specific UI affordances. The plugin's UI shells — sidebar
 palettes, menus, modals — are domain-neutral; the content of these
-data snippets defines what's available. Examples: `_chips.md` defines
+data notes defines what's available. Examples: `_chips.md` defines
 a click-to-insert palette of procedural verbs surfaced in a sidebar
 chip pane; future conventions (`_templates.md`, `_examples.md`) may
 define other affordances. Authors shape the UI by editing markdown,
@@ -1088,14 +1091,14 @@ churn.
 
 ## Current implementation choices
 
-**I1.** Python is the realization language for action snippets.
+**I1.** Python is the realization language for action notes.
 
 **I2.** Forge is delivered as an Obsidian plugin. In V1 closed beta,
 the plugin bundles Pyodide and runs the engine in-process inside
 the Obsidian renderer; the user's machine requires no Python install
 and no local backend. LLM-driven `/generate` requests go to a hosted
 transpile service over HTTPS (authenticated via a shared bearer
-token); all other compute paths — `/compute`, snippet resolution,
+token); all other compute paths — `/compute`, note resolution,
 snapshot read/write — execute locally inside the plugin process via
 Pyodide. A legacy HTTP backend mode (Python uvicorn serving the
 engine) remains supported for engine development workflows but is
@@ -1145,40 +1148,40 @@ These are things Forge does not currently address. They might be
 addressed in future versions; their absence is intentional.
 
 - Reproducibility guarantees on compute outputs.
-- Determinism enforcement on snippet code.
+- Determinism enforcement on note code.
 - Cycle detection in the DAG (loops are the user's responsibility).
-- Sandboxing of snippet code.
-- Runtime-writable data snippets (D6, mentioned as optional future
+- Sandboxing of note code.
+- Runtime-writable data notes (D6, mentioned as optional future
   extension).
 - Multi-user collaboration on a single vault.
 - Cloud / hosted execution.
 - Streaming output for long-running computations.
 - Automatic snapshot eviction or cleanup policies.
-- **Backward compatibility for free-English snippet facets.** As the E-- migration (anticipated extensions below) progresses, free-English English facets that haven't been normalized to canonical E-- may break or require explicit migration. The contract going forward is: the English facet IS canonical E--, possibly with the LLM-normalizer run automatically on free-form input at /generate time. Snippets authored before the migration are not guaranteed to keep working as their English facets stand — they need re-running through /generate or hand-editing into canonical form.
+- **Backward compatibility for free-English note facets.** As the E-- migration (anticipated extensions below) progresses, free-English English facets that haven't been normalized to canonical E-- may break or require explicit migration. The contract going forward is: the English facet IS canonical E--, possibly with the LLM-normalizer run automatically on free-form input at /generate time. Notes authored before the migration are not guaranteed to keep working as their English facets stand — they need re-running through /generate or hand-editing into canonical form.
 
 ## Anticipated extensions
 
 Patterns the architecture admits cleanly, expected to land in future
 versions when the use case demands them.
 
-- **Runtime-writable data snippets** — if a use case emerges
+- **Runtime-writable data notes** — if a use case emerges
   justifying the architectural cost.
 - **Snapshot eviction policies** — automatic cleanup when storage
   grows.
 - **Multi-version snapshots** — keeping a history of past frozen
   values per edge, not just the latest.
 - **Snapshot promotion** — converting a system-generated snapshot
-  into a hand-authored data snippet for sharing or version control.
+  into a hand-authored data note for sharing or version control.
 - **Per-vault Python virtualenvs** — vaults declare their Python
   dependencies; the engine manages venv isolation.
 - **Cassette-style record-and-replay** for testing — captured LLM
   responses and compute outputs replayed deterministically in test
   mode.
-- **Cross-snippet generation tooling** — external tools (Claude Code,
-  domain-specific generators) that create related sets of snippets.
-  Lives outside Forge core; integrates via the standard snippet
+- **Cross-note generation tooling** — external tools (Claude Code,
+  domain-specific generators) that create related sets of notes.
+  Lives outside Forge core; integrates via the standard note
   contract.
-- **Region-level transpilation caching.** B7.3 commits to snippet-level cache granularity: any English-facet edit triggers a full re-transpile + re-resolution of all slots on the next compute. The architecture admits a finer granularity — caching individual transpiled regions (per-statement, per-slot) and re-running only the changed regions on partial edits. Adoption trigger: evidence that real cohort usage pushes snippets to N>3 slots where re-resolving unchanged slots becomes a real cost (LLM dollars, latency, or user-perceived sluggishness). The diagnostic for this trigger is concrete: per-vault slot-count histograms + post-edit re-transpile latency measurements. Until that evidence surfaces, snippet-level keeps the contract simple, the wire format small (one `# Python` heading, no per-region cache structures), and the user-facing surface minimal (no hash-keyed YAML for students to interpret).
+- **Region-level transpilation caching.** B7.3 commits to note-level cache granularity: any English-facet edit triggers a full re-transpile + re-resolution of all slots on the next compute. The architecture admits a finer granularity — caching individual transpiled regions (per-statement, per-slot) and re-running only the changed regions on partial edits. Adoption trigger: evidence that real cohort usage pushes notes to N>3 slots where re-resolving unchanged slots becomes a real cost (LLM dollars, latency, or user-perceived sluggishness). The diagnostic for this trigger is concrete: per-vault slot-count histograms + post-edit re-transpile latency measurements. Until that evidence surfaces, note-level keeps the contract simple, the wire format small (one `# Python` heading, no per-region cache structures), and the user-facing surface minimal (no hash-keyed YAML for students to interpret).
 - **E-- as the canonical English facet form (in progress).** Forge is
   migrating the English facet from free-prose-with-LLM-translation to
   canonical E-- (`~/projects/e--/`, vendored into the Forge engine
@@ -1194,25 +1197,25 @@ versions when the use case demands them.
 
 ## What Forge promises
 
-- Two-facet authoring on action snippets (English + Python) with LLM
+- Two-facet authoring on action notes (English + Python) with LLM
   bridging in both directions (English → Python via `/generate`;
   Python → English via explicit canonicalization sync). Inert stored
-  content on data snippets (no English facet).
+  content on data notes (no English facet).
 - DAG composition via `context.compute`.
 - Distribution via vaults and registry.
 - Structured output rendering via standard formats.
-- Full Python expressivity inside action snippets.
+- Full Python expressivity inside action notes.
 - Improvisational, exploratory creative work as a first-class
   workflow.
 - Per-edge automatic snapshot capture and per-edge freeze/unfreeze
   semantics for stabilizing parts of the DAG.
-- Hand-editable, git-trackable artifacts throughout — snippets,
+- Hand-editable, git-trackable artifacts throughout — notes,
   manifests, snapshots all live as markdown files in the vault.
 
 ## What Forge does not promise
 
 - That the same compute returns the same value next time.
-- That snippets are pure.
+- That notes are pure.
 - That side effects don't happen.
 - That LLM calls don't happen at runtime.
 - That dependency graphs don't have cycles.
@@ -1227,7 +1230,7 @@ fixed.
 
 The vault is markdown files in a directory; you can move it, share
 it, version it. Python facets are real Python; English facets are
-real prose; data snippet bodies are real wire-format text; snapshot
+real prose; data note bodies are real wire-format text; snapshot
 files are markdown with frontmatter and serialized values. Anyone
 with a Python interpreter and a markdown viewer can inspect, copy,
 modify, or fork your work. Snapshots travel with the vault,
