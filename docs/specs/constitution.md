@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v11.3)
+# Forge — Core Invariants and Discipline (V2a v11.4)
 
 ## Mission
 
@@ -242,7 +242,7 @@ is whichever was most recently hand-edited:
   documentation (they no longer drive runtime; the engineer's Python
   is authoritative).
 
-**Uniform-visibility contract (V2a v11.3).** All three facets
+**Uniform-visibility contract (V2a v11.3, preserved in v11.4).** All three facets
 (`# Description`, `# Recipe`, `# Python`) are always visible and
 always editable in the source markdown — there is no toggle to hide
 Python and no default that presents fewer than three sections. The
@@ -255,25 +255,40 @@ harder to answer at a glance. Cohort authoring stays through the
 Description/Recipe path; Python's visibility does not push cohort
 into engineer mode.
 
-**Stale-facet communication (V2a v11.3).** Non-canonical facets
-signal their stale/documentation-only state via TWO cues:
+**Tri-state visibility (V2a v11.4).** V11.4 supersedes v11.3's
+binary source/reference suffix with a tri-state
+source/derived/stale contract. Each facet's state is auto-annotated
+by the CM6 view plugin with a state suffix and body decoration:
 
-1. **Section title suffix.** The heading gets a terse suffix
-   describing its current role — `# Description — reference`,
-   `# Recipe — reference` — when Python is canonical; similarly for
-   Recipe when Recipe-canonical would leave Description as
-   reference. The suffix is auto-rendered by the plugin (CM6 view
-   plugin), NOT stored in the file body; on-disk `# Description` /
-   `# Recipe` / `# Python` heading text stays clean.
-2. **Grayscale dimming.** Non-canonical facet body gets a subtle
-   opacity reduction (matches the prior CM6 stale-facet decoration).
+- `— source`, full color: this facet drives runtime; content is
+  authoritative.
+- `— derived`, 60% opacity: this facet was auto-produced from the
+  current source and its stored `<facet>_derived_from_source_hash`
+  matches the canonical's current hash (recently forged).
+- `— stale`, 40% opacity: this facet's content does not reflect
+  current source. Either upstream of canonical in the D→R→P chain
+  (upstream never regenerates automatically), or downstream with a
+  stored `derived_from_source_hash` that no longer matches — cohort
+  edited source after last forge.
 
-The two cues together (suffix + dimming) are defense-in-depth —
-colorblind cohort still see the suffix change; low-contrast displays
-still communicate via dimming. The moment cohort edits a stale
-facet, its hash drifts + it becomes the new canonical → suffix
-disappears + dimming clears + the previously-canonical facet gains
-the "— reference" suffix.
+State computation is symmetric-by-construction: `facet === canonical`
+is source; upstream of canonical is inherently stale; downstream
+compares `<facet>_derived_from_source_hash` against `<canonical>_hash`.
+
+Frontmatter schema additions (v11.4):
+- `description_derived_from_source_hash` (rare; only when a future
+  reverse-derivation path is added).
+- `recipe_derived_from_source_hash` — stamped when Recipe is
+  auto-produced from Description (`/generate`).
+- `python_derived_from_source_hash` — stamped when Python is
+  auto-produced from Description or Recipe (Forge-click transpile).
+
+Suffix widgets are view-only CM6 decorations. On-disk `# Description`
+/ `# Recipe` / `# Python` heading text stays clean.
+
+Cohort norm: forge after editing to normalize downstream from stale
+back to derived. Direct edits to any facet promote it to source; other
+facets recompute state on next render.
 
 CM6 decorations + status bar surface the canonical layer to the
 cohort. A confirmation modal protects against unintended overwrite
