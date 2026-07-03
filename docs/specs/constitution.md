@@ -278,6 +278,28 @@ State computation is symmetric-by-construction: `facet === canonical`
 is source; upstream of canonical is inherently stale; downstream
 compares `<facet>_derived_from_source_hash` against `<canonical>_hash`.
 
+**Synced state → Description canonical (V2a v11.4.1).** When no
+facet has drifted (all three body-hashes match their stored
+`<facet>_hash` frontmatter fields), the tri-state view treats
+Description as source-of-truth. This matches the V2 authorial
+convention that Description is the cohort's entry point. Recipe
+and Python render as `— derived` provided their
+`<facet>_derived_from_source_hash` fields point at
+`description_hash`; else `— stale` (which flags a note whose
+downstream derivation-lineage doesn't trace to the Description).
+Prior V2a v11.4 rendered all three as `— source` in synced state;
+v11.4.1 refines this so the visual reinforces "hand-edit
+Description here" as authorial entry point and "these were
+auto-produced" as downstream cue.
+
+Write-time rule (v11.4.1 clarification): on any downstream write,
+`<facet>_derived_from_source_hash` gets stamped with the CURRENT
+canonical's hash (its root source), not a shortcut fallback. The
+v0.2.243 shipping code preferred `recipe_hash` over
+`description_hash`; v0.2.248 fixes this to use whichever hash the
+canonical layer supplies, with 'synced' treated as Description
+canonical per this amendment.
+
 Frontmatter schema additions (v11.4):
 - `description_derived_from_source_hash` (rare; only when a future
   reverse-derivation path is added).
