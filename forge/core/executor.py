@@ -701,7 +701,8 @@ def extract_section(body, heading):
   return "\n".join(section_lines).strip() or None
 
 
-def resolve_action_code(snippet, slot_resolutions=None, force=False):
+def resolve_action_code(snippet, slot_resolutions=None, force=False,
+                        canonical_layer=None):
   """Return the Python code for an action snippet, transpiling via
   E--'s deterministic compiler when E-- can compile the English
   facet, falling back to None (plugin handles /generate routing)
@@ -769,6 +770,30 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False):
     code = extract_python(snippet["body"])
     if code is not None:
       return code
+
+  # v0.2.252 drain 2026-07-03-1000 §3.3 (L45 impl) — plugin's routing
+  # signal short-circuits the V2 parse when the plugin has already
+  # declared Python canonical. Pre-v0.2.252 the engine ran V2 parse
+  # unconditionally and a stale/broken Recipe (residue from prior
+  # smoke) would blow up ParseError even when the plugin correctly
+  # decided Python was the source-of-truth. When canonical_layer ==
+  # "python" the plugin has confirmed the # Python facet is the
+  # authoritative source; skip the V2 parse + transpile chain and
+  # return extracted Python directly.
+  if canonical_layer == "python":
+    code = extract_python(snippet["body"])
+    if code is not None:
+      return code
+
+  # v0.2.252 — description-canonical short-circuit. The plugin's
+  # forgeSnippet path aborts early with a "run /generate first"
+  # message when Description is canonical, so this path is only hit
+  # by transitive `context.compute("X")` calls where the transitive
+  # snippet is Description-canonical. Same reasoning: skip the V2
+  # parse (Recipe is stale by definition when Description is
+  # canonical) and return None so the caller routes to /generate.
+  if canonical_layer == "description":
+    return None
 
   try:
     from forge.recipe import detect_recipe_shape as _v2_detect
