@@ -300,6 +300,38 @@ v0.2.243 shipping code preferred `recipe_hash` over
 canonical layer supplies, with 'synced' treated as Description
 canonical per this amendment.
 
+**Canonical is STORED, not inferred (V2a v11.5).** V11.5 supersedes
+v11.4's hash-mismatch inference as the primary path. Canonical
+becomes an explicit frontmatter field:
+
+```yaml
+canonical_facet: description | recipe | python | synced
+```
+
+The plugin writes `canonical_facet` on hand-edit events (buffer save
++ editor typing when the modify listener observes a body-hash
+diverge from stored). Programmatic writes (forge-click transpile,
+/generate write-back, backfill) do NOT overwrite the field — cohort
+intent is preserved through the derived cycle. Hash-mismatch inference
+retains its role for TWO fallback cases:
+1. Backfill seed for pre-v11.5 notes: on first open per session, the
+   backfill reads the current hash-mismatch pattern (upstream-wins
+   tiebreak: Description > Recipe > Python) and writes the seed value
+   to `canonical_facet` so all subsequent reads use the fast path.
+2. External-edit escape hatch: if `canonical_facet` reads e.g.
+   `description` but Description's body-hash matches its stored hash
+   AND another facet has drift (e.g., Recipe was edited externally
+   via git / sed), detection flips to the drifted facet on next
+   read. This catches external tools that bypass the plugin's write
+   path.
+
+Rationale: v0.2.253's upstream-wins hash inference diverged from
+cohort intuition "editing a facet body makes THAT facet the source"
+in one corner case (Description edited while Recipe had residual
+drift from prior smoke). Storing the field explicitly puts driver's
+intent in charge; inference becomes the safety net, not the primary
+signal. Per drain 2026-07-03-1200 §5.
+
 Frontmatter schema additions (v11.4):
 - `description_derived_from_source_hash` (rare; only when a future
   reverse-derivation path is added).
