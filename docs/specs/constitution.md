@@ -347,6 +347,87 @@ Cohort norm: forge after editing to normalize downstream from stale
 back to derived. Direct edits to any facet promote it to source; other
 facets recompute state on next render.
 
+**Hexa-state visibility (V2a v11.6).** V11.6 supersedes v11.4's
+tri-state source/derived/stale with a hexa-state that names each
+facet's lineage (what it derived from) and freshness (whether that
+lineage is current). Each facet's state suffix reflects both
+dimensions distinctly:
+
+- `— source`, full color: this facet drives runtime; content is
+  authoritative.
+- `— derived from Description`, 60% opacity (Recipe only): Recipe
+  reflects Description via `/generate` lineage. Description's current
+  hash matches Recipe's stored
+  `recipe_derived_from_description_hash`.
+- `— derived from Recipe`, 60% opacity (Python only): Python reflects
+  Recipe via transpile lineage. Recipe's current hash matches
+  Python's stored `python_derived_from_recipe_hash`, AND Recipe is
+  itself in-sync with Description (transitive freshness — see
+  transitive rule below).
+- `— derived from Description, out of date`, 50% opacity (Recipe
+  only): Recipe was derived from Description at some prior point;
+  Description has since been edited. Regenerating refreshes.
+- `— derived from Recipe, out of date`, 50% opacity (Python only):
+  Python was derived from Recipe at some prior point; EITHER Recipe
+  has since been edited OR Recipe is transitively out of date from
+  Description. Regenerating refreshes.
+- `— ignored`, 40% opacity: this facet is upstream of the current
+  canonical in the D → R → P chain. No derivation relationship to
+  the canonical (upstream never regenerates from downstream).
+  Content is preserved on disk but not participating in current
+  runtime. Cohort can edit it to reclaim canonical status; else it
+  stays out of scope.
+
+Description has no `— derived from X` variants (top of chain; never
+derived from anything). Description's states are: `— source`,
+`— ignored`, or the v11.4.1 synced-state default (`— source` when
+all hashes align).
+
+**Transitive out-of-date (v11.6, driver Q3 2026-07-03):** If Recipe
+is `— derived from Description, out of date`, then Python is
+`— derived from Recipe, out of date` regardless of Python's own
+local Recipe-vs-python lineage match. Rationale: cohort will
+regenerate the whole chain from source; local Python-vs-Recipe
+alignment is uninformative when Recipe itself needs regeneration.
+Reporting Python as `— derived from Recipe` (in sync) when Recipe
+is upstream-broken would mislead cohort about the pipeline's actual
+freshness.
+
+**Frontmatter schema (V2a v11.6):**
+
+Immediate-parent lineage tracking replaces the v11.4 canonical-hash
+approach. Two new fields:
+
+- `recipe_derived_from_description_hash` — stamped at `/generate`
+  time with Description's current hash. Renames v11.4's
+  `recipe_derived_from_source_hash` to reflect that Recipe's parent
+  is always Description (never Recipe's own prior state).
+- `python_derived_from_recipe_hash` — stamped at transpile time
+  with Recipe's current hash. Renames v11.4's
+  `python_derived_from_source_hash` to reflect that Python's
+  immediate parent is always Recipe (not Description, per driver
+  Q1 2026-07-03 decision favoring immediate-parent lineage).
+
+Backfill migration on file-open per session: populate new fields
+from v11.4's `_source_hash` fields where semantic maps cleanly
+(Description-canonical two-hop case requires heuristic best-effort
+seed for Python). Old fields retained during transition; retired
+in a followup drain after cohort validation.
+
+**"ignored" wording rationale (v11.6):** V11.4's `— stale` conflated
+two distinct states — upstream-of-source (no derivation relationship
+possible) and downstream-out-of-date (had a derivation, source
+moved). V11.6 names these separately: `— ignored` for the upstream
+case (cohort intuition: "this facet isn't participating; if I want
+it in the chain, I need to edit or regenerate through it"),
+`— derived from X, out of date` for the downstream case (cohort
+intuition: "this used to be right; regenerate to refresh").
+
+Prior V2a v11.4 (tri-state source/derived/stale) and v11.4.1
+(synced → Description convention) retired. v11.6 is the current
+S9 visibility contract. Header stays V2a v12; this is an S9
+sub-versioning refinement.
+
 CM6 decorations + status bar surface the canonical layer to the
 cohort. A confirmation modal protects against unintended overwrite
 when `/generate` would clobber a hand-edited Recipe. The hash-driven
