@@ -551,145 +551,114 @@ between the section and the current Python facet may occur if the user
 edits the Python directly. Drift is detected and surfaced by clients
 but not automatically resolved by Forge.
 
-**B7.1.** *Canonical E-- call syntax in English facets.* When an
-action note's English facet is in canonical E-- form (the
-canonical form per the Mission preamble; the post-migration default,
-opt-in during the migration), calls to other notes are written as
-`[[<snippet_id>]](<arg-list>)`, where:
+**B7.1.** *Recipe grammar for calls.* An action note's Recipe facet
+uses the following grammar to invoke other notes and language
+primitives:
 
-- `<snippet_id>` is a wikilink target identifying the callee
-  (qualified per A4 if needed for disambiguation; bare otherwise).
-- `<arg-list>` is a parenthesized, comma-separated list of arguments,
-  positional and/or keyword. Keyword arguments use `name=expression`
-  syntax. The arguments correspond to the callee's declared `inputs`
-  frontmatter.
-- Each argument is itself an expression per the E-- grammar (literal,
-  variable, nested call, `{{ ... }}` value slot, list, dict, or
-  parenthesized group).
+- `Let X = Call [[note_id]] with k1=v1, k2=v2.` — assign the result
+  of a call to a variable.
+- `Call [[note_id]] with k1=v1, k2=v2.` — bare call.
+- `Return expr.` — return an expression.
+- `Let X = expr.` — assign an expression to a variable.
+- `If cond`, `Otherwise`, `For each ... In ...`, `Repeat N times` —
+  control-flow keywords.
+- `{{ free-text }}` — value slot; resolved to a Python expression at
+  transpile time via `/resolve-slot` (see B7.3).
+- `[[note_id]]` — wikilink target identifying a callable. Qualified
+  per A4 if needed; bare otherwise.
 
-This is the **syntactic contract** that Forge tooling depends on. The
-static dependency analyzer (B7), the chip palette, the Obsidian graph
-view's edge rendering of `# Dependencies` wikilinks, the wikilink-
-context-menu freeze affordance, and any future chat-driven authoring
-surfaces all read or produce calls in this form. A call written in
-canonical form is parser-readable without LLM disambiguation. Tooling
-that inserts calls (chip palette, chat) MUST produce text in this
-shape; tooling that reads calls (static analysis, freeze affordance)
-MUST accept this shape as the canonical input.
+Keyword arguments (`k=v`) correspond to the callee's declared
+parameters. The grammar is deterministic and parser-readable
+without LLM disambiguation.
+
+This is the **syntactic contract** Forge tooling depends on: the
+static dependency analyzer, the chip palette, Obsidian's graph-view
+edge rendering, and the wikilink freeze affordance all read Recipe
+bodies via this shape. Tooling that inserts calls (chip palette,
+chat) MUST produce text in this shape; tooling that reads calls
+(static analysis, freeze) MUST accept this shape.
 
 Examples:
 
 ```
-Set result to [[fibonacci]](7).
-Do [[print]]("hello world").
-Set chord to [[major_chord]](root="C", inversion=2).
-Set song to [[compose_blues]](
-    bars=12,
-    key="E",
-    drums=[[shuffle_drums]](feel="laid_back"),
-).
+Let result = Call [[fibonacci]] with n=7.
+Call [[print]] with text="hello world".
+Let chord = Call [[major_chord]] with root="C", inversion=2.
+Let song = Call [[compose_blues]] with bars=12, key="E".
+Return song.
 ```
 
-During the migration from free-English to canonical-E-- facet form
-(see Anticipated extensions), free-English facets may still describe
-calls in prose. The LLM normalizer translates such prose into canonical
-form before the deterministic compiler runs. Post-migration, the
-canonical form is the only authored form for new notes, and B5/B6/B7
-will be rewritten atomically to describe the new compilation pipeline.
-
-**B7.2.** *Builtin references in canonical form.* Canonical E-- uses
-`[[name]](args)` for every function call, including Python builtins
-(`print`, `len`, `range`, etc.). When the wikilink target matches a
-known Python builtin, the Forge plugin intercepts the Obsidian
+**B7.2.** *Builtin references.* Recipe uses `Call [[name]] with ...`
+for every function invocation, including Python builtins (`print`,
+`len`, `range`, etc.). When a wikilink target matches a known
+Python builtin, the Forge plugin intercepts the Obsidian
 wikilink-click and suppresses the default "create unresolved file"
 behavior. The user sees a tooltip or Notice naming the builtin; no
-stray file lands in the vault. Builtins are NOT Forge notes and
-do not require backing `.md` files; the bundled engine knows the
-Python globals.
+stray file lands in the vault. Builtins are NOT Forge notes and do
+not require backing `.md` files.
 
-Forge plugin maintains a vetted list of recognized builtin names —
-the common Python globals (`print`, `len`, `range`, `str`, `int`,
+The plugin maintains a vetted list of recognized builtin names —
+common Python globals (`print`, `len`, `range`, `str`, `int`,
 `float`, `bool`, `list`, `dict`, `set`, `tuple`, `enumerate`,
 `zip`, `map`, `filter`, `sorted`, `reversed`, `min`, `max`, `sum`,
-`abs`, `round`, `type`, `isinstance`, `getattr`, `setattr`, `hasattr`,
-`open`, `input`). Calls to NON-listed names follow the existing
-wikilink resolution per A4 + A4.1 — the link is treated as a note
-reference. Authors who want to use a less-common builtin can either
-qualify it (`[[python:builtin_name]]` or similar — TBD per the
-implementation drain) or ship a sibling note that wraps it.
+`abs`, `round`, `type`, `isinstance`, `getattr`, `setattr`,
+`hasattr`, `open`, `input`). Calls to non-listed names follow
+wikilink resolution per A4 + A4.1. Authors who want a less-common
+builtin can qualify it (`[[python:name]]`) or ship a sibling note
+that wraps it.
 
 **Rationale**: per the Mission's "low floor" property, every stray
-file the user has to clean up raises cost-to-tweak. Canonical
-notes that contain `print` references shouldn't pollute the
-vault when the user clicks the rendered wikilink. The Forge plugin
-knows it's running inside Obsidian and can mediate the click
-behavior; the engine's transpile path is unaffected.
+file the user has to clean up raises cost-to-tweak. Recipes that
+contain `print` references shouldn't pollute the vault when the
+user clicks the rendered wikilink.
 
 **B7.3.** *Value-slot resolution.*
 
-When a note's canonical E-- facet contains a `{{ free-text }}`
-value slot, the engine resolves the slot to a Python expression at
-**transpile time** via a Forge-hosted `/resolve-slot` endpoint
-(parallel to `/generate`, same bearer-token auth). The resolved
-expression is spliced into the note's transpiled Python; the
-result lands in the note's `# Python` heading — the same cache
-surface that legacy free-English notes use. **There is no
-separate slot-cache structure visible to users.** `# Python` IS the
-cache. The hash-keyed bookkeeping that links a slot text to its
-resolution lives transiently in memory during transpile and is
-never persisted as a user-facing artifact.
+When a Recipe contains a `{{ free-text }}` value slot, the engine
+resolves the slot to a Python expression at **transpile time** via
+a Forge-hosted `/resolve-slot` endpoint (parallel to `/generate`,
+same bearer-token auth). The resolved expression is spliced into
+the transpiled Python; the result lands in the note's `# Python`
+facet — the same cache surface used by other transpile output.
+Hash-keyed bookkeeping that links slot text to its resolution
+lives transiently in memory during transpile and is never persisted
+as a user-facing artifact.
 
-**Cache only when the cache pays for itself.** Slot-free canonical
-notes continue transpiling fresh on every compute and DO NOT
-write `# Python` — E-- transpile is deterministic, fast, and free,
-so caching adds file noise without saving cost. Only slot-bearing
-canonical notes persist `# Python` (because the LLM resolution
-cost must be amortized). This means in practice: a tutorial that
-introduces canonical notes in early chapters ships notes
-with `# English` + `# Dependencies` and no `# Python`; the moment
-a chapter introduces `{{ }}` slots, those notes begin growing
-a `# Python` heading on first compute. The discontinuity is
-pedagogically meaningful — the heading appears precisely because
-the LLM's answer needs to be remembered.
+**Cache only when the cache pays for itself.** Slot-free Recipes
+continue transpiling fresh on every compute; transpile is
+deterministic and fast, so caching adds file noise without saving
+cost. Only slot-bearing Recipes persist `# Python` because the
+LLM resolution cost must be amortized.
 
-Cache semantics for slot-bearing canonical notes follow B8
-(`edit_mode`). In `english` mode (default), the engine detects
-English-facet changes via an `english_hash` frontmatter field
-written when `# Python` was last generated, and re-transpiles +
-re-resolves on hash mismatch. In `python` mode, `# Python` is
-editable and the cached output is used unconditionally — the
-user's edits to `# Python` are the override path for any slot
-resolution they want to refine. Per the "high ceiling" property,
-the Python facet is the natural surface for fine-tuning compiled
-output (it's where they'd already go for any other manual Python
-correction). For non-programmer cohorts, the override is an
-explicitly advanced affordance — the low-floor headline stays at
-"write English → get a working value."
+Cache semantics follow S9's state machine. The engine detects
+Recipe changes via `recipe_derived_from_description_hash` and
+re-resolves slots on hash mismatch. When Python is canonical
+(engineer-mode per S10), the cached Python is used unconditionally
+— engineer edits are the override path for any slot resolution
+they want to refine.
 
-**At runtime, the engine MUST NOT hit the LLM.** This is a HARD
-RULE per E-- spec §1.2. If a note's `# Python` is missing and
-its English contains slots, the engine raises a cache-miss
-exception envelope; the plugin batches the missing slots into one
-`/resolve-slot` call, the engine splices the resolutions into the
-transpiled output on the second pass, the plugin writes the
-resulting Python to `# Python`, and re-fires compute. The user-
-visible flow is a single Forge-click; the miss + resolution +
+**At runtime, the engine MUST NOT hit the LLM.** If a note's
+`# Python` is missing and its Recipe contains slots, the engine
+raises a cache-miss exception; the plugin batches the missing slots
+into one `/resolve-slot` call, the engine splices the resolutions
+into the transpiled output on a second pass, the plugin writes the
+resulting Python to `# Python`, and re-fires compute. The
+user-visible flow is a single Forge-click; the miss + resolution +
 write-back are internal.
 
 The resolver is hosted-side responsibility: the engine sees only
 the resolved Python expression, never the LLM. Per the Mission's
-"low floor" property, students never see an API key or per-
-note LLM cost.
+"low floor" property, cohort never sees an API key or per-note
+LLM cost.
 
 **Cache invalidation granularity is note-level.** Editing any
-character of the English facet triggers a full re-transpile (and
+character of the Recipe triggers a full re-transpile (and
 re-resolution of all slots) on the next compute. Region-level
-invalidation (re-resolving only the slot whose text changed,
-preserving other slot resolutions) is a deliberate non-commitment
-— see Anticipated extensions. Rationale: notes are short per the
-Mission preamble, slot counts are small (1-2 typical), and
-haiku-pinned slot resolutions are cheap; the architectural
-simplification of a single cache surface is worth more than the
+invalidation is a deliberate non-commitment — see Anticipated
+extensions. Rationale: notes are short per the Mission preamble,
+slot counts are small (1-2 typical), and slot resolutions are
+cheap; the architectural simplification of a single cache surface
+is worth more than the
 marginal cost of re-resolving unchanged slots on edits.
 
 See `docs/investigations/slot-resolution-design.md` for the wire-
