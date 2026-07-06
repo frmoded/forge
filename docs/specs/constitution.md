@@ -191,8 +191,10 @@ starts with an underscore (`_`) are treated as vault **infrastructure
 files**, not notes. They are excluded from note-registry discovery,
 from chip-palette auto-derivation, from the Forge-click compute
 surface, and from the static dependency analyzer. Examples:
-`_chips.md` (chip palette curation), `_meta/*.md` files (vault
-metadata), future `_config.md`, `_aliases.md`, etc. The `_` prefix is
+`_meta/*.md` files (vault metadata), future `_config.md`,
+`_aliases.md`, etc. (The `_chips.md` schema was retired v0.2.259;
+the palette is now discovered from `type: action` notes directly —
+see S9 note.) The `_` prefix is
 a syntactically-explicit convention so authors know which files are
 "real content" vs which are "tooling configuration" without reading
 frontmatter. Infrastructure files MAY still be valid data notes in
@@ -1215,14 +1217,17 @@ notes (conventionally prefixed `_*.md` at the vault root or in
 installed domain subdirectories) that the plugin reads to surface
 domain-specific UI affordances. The plugin's UI shells — sidebar
 palettes, menus, modals — are domain-neutral; the content of these
-data notes defines what's available. Examples: `_chips.md` defines
-a click-to-insert palette of procedural verbs surfaced in a sidebar
-chip pane; future conventions (`_templates.md`, `_examples.md`) may
-define other affordances. Authors shape the UI by editing markdown,
-not plugin code. The plugin reads these files on activate and on an
-explicit refresh — it does not file-watch them — so authors get
-predictable, palette-refresh-on-demand semantics rather than reactive
-churn.
+data notes defines what's available. Future conventions
+(`_templates.md`, `_examples.md`) may define such affordances.
+Authors shape the UI by editing markdown, not plugin code.
+
+Post-v0.2.259 the chip palette is NOT a vault-driven affordance —
+palette entries come from `type: action` notes discovered in the
+vault + installed library subdirs + hardcoded language primitives.
+A library note MAY carry a `chip_insertion:` frontmatter field for a
+custom insertion template; absent that field, the palette uses a
+plain wikilink. The retired `_chips.md` schema (schema_version 2/3
+overrides + synthetic chips + walk-up pacing) is no longer read.
 
 ## Current implementation choices
 
