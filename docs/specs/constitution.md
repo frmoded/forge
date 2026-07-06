@@ -59,8 +59,8 @@ decide program structure at runtime. After Recipe is in hand, the
 deterministic transpiler emits Python; the LLM is out of the runtime
 path. This is the load-bearing implementation choice that makes the
 runtime determinism + cheap-tweak properties above realizable. Legacy
-V1 action notes (English + Python facets) remain valid; the engine
-accepts both shapes during the V1 → V2 migration period.
+Legacy action notes (two-facet English + Python shape) remain valid;
+the engine accepts both shapes.
 
 The clauses that follow (Purpose, Core abstractions, A/B/F/D/C-series)
 are the invariants and disciplines that make this mission realizable.
@@ -68,71 +68,46 @@ When a decision is unclear, the mission is the yardstick.
 
 ## Vocabulary
 
-Adopted from V2 specification §1, June 2026. These terms are
-authoritative throughout this document and the engine. The V2a v12
-sweep amendment (2026-07-03) migrated remaining "snippet" occurrences
-in A-series, B-series, Data, Snapshots, and Cultural sections to V2
-vocabulary. `snippet_id` and `AmbiguousSnippetResolutionError` retain
-V1 naming as engine-code identifiers; source-side renames are
-tracked separately.
+These terms are authoritative throughout this document and the engine.
+`snippet_id` and `AmbiguousSnippetResolutionError` retain historical
+naming as engine-code identifiers.
 
 1. **Note** — the file unit. A `.md` file with frontmatter and one or
-   more facets. The umbrella term covering both shapes below.
-2. **Action note** — a note that returns a computed result. Replaces
-   the V1 term "action snippet."
-3. **Data note** — a note that returns literal data. Replaces the V1
-   term "data snippet."
-4. **Description** — free-prose facet capturing intent + mechanics +
-   design notes + parameter documentation. Required on every V2 action
-   note. Replaces the V1 "English facet."
-5. **Recipe** — structured-recipe facet that compiles to Python.
-   Required on every V2 action note. Uses chip-call syntax
-   (`Let X = Y.`, `Call [[chip]] with k=v.`, `Return X.`,
-   `If/Otherwise`, `For each/Repeat`, `{{...}}` slots).
+   more facets. Umbrella term covering both shapes below.
+2. **Action note** — a note that returns a computed result.
+3. **Data note** — a note that returns literal data.
+4. **Description** — free-prose facet capturing intent, mechanics,
+   design notes, and parameter documentation. Required on every action
+   note.
+5. **Recipe** — structured-grammar facet that compiles to Python.
+   Required on every action note. Syntax: `Let X = Y.`,
+   `Call [[note]] with k=v.`, `Return X.`, `If/Otherwise`,
+   `For each/Repeat`, `{{...}}` slots.
 6. **Python** — the compiled-from-Recipe Python facet. Always present
-   at compute time; visible to the cohort when toggled, editable by
-   engineers. The canonical facet (the one that actually runs) is
-   determined by which layer was last hand-edited; the implicit-
-   locking state machine (S9) routes accordingly.
-7. **Chip** — a palette UX construct. The chip palette displays
-   clickable entries that insert wikilinks + Recipe-grammar shapes
-   into the active note. Each chip in the palette references a note
-   (library note per §12, or vault note per §13). "Chip" is NOT the
-   model concept for callable primitives — the model concept is the
-   note that the chip references. Per V2a v11.2 amendment closing
-   the chip-as-model-concept conflation.
-8. **Chip palette** — the UI affordance for inserting chips +
-   control-flow into a Recipe. Not a model concept.
+   at compute time. The canonical facet (the one that runs) is
+   determined by S9's state machine.
+7. **Library note** — a callable action note shipped by the engine.
+   Python lives in `forge/forge/<domain>/lib.py`; facets are served
+   read-only via the library-note view (Description from docstring,
+   Recipe from synthetic signature, Python from function source).
+   Virtual at the vault level (no `.md` materializes). Callable from
+   any Recipe via wikilink.
+8. **Vault note** — a callable action note authored by the cohort.
+   Full three-facet shape with S9 state machine. Callable from any
+   Recipe via wikilink. Distinct from library notes only in
+   authorship (cohort vs engine) and editability.
 9. **Library** — the union of engine primitives + vault notes that
    are callable.
-10. **Cohort author** — composes notes from existing chips. Writes
+10. **Cohort author** — composes notes from existing notes. Writes
     Description + Recipe. Never writes Python directly.
-11. **Engineer** — extends the library by adding library notes (per
-    §12) in `forge/forge/<domain>/lib.py`.
-12. **Library note** — a callable action note shipped by the engine.
-    The Python source lives in `forge/forge/<domain>/lib.py`; the
-    note's facets are served read-only via the plugin's library-note
-    view (Description from the function's docstring, Recipe from a
-    synthetic signature, Python from the function source). Library
-    notes are virtual at the vault level (no `.md` file materializes;
-    the view renders directly from the `lib.py` introspection). They
-    are callable from any Recipe via wikilink.
-13. **Vault note** — a callable action note authored by the cohort.
-    Full V2 shape (Description + Recipe + Python) with implicit-
-    locking state machine per S9. Callable from any Recipe via
-    wikilink. Distinct from library notes only in authorship (cohort
-    vs engine) and editability (read-write vs read-only).
-
-Every chip in the palette MUST correspond to a note (library or
-vault). There are no chips without backing notes. The conflation of
-chip-as-model-concept and chip-as-palette-entry shipped in V2a v11.0
-was the prior framing; V2a v11.2 separates them.
-
-The terms above are the V2 paradigm. V1 vocabulary ("snippet,"
-"English facet") remains valid in the engine source and in legacy
-content (e.g., `forge-music/blues/*.md`) and SHOULD be migrated to V2
-on a per-vault basis. V1 and V2 notes coexist in the same vault; the
-engine accepts both shapes.
+11. **Engineer** — extends the library by adding library notes in
+    `forge/forge/<domain>/lib.py`.
+12. **Chip** — a palette UX construct. Palette entries insert
+    wikilinks or grammar shapes into the active note. Chips are not
+    model concepts; they reference notes (library or vault). Every
+    chip in the palette corresponds to a note.
+13. **Chip palette** — the UI affordance for inserting chips into a
+    Recipe. Not a model concept.
 
 ## Purpose
 
@@ -192,9 +167,8 @@ files**, not notes. They are excluded from note-registry discovery,
 from chip-palette auto-derivation, from the Forge-click compute
 surface, and from the static dependency analyzer. Examples:
 `_meta/*.md` files (vault metadata), future `_config.md`,
-`_aliases.md`, etc. (The `_chips.md` schema was retired v0.2.259;
-the palette is now discovered from `type: action` notes directly —
-see S9 note.) The `_` prefix is
+`_aliases.md`, etc. The palette is discovered from `type: action`
+notes directly (see S9). The `_` prefix is
 a syntactically-explicit convention so authors know which files are
 "real content" vs which are "tooling configuration" without reading
 frontmatter. Infrastructure files MAY still be valid data notes in
@@ -204,297 +178,136 @@ auto-discovered as part of the note inventory. Auto-discovery rules in
 registry-building, chip-palette construction, and any future discovery
 surfaces MUST honor this exclusion.
 
-**S8.** *Facet structure for V2 action notes.* A V2 action note has
+**S8.** *Facet structure for action notes.* An action note has
 three facets, in this order in the markdown body:
 
-1. `# Description` — required. Free prose describing intent +
-   mechanics + design notes. Optionally contains a `## Inputs`
-   sub-section listing parameters with descriptions. The Description
-   is the load-bearing facet for `/generate` (LLM reads it to produce
-   Recipe) and for cohort comprehension.
-2. `# Recipe` — required for V2 action notes. Structured grammar that
-   compiles to Python via the forge-transpile service. Uses chip-call
-   syntax (per Vocabulary item 5).
-3. `# Python` — required in the source file. All three facets are
-   always visible + always editable per the S9 uniform-visibility
-   contract (V2a v11.3). When hand-edited, takes precedence over
-   Recipe per the implicit-locking state machine (S9). New V2
-   templates seed Python with `def compute(context): return None` so
-   the section is populated from note creation.
+1. `# Description` — required. Free prose describing intent,
+   mechanics, and design notes. Optionally contains a `## Inputs`
+   sub-section listing parameters. The Description is load-bearing
+   for `/generate` (LLM reads it to produce Recipe) and for cohort
+   comprehension.
+2. `# Recipe` — required. Structured grammar that compiles to Python
+   via the transpile service. Uses chip-call syntax (per Vocabulary
+   item 5).
+3. `# Python` — required. Templates seed Python with
+   `def compute(context): return None` so the section is populated
+   from creation.
 
-A V1 action note has two facets (`# English` + `# Python`) and uses
-frontmatter `inputs: []` for parameter declaration. V1 notes remain
-valid; the engine accepts both shapes. New action notes SHOULD be
-authored as V2.
+All three facets are always visible and always editable in the
+source markdown. Python is not hidden by default — it IS what the
+engine runs, so masking it would obscure "which layer is running?".
 
-**S9.** *Implicit-locking state machine for V2 action notes.* Three
-SHA-256 hashes in frontmatter (`description_hash`, `recipe_hash`,
-`python_hash`) track which facets have been hand-edited since the
-last synced state. The **canonical facet** — the source-of-truth
-facet, the one whose content actually drives what Forge-click runs —
-is whichever was most recently hand-edited:
+**S9.** *Canonical state machine for action notes.*
 
-- All three hashes match stored: **synced** state; running Python
-  produces output matching all three facets.
-- Description hash drifted: cohort is editing Description; Recipe
-  regenerates from Description on next `/generate`; Python then
-  recompiles from Recipe on next Forge-click.
-- Recipe hash drifted: cohort is editing Recipe; Python recompiles
-  from Recipe on next Forge-click; Description stays as documentation
-  of the prior intent.
-- Python hash drifted: engineer is editing Python directly; Python
-  runs as-is (no transpile), Recipe + Description treated as
-  documentation (they no longer drive runtime; the engineer's Python
-  is authoritative).
+Every action note stores which facet is authoritative in a
+`canonical_facet` frontmatter field with values
+`description | recipe | python | synced`. The canonical facet
+drives runtime; other facets render lineage + freshness state.
 
-**Uniform-visibility contract (V2a v11.3, preserved in v11.4).** All three facets
-(`# Description`, `# Recipe`, `# Python`) are always visible and
-always editable in the source markdown — there is no toggle to hide
-Python and no default that presents fewer than three sections. The
-V2a v11.0 "Toggle Python visibility" command is retired; new-note
-templates seed Python with a `def compute(context): return None`
-stub so the section is populated from creation. Rationale: Python
-IS what the engine runs; hiding it from cohort by default was a
-false-modesty design choice that made "which layer is running?"
-harder to answer at a glance. Cohort authoring stays through the
-Description/Recipe path; Python's visibility does not push cohort
-into engineer mode.
+Write-time rules:
+- Hand-edits (buffer save with body-hash divergence from stored
+  hash) write `canonical_facet` to the edited facet.
+- Programmatic writes (transpile output, `/generate` write-back,
+  backfill migrations) do NOT overwrite an EXISTING
+  `canonical_facet`. Backfill DOES seed when the field is absent.
+- Hash-mismatch inference retains two fallback roles: seeding
+  legacy notes on first-open (upstream-wins tiebreak: Description
+  > Recipe > Python), and detecting external edits that bypass the
+  plugin's write path.
 
-**Tri-state visibility (V2a v11.4).** V11.4 supersedes v11.3's
-binary source/reference suffix with a tri-state
-source/derived/stale contract. Each facet's state is auto-annotated
-by the CM6 view plugin with a state suffix and body decoration:
+Frontmatter schema for lineage tracking:
+- `description_hash`, `recipe_hash`, `python_hash` — SHA-256 of
+  each facet's current body content.
+- `recipe_derived_from_description_hash` — stamped at `/generate`
+  time with Description's current hash. Recipe's parent in the
+  D → R → P chain is Description.
+- `python_derived_from_recipe_hash` — stamped at transpile time
+  with Recipe's current hash. Python's parent is Recipe.
 
-- `— source`, full color: this facet drives runtime; content is
-  authoritative.
-- `— derived`, 60% opacity: this facet was auto-produced from the
-  current source and its stored `<facet>_derived_from_source_hash`
-  matches the canonical's current hash (recently forged).
-- `— stale`, 40% opacity: this facet's content does not reflect
-  current source. Either upstream of canonical in the D→R→P chain
-  (upstream never regenerates automatically), or downstream with a
-  stored `derived_from_source_hash` that no longer matches — cohort
-  edited source after last forge.
+Visibility contract. Each non-source facet is annotated by the CM6
+view plugin with a state suffix + body opacity reflecting lineage +
+freshness:
 
-State computation is symmetric-by-construction: `facet === canonical`
-is source; upstream of canonical is inherently stale; downstream
-compares `<facet>_derived_from_source_hash` against `<canonical>_hash`.
-
-**Synced state → Description canonical (V2a v11.4.1).** When no
-facet has drifted (all three body-hashes match their stored
-`<facet>_hash` frontmatter fields), the tri-state view treats
-Description as source-of-truth. This matches the V2 authorial
-convention that Description is the cohort's entry point. Recipe
-and Python render as `— derived` provided their
-`<facet>_derived_from_source_hash` fields point at
-`description_hash`; else `— stale` (which flags a note whose
-downstream derivation-lineage doesn't trace to the Description).
-Prior V2a v11.4 rendered all three as `— source` in synced state;
-v11.4.1 refines this so the visual reinforces "hand-edit
-Description here" as authorial entry point and "these were
-auto-produced" as downstream cue.
-
-Write-time rule (v11.4.1 clarification): on any downstream write,
-`<facet>_derived_from_source_hash` gets stamped with the CURRENT
-canonical's hash (its root source), not a shortcut fallback. The
-v0.2.243 shipping code preferred `recipe_hash` over
-`description_hash`; v0.2.248 fixes this to use whichever hash the
-canonical layer supplies, with 'synced' treated as Description
-canonical per this amendment.
-
-**Canonical is STORED, not inferred (V2a v11.5).** V11.5 supersedes
-v11.4's hash-mismatch inference as the primary path. Canonical
-becomes an explicit frontmatter field:
-
-```yaml
-canonical_facet: description | recipe | python | synced
-```
-
-The plugin writes `canonical_facet` on hand-edit events (buffer save
-+ editor typing when the modify listener observes a body-hash
-diverge from stored). Programmatic writes (forge-click transpile,
-/generate write-back, backfill) do NOT overwrite the field — cohort
-intent is preserved through the derived cycle. Hash-mismatch inference
-retains its role for TWO fallback cases:
-1. Backfill seed for pre-v11.5 notes: on first open per session, the
-   backfill reads the current hash-mismatch pattern (upstream-wins
-   tiebreak: Description > Recipe > Python) and writes the seed value
-   to `canonical_facet` so all subsequent reads use the fast path.
-2. External-edit escape hatch: if `canonical_facet` reads e.g.
-   `description` but Description's body-hash matches its stored hash
-   AND another facet has drift (e.g., Recipe was edited externally
-   via git / sed), detection flips to the drifted facet on next
-   read. This catches external tools that bypass the plugin's write
-   path.
-
-Rationale: v0.2.253's upstream-wins hash inference diverged from
-cohort intuition "editing a facet body makes THAT facet the source"
-in one corner case (Description edited while Recipe had residual
-drift from prior smoke). Storing the field explicitly puts driver's
-intent in charge; inference becomes the safety net, not the primary
-signal. Per drain 2026-07-03-1200 §5.
-
-Frontmatter schema additions (v11.4):
-- `description_derived_from_source_hash` (rare; only when a future
-  reverse-derivation path is added).
-- `recipe_derived_from_source_hash` — stamped when Recipe is
-  auto-produced from Description (`/generate`).
-- `python_derived_from_source_hash` — stamped when Python is
-  auto-produced from Description or Recipe (Forge-click transpile).
-
-Suffix widgets are view-only CM6 decorations. On-disk `# Description`
-/ `# Recipe` / `# Python` heading text stays clean.
-
-Cohort norm: forge after editing to normalize downstream from stale
-back to derived. Direct edits to any facet promote it to source; other
-facets recompute state on next render.
-
-**Hexa-state visibility (V2a v11.6).** V11.6 supersedes v11.4's
-tri-state source/derived/stale with a hexa-state that names each
-facet's lineage (what it derived from) and freshness (whether that
-lineage is current). Each facet's state suffix reflects both
-dimensions distinctly:
-
-- `— source`, full color: this facet drives runtime; content is
-  authoritative.
+- `— source`, full color: this facet is canonical.
 - `— derived from Description`, 60% opacity (Recipe only): Recipe
-  reflects Description via `/generate` lineage. Description's current
-  hash matches Recipe's stored
-  `recipe_derived_from_description_hash`.
-- `— derived from Recipe`, 60% opacity (Python only): Python reflects
-  Recipe via transpile lineage. Recipe's current hash matches
-  Python's stored `python_derived_from_recipe_hash`, AND Recipe is
-  itself in-sync with Description (transitive freshness — see
-  transitive rule below).
+  reflects current Description via `/generate` lineage.
+- `— derived from Recipe`, 60% opacity (Python only): Python
+  reflects current Recipe via transpile, AND Recipe is itself in
+  sync with Description (transitive freshness).
 - `— derived from Description, out of date`, 50% opacity (Recipe
-  only): Recipe was derived from Description at some prior point;
-  Description has since been edited. Regenerating refreshes.
+  only): Recipe's lineage points at a prior Description state.
+  Regenerating refreshes.
 - `— derived from Recipe, out of date`, 50% opacity (Python only):
-  Python was derived from Recipe at some prior point; EITHER Recipe
-  has since been edited OR Recipe is transitively out of date from
-  Description. Regenerating refreshes.
+  Python's lineage points at a prior Recipe state OR Recipe is
+  transitively out of date from Description. Regenerating refreshes.
 - `— ignored`, 40% opacity: this facet is upstream of the current
   canonical in the D → R → P chain. No derivation relationship to
-  the canonical (upstream never regenerates from downstream).
-  Content is preserved on disk but not participating in current
-  runtime. Cohort can edit it to reclaim canonical status; else it
-  stays out of scope.
+  the canonical. Content is preserved; not participating in runtime.
+  Cohort can edit it to reclaim canonical status.
 
-Description has no `— derived from X` variants (top of chain; never
-derived from anything). Description's states are: `— source`,
-`— ignored`, or the v11.4.1 synced-state default (`— source` when
-all hashes align).
+Description has no `— derived from X` variants (top of chain, never
+derived). Description's states: `— source`, `— ignored`, or the
+synced-state default (`— source` when all hashes align — the
+Description-canonical authorial convention).
 
-**Transitive out-of-date (v11.6, driver Q3 2026-07-03):** If Recipe
-is `— derived from Description, out of date`, then Python is
-`— derived from Recipe, out of date` regardless of Python's own
-local Recipe-vs-python lineage match. Rationale: cohort will
-regenerate the whole chain from source; local Python-vs-Recipe
-alignment is uninformative when Recipe itself needs regeneration.
-Reporting Python as `— derived from Recipe` (in sync) when Recipe
-is upstream-broken would mislead cohort about the pipeline's actual
-freshness.
+Transitive out-of-date: if Recipe is `— derived from Description,
+out of date`, Python renders `— derived from Recipe, out of date`
+regardless of local Python-vs-Recipe hash match. Cohort will
+regenerate the whole chain from source; reporting Python as fresh
+when Recipe is upstream-broken would mislead about the pipeline's
+actual freshness.
 
-**Frontmatter schema (V2a v11.6):**
+Suffix widgets are view-only CM6 decorations. On-disk heading text
+stays clean.
 
-Immediate-parent lineage tracking replaces the v11.4 canonical-hash
-approach. Two new fields:
+Cohort norm: forge after editing to normalize downstream from
+out-of-date back to derived. Direct edits to any facet promote it
+to canonical; other facets recompute state on next render.
 
-- `recipe_derived_from_description_hash` — stamped at `/generate`
-  time with Description's current hash. Renames v11.4's
-  `recipe_derived_from_source_hash` to reflect that Recipe's parent
-  is always Description (never Recipe's own prior state).
-- `python_derived_from_recipe_hash` — stamped at transpile time
-  with Recipe's current hash. Renames v11.4's
-  `python_derived_from_source_hash` to reflect that Python's
-  immediate parent is always Recipe (not Description, per driver
-  Q1 2026-07-03 decision favoring immediate-parent lineage).
+A confirmation modal protects against unintended overwrite when
+`/generate` would clobber a hand-edited Recipe. The hash-driven
+locking replaces earlier explicit-lock mechanisms.
 
-Backfill migration on file-open per session: populate new fields
-from v11.4's `_source_hash` fields where semantic maps cleanly
-(Description-canonical two-hop case requires heuristic best-effort
-seed for Python). Old fields retained during transition; retired
-in a followup drain after cohort validation.
+**S10.** *Engineer-mode action notes.* Some action notes carry
+Python logic that Recipe grammar cannot express: lambdas,
+comprehensions, music21 object construction with bound method
+references, complex try/except, dynamic attribute access. These
+notes are authored three-facet-shaped (participating in the palette
++ display contract) while remaining engineer-owned operationally
+(Python is canonical, hand-authored, runs as-is on Forge-click).
 
-**"ignored" wording rationale (v11.6):** V11.4's `— stale` conflated
-two distinct states — upstream-of-source (no derivation relationship
-possible) and downstream-out-of-date (had a derivation, source
-moved). V11.6 names these separately: `— ignored` for the upstream
-case (cohort intuition: "this facet isn't participating; if I want
-it in the chain, I need to edit or regenerate through it"),
-`— derived from X, out of date` for the downstream case (cohort
-intuition: "this used to be right; regenerate to refresh").
+Convention:
 
-Prior V2a v11.4 (tri-state source/derived/stale) and v11.4.1
-(synced → Description convention) retired. v11.6 is the current
-S9 visibility contract. Header stays V2a v12; this is an S9
-sub-versioning refinement.
-
-CM6 decorations + status bar surface the canonical layer to the
-cohort. A confirmation modal protects against unintended overwrite
-when `/generate` would clobber a hand-edited Recipe. The hash-driven
-locking replaces the V1 explicit-lock mechanism (`lock` / `unlock`
-commands, removed v0.2.197).
-
-**S10.** *Engineer-mode action notes — third operational shape between
-V1 and full-V2.*
-
-Some action notes carry Python logic that V2 Recipe grammar cannot
-express: lambdas, comprehensions, music21 object construction with
-bound method references, complex try/except, dynamic attribute access,
-etc. These notes need to be authored as V2-shaped (so they participate
-in the V2 ecosystem — Description for cohort comprehension, Recipe
-heading for the chip palette + display contract) while remaining
-engineer-owned operationally (the canonical layer is Python, hand-
-authored, and runs as-is on Forge-click).
-
-The convention:
-
-1. **Frontmatter signal**: `edit_mode: python` MUST appear in the
-   frontmatter.
-2. **Facet structure**: Description + Recipe + Python all present
-   (V2-shaped per S8), where Recipe body is a single HTML comment
-   indicating engineer-mode (e.g., `<!-- engineer-mode: this note's
-   logic lives in # Python. The frontmatter carries edit_mode: python
-   so Forge-click runs the Python directly instead of transpiling
-   Recipe → Python. -->`).
+1. **Frontmatter signal**: `edit_mode: python` MUST appear.
+2. **Facet structure**: all three facets present per S8, where
+   Recipe body is a single HTML comment indicating engineer-mode
+   (`<!-- engineer-mode: logic in # Python; edit_mode: python
+   routes Forge-click to run Python directly. -->`).
 3. **Routing precedence**: the engine's action-code resolver MUST
-   check the `edit_mode: python` frontmatter signal BEFORE V2-shape
-   detection. The short-circuit ensures engineer-mode notes never
-   route through Recipe transpilation regardless of whether their
-   shape would otherwise classify as V2 (per v0.2.222 retrospective —
-   ordering bug had `resolve_action_code` hitting V2 detect first,
-   transpiling stub Recipes to empty Python and overwriting the
-   canonical).
+   check `edit_mode: python` BEFORE shape-based detection. The
+   short-circuit ensures engineer-mode notes never route through
+   Recipe transpilation.
 
-Engineer-mode is the legitimate operational shape for action notes
-whose Python uses constructs outside V2 Recipe's expressive range.
-It is NOT a workaround for V1 notes that haven't been migrated —
-those keep `# English` + `# Python` shape. It is NOT a Path Y escape
-hatch (Path Y delivery via v0.2.197-205 implicit-locking handles
-cohort-authored Python edits correctly per S9).
+Engineer-mode is engineer-authored. Cohort can READ Description but
+should not edit Python; behavior changes go through engine work or
+cohort forking the note.
 
-Engineer-mode is engineer-authored. Cohort users can READ the
-Description but should not edit the Python; if they want behavior
-changes, the right path is to request engine work or fork the note
-with their own Python facet.
-
-The implicit-locking state machine (S9) is bypassed entirely for
-engineer-mode notes — the engine treats the Python facet as
-canonical without hash comparison. This is intentional: hash drift
-would surface false-positive "Python canonical" status when the
-Recipe is just a stub that the cohort might edit by accident; the
-short-circuit prevents the stale state machine from firing.
+The S9 state machine is bypassed for engineer-mode notes — the
+engine treats Python as canonical without hash comparison. Hash
+drift would surface false-positive "Python canonical" status when
+Recipe is just a stub the cohort might edit by accident; the
+routing decision is authoritative.
 
 ## Architectural guarantees
 
 These are structural and behavioral properties the engine guarantees by
 construction (independent of what users write inside their notes).
 
-**A1.** Every action note has an English facet (intent) and a
-Python facet. Every data note has a `content_type` declaration and
-either an inline body (text content types) or a `content_ref`
-pointing to a sibling asset file (binary content types).
+**A1.** Every action note has three facets: Description (prose
+intent), Recipe (structured grammar), and Python (executable code).
+Every data note has a `content_type` declaration and either an
+inline body (text content types) or a `content_ref` pointing to a
+sibling asset file (binary content types).
 
 **A2.** Action note Python facets define a top-level `compute`
 function whose first parameter is `context`. Additional parameters
@@ -597,13 +410,11 @@ for v1.1+ vaults not in the bundle. Bundled-vault content updates
 ship via plugin releases; user-edited copies in the vault root take
 precedence via A4 shadowing.
 
-**A5.4.** *Inlined-asset version stamping (added 2026-06-10 per
-v0.2.98; relocated from B10 to A5.4 in V2a v10 — this is a
-distribution/packaging guarantee, sibling to A5.1-A5.3, not engine
-compute behavior).* When the runtime distribution channel does not
-deliver the plugin's `assets/` tree alongside `main.js` (BRAT being
-the canonical example — it pulls only `main.js`, `manifest.json`,
-`styles.css`, `data.json`), the plugin MUST:
+**A5.4.** *Inlined-asset version stamping.* When the runtime
+distribution channel does not deliver the plugin's `assets/` tree
+alongside `main.js` (BRAT being the canonical example — it pulls
+only `main.js`, `manifest.json`, `styles.css`, `data.json`), the
+plugin MUST:
 
 1. Inline the required assets into `main.js` at build time and
    ship a runtime restore step on plugin onload that writes any
@@ -614,15 +425,12 @@ the canonical example — it pulls only `main.js`, `manifest.json`,
 3. Force-overwrite the entire inlined-asset tree on every plugin
    onload where the sentinel version does not match the bundle's
    embedded version. Skip-if-exists guards on individual files
-   are FORBIDDEN — they cause silent staleness when a BRAT update
+   are FORBIDDEN — they cause silent staleness when an update
    replaces `main.js` but leaves the previously-restored asset
    tree untouched.
 
-The skip-if-exists antipattern silently broke every plugin update
-between v0.2.91 (first inlined-assets ship) and v0.2.98 (sentinel
-introduction). Any future asset-bundling mechanism MUST follow
-this stamp + force-overwrite pattern; per-file existence checks
-are not a substitute.
+Any asset-bundling mechanism MUST follow this stamp + force-overwrite
+pattern; per-file existence checks are not a substitute.
 
 **A6.** The plugin renders structured output values by their tagged
 shape (`{type, content}`). Current formats: `musicxml` (rendered via
@@ -878,19 +686,18 @@ character of the English facet triggers a full re-transpile (and
 re-resolution of all slots) on the next compute. Region-level
 invalidation (re-resolving only the slot whose text changed,
 preserving other slot resolutions) is a deliberate non-commitment
-— see Anticipated extensions. The rationale is V1 cohort scale:
-notes are short per the Mission preamble, slot counts are
-small (1-2 typical), and haiku-pinned slot resolutions are cheap;
-the architectural simplification of a single cache surface is
-worth more than the marginal cost of re-resolving unchanged slots
-on English edits.
+— see Anticipated extensions. Rationale: notes are short per the
+Mission preamble, slot counts are small (1-2 typical), and
+haiku-pinned slot resolutions are cheap; the architectural
+simplification of a single cache surface is worth more than the
+marginal cost of re-resolving unchanged slots on edits.
 
 See `docs/investigations/slot-resolution-design.md` for the wire-
 format details and the in-memory hash contract used by the
 transpile-time resolver.
 
-**Cache invalidation on switch-to-English (added 2026-06-10 per
-v0.2.90 + v0.2.119 arc).** When the user toggles `edit_mode` from
+**Cache invalidation on switch-to-English.** When the user toggles
+`edit_mode` from
 `python` back to `english` (B8), the plugin MUST delete the
 note's `english_hash` frontmatter field as part of the
 transition. This forces a cache miss + re-transpile on the next
@@ -930,10 +737,7 @@ but serve different consumers. A future consolidation may unify them
 under a single field with two consumers; until then, notes in
 `edit_mode: python` may carry both fields with the same value.
 
-**Symmetric facet-mutex invariant (added 2026-06-10 per v0.2.83
-gestural model + v0.2.87 collapse-active completion; relocated from
-B7.3 to B8 in V2a v10 — the invariant governs `edit_mode` facet
-visibility, which is B8's concern, not B7.3 slot-caching).** When a
+**Symmetric facet-mutex invariant.** When a
 note's `# English` and `# Python` headings are both present in
 the body, the facet-mutex maintains the invariant *exactly one
 facet visible at any time*. Two gestures trigger a flip:
@@ -1221,28 +1025,25 @@ data notes defines what's available. Future conventions
 (`_templates.md`, `_examples.md`) may define such affordances.
 Authors shape the UI by editing markdown, not plugin code.
 
-Post-v0.2.259 the chip palette is NOT a vault-driven affordance —
-palette entries come from `type: action` notes discovered in the
-vault + installed library subdirs + hardcoded language primitives.
-A library note MAY carry a `chip_insertion:` frontmatter field for a
-custom insertion template; absent that field, the palette uses a
-plain wikilink. The retired `_chips.md` schema (schema_version 2/3
-overrides + synthetic chips + walk-up pacing) is no longer read.
+The chip palette is NOT a vault-driven affordance — palette entries
+come from `type: action` notes discovered in the vault + installed
+library subdirs + hardcoded language primitives. A library note MAY
+carry a `chip_insertion:` frontmatter field for a custom insertion
+template; absent that field, the palette uses a plain wikilink.
 
 ## Current implementation choices
 
 **I1.** Python is the realization language for action notes.
 
-**I2.** Forge is delivered as an Obsidian plugin. In V1 closed beta,
-the plugin bundles Pyodide and runs the engine in-process inside
-the Obsidian renderer; the user's machine requires no Python install
-and no local backend. LLM-driven `/generate` requests go to a hosted
-transpile service over HTTPS (authenticated via a shared bearer
-token); all other compute paths — `/compute`, note resolution,
-snapshot read/write — execute locally inside the plugin process via
-Pyodide. A legacy HTTP backend mode (Python uvicorn serving the
-engine) remains supported for engine development workflows but is
-not exercised on student installs.
+**I2.** Forge is delivered as an Obsidian plugin. The plugin bundles
+Pyodide and runs the engine in-process inside the Obsidian renderer;
+the user's machine requires no Python install and no local backend.
+LLM-driven `/generate` requests go to a hosted transpile service over
+HTTPS (authenticated via a shared bearer token); all other compute
+paths — `/compute`, note resolution, snapshot read/write — execute
+locally inside the plugin process via Pyodide. A legacy HTTP backend
+mode (Python uvicorn serving the engine) remains supported for engine
+development workflows but is not exercised on cohort installs.
 
 **I3.** The plugin's renderer set is fixed at build time: SVG (browser
 native), MusicXML (Verovio). New formats added through plugin updates.
@@ -1258,29 +1059,13 @@ via environment variable.
 `<vault>/.forge/edges/<caller_id>/<callee_id>.md`. Snapshot content is
 wire-format text in the body; metadata in frontmatter.
 
-**I7.** *V1 → V2 migration status.* As of V2a v11.2, the engine and
-plugin support both V1 (`# English` + `# Python` + frontmatter inputs)
-and full-V2 (`# Description` + `# Recipe` + `# Python` + facet hashes
-per S8-S9) action notes. Existing content: forge-tutorial fully V2;
-forge-moda fully V2; forge-music fully full-V2 post-v0.7.0 (renamed
-`blues/` → `slow_burn/` + `song.md` → `slow_burn.md` in v0.8.0) —
-all 5 vault action notes (`slow_burn.md`, `chorus.md`,
-`solo_chorus.md`, `percussion/loom.md`, `percussion/murmuration.md`)
-are full-V2 with Description + Recipe + Python and implicit-locking
-per S9. The 8
-prior engineer-mode files (drum_chorus, drums_shuffle, form,
-guitar_solo_chorus, vocal_phrase_a, vocal_phrase_b, phase_cell,
-phase_shifter) were promoted to library notes per S10 + per the
-2026-07-01 brainstorm consistency rule (every chip backs a note —
-library or vault; no second-class engineer-mode notes in vault).
-They now live as functions in `forge.music.lib` and serve via the
-LibraryNoteView read-only path. New action notes SHOULD be authored
-as full-V2. Engineer-mode V2 (S10) remains a documented operational
-shape for any future case where vault-authored content needs to
-escape V2 Recipe grammar, but no current vault notes use it. V1
-content is grandfathered indefinitely; the engine does not plan to
-drop V1 support, though chip-palette UX defaults bias toward V2
-keywords (Let / Return / Call) in V2-contextual editors.
+**I7.** *Legacy shape support.* The engine accepts both the current
+three-facet shape (Description + Recipe + Python + facet hashes per
+S8-S9) and legacy two-facet notes (English + Python + frontmatter
+inputs). Legacy notes are grandfathered indefinitely; new action
+notes SHOULD be authored in the three-facet shape. Engineer-mode
+(S10) is the documented operational shape for action notes whose
+Python cannot be expressed via Recipe grammar.
 
 ## Deliberate non-commitments
 
@@ -1297,7 +1082,11 @@ addressed in future versions; their absence is intentional.
 - Cloud / hosted execution.
 - Streaming output for long-running computations.
 - Automatic snapshot eviction or cleanup policies.
-- **Backward compatibility for free-English note facets.** As the E-- migration (anticipated extensions below) progresses, free-English English facets that haven't been normalized to canonical E-- may break or require explicit migration. The contract going forward is: the English facet IS canonical E--, possibly with the LLM-normalizer run automatically on free-form input at /generate time. Notes authored before the migration are not guaranteed to keep working as their English facets stand — they need re-running through /generate or hand-editing into canonical form.
+- **Backward compatibility for free-prose Description facets across
+  Recipe-grammar shifts.** As the Recipe grammar evolves, free-prose
+  Description content is regenerated to Recipe by `/generate` on
+  demand. Notes authored under prior Recipe conventions may need
+  re-running through `/generate` or hand-editing into current form.
 
 ## Anticipated extensions
 
@@ -1322,25 +1111,19 @@ versions when the use case demands them.
   Lives outside Forge core; integrates via the standard note
   contract.
 - **Region-level transpilation caching.** B7.3 commits to note-level cache granularity: any English-facet edit triggers a full re-transpile + re-resolution of all slots on the next compute. The architecture admits a finer granularity — caching individual transpiled regions (per-statement, per-slot) and re-running only the changed regions on partial edits. Adoption trigger: evidence that real cohort usage pushes notes to N>3 slots where re-resolving unchanged slots becomes a real cost (LLM dollars, latency, or user-perceived sluggishness). The diagnostic for this trigger is concrete: per-vault slot-count histograms + post-edit re-transpile latency measurements. Until that evidence surfaces, note-level keeps the contract simple, the wire format small (one `# Python` heading, no per-region cache structures), and the user-facing surface minimal (no hash-keyed YAML for students to interpret).
-- **E-- as the canonical English facet form (in progress).** Forge is
-  migrating the English facet from free-prose-with-LLM-translation to
-  canonical E-- (`~/projects/e--/`, vendored into the Forge engine
-  package as `forge/forge/e_minus_minus/`). The engine compiles E--
-  canonical to Python deterministically; the LLM runs only for
-  free-English → canonical normalization (at /generate time) and for
-  `{{ ... }}` value-slot resolution (cached per slot text). The
-  migration ships as a small number of staged drains post-V1 closed
-  beta. Backward compatibility for free-English facets is not
-  promised (see Deliberate non-commitments). When Stage-1+Stage-2
-  ship, B5/B6/B7 are rewritten atomically to describe the new
-  compilation pipeline.
+- **Grammar-canonical Recipe (in progress).** The Recipe grammar is
+  the deterministic compilation surface: cohort-authored Description
+  → Recipe via `/generate` (LLM), Recipe → Python via transpile
+  (deterministic). Future grammar expansions land as staged drains;
+  cohort-authored content re-generates through `/generate` when
+  grammar conventions shift.
 
 ## What Forge promises
 
-- Two-facet authoring on action notes (English + Python) with LLM
-  bridging in both directions (English → Python via `/generate`;
-  Python → English via explicit canonicalization sync). Inert stored
-  content on data notes (no English facet).
+- Three-facet authoring on action notes (Description + Recipe +
+  Python) with LLM bridging (Description → Recipe via `/generate`)
+  and deterministic transpile (Recipe → Python). Inert stored
+  content on data notes (no computed facet).
 - DAG composition via `context.compute`.
 - Distribution via vaults and registry.
 - Structured output rendering via standard formats.
