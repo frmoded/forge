@@ -86,11 +86,12 @@ naming as engine-code identifiers.
    `Call [[note]] with k=v.`, `Return X.`, `If/Otherwise`,
    `For each/Repeat`, `{{...}}` slots.
 6. **Python** — the compiled-from-Recipe Python facet. Always present
-   at compute time; this is what the engine actually executes at
-   runtime. Which facet is the current source-of-truth for compute —
-   the "canonical facet" driving what Python content gets produced —
-   is determined by S9's state machine (whichever facet was last
-   hand-edited becomes canonical).
+   at compute time; this is what the engine executes at runtime. What
+   Python content contains depends on S9's state machine: if
+   Description was last hand-edited, Python is regenerated via
+   Description → Recipe → Python; if Recipe was last hand-edited,
+   Python is regenerated via Recipe → Python (no LLM call); if Python
+   was last hand-edited, Python content stays as authored.
 7. **Library note** — a callable action note shipped by the engine.
    Python lives in `forge/forge/<domain>/lib.py`; facets are served
    read-only via the library-note view (Description from docstring,
