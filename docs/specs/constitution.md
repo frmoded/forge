@@ -210,6 +210,20 @@ Every action note stores which facet is authoritative in a
 `description | recipe | python | synced`. The canonical facet
 drives runtime; other facets render lineage + freshness state.
 
+Facet-edit consequences — what happens when cohort edits each facet
+and clicks Forge:
+
+- **Edit Description** → `canonical_facet` becomes `description`.
+  Forge: LLM regenerates Recipe from Description → transpile
+  regenerates Python from Recipe → run.
+- **Edit Recipe** → `canonical_facet` becomes `recipe`. Forge:
+  transpile regenerates Python from Recipe (no LLM call) → run.
+- **Edit Python** → `canonical_facet` becomes `python`. Forge: run
+  Python as-authored (no regeneration).
+- **No edit since last forge** → `canonical_facet` stays `synced`.
+  Forge normalizes via Description (same behavior as
+  description-canonical).
+
 Write-time rules:
 - Hand-edits (buffer save with body-hash divergence from stored
   hash) write `canonical_facet` to the edited facet.
