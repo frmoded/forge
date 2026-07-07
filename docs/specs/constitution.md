@@ -47,18 +47,20 @@ system is deterministic, debuggable, and cheap — so users iterate without
 waiting and without per-click LLM cost. Architectural guarantees below
 serve this principle.
 
-**The canonical form is Recipe** (V2 paradigm; supersedes the V1
-canonical-English / E-- design). Every V2 action note has a Description
-facet (free prose capturing intent + mechanics + inputs) and a Recipe
-facet (a structured grammar that compiles deterministically to Python).
-The Recipe uses chips ([[note]] references, control flow, `{{ ... }}`
-value slots) so the call graph is legible without specifying mechanism.
-The LLM is invoked only at `/generate` time (Description → Recipe) and
-at `/resolve-slot` time (`{{ ... }}` → Python expression) — never to
-decide program structure at runtime. After Recipe is in hand, the
-deterministic transpiler emits Python; the LLM is out of the runtime
-path. This is the load-bearing implementation choice that makes the
-runtime determinism + cheap-tweak properties above realizable. Legacy
+**Recipe is the authoritative representation of a note's compute.**
+Every action note has a Description facet (free prose capturing
+intent + mechanics + inputs) and a Recipe facet (a structured grammar
+that compiles deterministically to Python). The Recipe uses wikilink
+references to other notes (`[[note]]`), control-flow keywords, and
+`{{ ... }}` value slots so the call graph is legible without
+specifying mechanism. The LLM is invoked only at `/generate` time
+(Description → Recipe) and at `/resolve-slot` time
+(`{{ ... }}` → Python expression) — never to decide program structure
+at runtime. After Recipe is in hand, the deterministic transpiler
+emits Python; the LLM is out of the runtime path. This is the
+load-bearing implementation choice that makes the runtime determinism
++ cheap-tweak properties above realizable.
+
 Legacy action notes (two-facet English + Python shape) remain valid;
 the engine accepts both shapes.
 
@@ -84,8 +86,11 @@ naming as engine-code identifiers.
    `Call [[note]] with k=v.`, `Return X.`, `If/Otherwise`,
    `For each/Repeat`, `{{...}}` slots.
 6. **Python** — the compiled-from-Recipe Python facet. Always present
-   at compute time. The canonical facet (the one that runs) is
-   determined by S9's state machine.
+   at compute time; this is what the engine actually executes at
+   runtime. Which facet is the current source-of-truth for compute —
+   the "canonical facet" driving what Python content gets produced —
+   is determined by S9's state machine (whichever facet was last
+   hand-edited becomes canonical).
 7. **Library note** — a callable action note shipped by the engine.
    Python lives in `forge/forge/<domain>/lib.py`; facets are served
    read-only via the library-note view (Description from docstring,
