@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v14)
+# Forge — Core Invariants and Discipline (V2a v15)
 
 ## Mission
 
@@ -513,296 +513,79 @@ dependencies Y has on Z are not traversed for this call. Freezing one
 edge short-circuits the entire subgraph below it from the caller's
 perspective.
 
-## Engine behavior (no purity guarantees)
+## Behavioral guarantees per component
 
-These are how the engine behaves; behavior depends on what the user
-writes.
+The Components section names three parts (`forge-client-obsidian`,
+`forge-service`, `forge-runtime`). Behavioral guarantees below are
+grouped by which component owns them. Cross-component contracts —
+behaviors depending on interfaces that no single component owns —
+are called out in their own subsection.
 
-**B1.** `compute(note, args)` runs the note's Python facet (for
-action notes) or returns the deserialized body (for data notes).
-Whatever Python the author wrote runs. The engine does not verify,
-sandbox, or constrain behavior beyond Python's own semantics.
+These are how each component behaves at pipeline time and runtime;
+behavior depends on what the user writes and how the components
+interact via shared contracts.
 
-**B2.** Action note Python has the full powers of Python: imports,
-network calls, file I/O, randomness without explicit seeds, LLM calls,
-mutation of inputs, side effects on the world. The author chooses what
-their note does and accepts the consequences.
+### forge-runtime behavior
 
-**B3.** Compute is **not** guaranteed to be deterministic. Same inputs
-may produce different outputs, especially for notes that call LLMs,
-sample randomly, or read external state. This is a feature for
-exploratory and improvisational work.
+**B1.** *(forge-runtime)* `compute(note, args)` runs the note's
+Python facet (for action notes) or returns the deserialized body
+(for data notes). Whatever Python the author wrote runs.
+`forge-runtime` does not verify, sandbox, or constrain behavior
+beyond Python's own semantics.
 
-**B4.** Snapshot capture (A7) happens regardless of the note's
-determinism. For non-deterministic notes, the most recent
+**B2.** *(forge-runtime)* Action note Python has the full powers of
+Python: imports, network calls, file I/O, randomness without explicit
+seeds, LLM calls, mutation of inputs, side effects on the world. The
+author chooses what their note does and accepts the consequences.
+
+**B3.** *(forge-runtime)* Compute is **not** guaranteed to be
+deterministic. Same inputs may produce different outputs, especially
+for notes that call LLMs, sample randomly, or read external state.
+This is a feature for exploratory and improvisational work.
+
+**B4.** *(forge-runtime)* Snapshot capture (A7) happens regardless of
+the note's determinism. For non-deterministic notes, the most recent
 computation is what's captured. Repeat invocations may overwrite the
 snapshot with successively different values until the edge is frozen.
 
-**B5.** Generation: `/generate` produces a Python facet from the
-note's English facet, augmented by read-only access to the vault's
-note inventory. For each note in scope, the LLM may consult the
-note's name, signature, and either its English facet (action
-notes) or its `description` and `content_type` (data notes).
-
-The LLM may use this information either to call notes explicitly
-referenced in the English facet of the note being authored, or to
-call notes it discovers while implementing the Python facet. Other
-notes are treated as black boxes characterized by their declared
-intent and signature; the LLM does not see other notes' Python
-facets or their computed outputs at authoring time.
-
-Generation does not execute notes at authoring time. The LLM's
-decisions about which notes to call are based on what's documented
-(English) and declared (signatures), not on what the notes actually
-compute.
-
-**B5.1.** *`generation_notes` frontmatter field.* A note's
-frontmatter may carry a `generation_notes` field — a free-text block
-consumed by `/generate` as additional authoring context for that
-specific note. The field captures machine-targeted guidance (data
-shapes the LLM should expect, idiomatic patterns specific to the
-domain, carve-out semantics, edge cases) that would clutter the English
-facet if written there. The English facet stays human-readable; the
-machine-targeted hints live in `generation_notes`.
-
-`generation_notes` is part of the note's authoring contract with
-the LLM, not part of its public interface. It is visible to `/generate`
-only when authoring *that* note's Python facet; it is not exposed
-when the note appears in another note's authoring inventory (per
-B5). Consumers of the note see only its name, signature, and
-English facet (or `description` for data notes) — implementation
-hints stay implementation-side. The runtime ignores the field; the
-plugin's rendered view does not display it prominently.
-
-**B5.2.** *Input derivation.* The engine determines which inputs to
-request from the user at compute time by parsing the note's
-Python signature and taking the union of (frontmatter-declared
-`inputs`) and (positional / keyword-only params other than
-`context`). The Python signature is the source of truth for what
-`compute` actually needs; frontmatter `inputs` is a declarative
-hint that informs `/generate`'s authoring context (per B5) and
-provides UI ordering. When the LLM produces Python with params not
-declared in frontmatter, the engine still surfaces them to the
-user via the input modal — the note's runtime contract
+**B5.2.** *(forge-runtime)* *Input derivation.* At compute time
+`forge-runtime` determines which inputs to request from the user by
+parsing the note's Python signature and taking the union of
+(frontmatter-declared `inputs`) and (positional / keyword-only
+params other than `context`). The Python signature is the source of
+truth for what `compute` actually needs; frontmatter `inputs` is a
+declarative hint that informs `forge-service`'s `/generate`
+authoring context (per B5) and provides UI ordering in
+`forge-client-obsidian`. When the LLM produces Python with params
+not declared in frontmatter, `forge-runtime` still surfaces them to
+the user via the input modal — the note's runtime contract
 self-describes via its signature, not its frontmatter. Inputs are
-delivered to `compute` as kwargs (via `**inputs` unpacking, per
-A2); declared parameters bind by name. The `context` parameter is
-always supplied by the engine and never surfaced to the user.
+delivered to `compute` as kwargs (via `**inputs` unpacking, per A2);
+declared parameters bind by name. The `context` parameter is always
+supplied by `forge-runtime` and never surfaced to the user.
 
-**B6.** The Python produced by `/generate` is then static code. It
-does not re-invoke `/generate` at runtime. Runtime LLM calls inside
-Python are allowed and explicit, distinct from the `/generate`
-mechanism.
+**B9.** *(forge-runtime)* *Note execution namespace and declared
+domains.* The runtime sandbox blocks `import` statements; notes
+cannot pull in modules at compute time. Instead, `forge-runtime`
+pre-injects a fixed set of names as globals into each note's
+execution namespace. The base set — always injected regardless of
+domain — includes `random`, `math`, and `numpy`. Domain layers
+register additional names and `/generate` prompt fragments under a
+domain key (e.g. `music`: music21 modules + composition helpers;
+`moda`: `Particle` / `ParticleState`).
 
-**B7.** After /generate produces a Python facet, Forge performs static
-analysis on the result to extract direct dependencies (calls to
-`context.compute(...)` with literal-string note IDs). These
-dependencies are written as a `Dependencies` section in the note's
-body, formatted as wikilinks. The section is delimited by a
-clearly-marked header indicating it is system-maintained. The section
-is updated at /generate time and on explicit user command; drift
-between the section and the current Python facet may occur if the user
-edits the Python directly. Drift is detected and surfaced by clients
-but not automatically resolved by Forge.
-
-**B7.1.** *Recipe grammar for calls.* An action note's Recipe facet
-uses the following grammar to invoke other notes and language
-primitives:
-
-- `Let X = Call [[note_id]] with k1=v1, k2=v2.` — assign the result
-  of a call to a variable.
-- `Call [[note_id]] with k1=v1, k2=v2.` — bare call.
-- `Return expr.` — return an expression.
-- `Let X = expr.` — assign an expression to a variable.
-- `If cond`, `Otherwise`, `For each ... In ...`, `Repeat N times` —
-  control-flow keywords.
-- `{{ free-text }}` — value slot; resolved to a Python expression at
-  transpile time via `/resolve-slot` (see B7.3).
-- `[[note_id]]` — wikilink target identifying a callable. Qualified
-  per A4 if needed; bare otherwise.
-
-Keyword arguments (`k=v`) correspond to the callee's declared
-parameters. The grammar is deterministic and parser-readable
-without LLM disambiguation.
-
-This is the **syntactic contract** Forge tooling depends on: the
-static dependency analyzer, the chip palette, Obsidian's graph-view
-edge rendering, and the wikilink freeze affordance all read Recipe
-bodies via this shape. Tooling that inserts calls (chip palette,
-chat) MUST produce text in this shape; tooling that reads calls
-(static analysis, freeze) MUST accept this shape.
-
-Examples:
-
-```
-Let result = Call [[fibonacci]] with n=7.
-Call [[print]] with text="hello world".
-Let chord = Call [[major_chord]] with root="C", inversion=2.
-Let song = Call [[compose_blues]] with bars=12, key="E".
-Return song.
-```
-
-**B7.2.** *Builtin references.* Recipe uses `Call [[name]] with ...`
-for every function invocation, including Python builtins (`print`,
-`len`, `range`, etc.). When a wikilink target matches a known
-Python builtin, the Forge plugin intercepts the Obsidian
-wikilink-click and suppresses the default "create unresolved file"
-behavior. The user sees a tooltip or Notice naming the builtin; no
-stray file lands in the vault. Builtins are NOT Forge notes and do
-not require backing `.md` files.
-
-The plugin maintains a vetted list of recognized builtin names —
-common Python globals (`print`, `len`, `range`, `str`, `int`,
-`float`, `bool`, `list`, `dict`, `set`, `tuple`, `enumerate`,
-`zip`, `map`, `filter`, `sorted`, `reversed`, `min`, `max`, `sum`,
-`abs`, `round`, `type`, `isinstance`, `getattr`, `setattr`,
-`hasattr`, `open`, `input`). Calls to non-listed names follow
-wikilink resolution per A4 + A4.1. Authors who want a less-common
-builtin can qualify it (`[[python:name]]`) or ship a sibling note
-that wraps it.
-
-**Rationale**: per the Mission's "low floor" property, every stray
-file the user has to clean up raises cost-to-tweak. Recipes that
-contain `print` references shouldn't pollute the vault when the
-user clicks the rendered wikilink.
-
-**B7.3.** *Value-slot resolution.*
-
-When a Recipe contains a `{{ free-text }}` value slot, the engine
-resolves the slot to a Python expression at **transpile time** via
-a Forge-hosted `/resolve-slot` endpoint (parallel to `/generate`,
-same bearer-token auth). The resolved expression is spliced into
-the transpiled Python; the result lands in the note's `# Python`
-facet — the same cache surface used by other transpile output.
-Hash-keyed bookkeeping that links slot text to its resolution
-lives transiently in memory during transpile and is never persisted
-as a user-facing artifact.
-
-**Cache only when the cache pays for itself.** Slot-free Recipes
-continue transpiling fresh on every compute; transpile is
-deterministic and fast, so caching adds file noise without saving
-cost. Only slot-bearing Recipes persist `# Python` because the
-LLM resolution cost must be amortized.
-
-Cache semantics follow S9's state machine. The engine detects
-Recipe changes via `recipe_derived_from_description_hash` and
-re-resolves slots on hash mismatch. When Python is canonical
-(engineer-mode per S10), the cached Python is used unconditionally
-— engineer edits are the override path for any slot resolution
-they want to refine.
-
-**At runtime, the engine MUST NOT hit the LLM.** If a note's
-`# Python` is missing and its Recipe contains slots, the engine
-raises a cache-miss exception; the plugin batches the missing slots
-into one `/resolve-slot` call, the engine splices the resolutions
-into the transpiled output on a second pass, the plugin writes the
-resulting Python to `# Python`, and re-fires compute. The
-user-visible flow is a single Forge-click; the miss + resolution +
-write-back are internal.
-
-The resolver is hosted-side responsibility: the engine sees only
-the resolved Python expression, never the LLM. Per the Mission's
-"low floor" property, cohort never sees an API key or per-note
-LLM cost.
-
-**Cache invalidation granularity is note-level.** Editing any
-character of the Recipe triggers a full re-transpile (and
-re-resolution of all slots) on the next compute. Region-level
-invalidation is a deliberate non-commitment — see Anticipated
-extensions. Rationale: notes are short per the Mission preamble,
-slot counts are small (1-2 typical), and slot resolutions are
-cheap; the architectural simplification of a single cache surface
-is worth more than the
-marginal cost of re-resolving unchanged slots on edits.
-
-See `docs/investigations/slot-resolution-design.md` for the wire-
-format details and the in-memory hash contract used by the
-transpile-time resolver.
-
-**Cache invalidation on switch-to-English.** When the user toggles
-`edit_mode` from
-`python` back to `english` (B8), the plugin MUST delete the
-note's `english_hash` frontmatter field as part of the
-transition. This forces a cache miss + re-transpile on the next
-Forge-click, restoring the engine's English-as-source-of-truth
-contract. Without this rule, manual Python edits made during
-`python` mode would persist as the cached output even after the
-user signaled they want English-driven regeneration. The deletion
-is plugin-side (engine never reads `english_hash` for cache
-purposes outside this contract); it shares the same field name as
-the engine's slot-resolution cache key by construction.
-
-**B8.** Action notes carry an `edit_mode` (`english` or `python`,
-defaulting to `english`). In `english` mode, the Python facet is
-read-only in the editor and regenerated from English when Forge runs
-the note. In `python` mode, the Python facet is editable and
-regeneration is skipped; the English facet remains as the canonical
-record. An explicit "Sync English to Python" action canonicalizes
-English from current Python via a one-shot LLM call (the inverse
-direction of B5). Round-trip regeneration is not automatic; mode-flips
-and sync are explicit user gestures, never side effects of edits.
-
-**Drift detection in `python` mode.** When the user switches to
-`python` mode, the plugin snapshots `sha256(English facet)` into a
-`locked_english_hash` frontmatter field. On editor refresh, the
-plugin recomputes the hash of the current English facet and compares.
-If they differ (the user edited English while in python mode), the
-plugin shows a yellow-tinted "drifted" indicator on the mode toggle
-button + a hover tooltip prompting the user to either run "Sync
-English ← Python" to canonicalize from the current Python, or switch
-back to `english` mode to regenerate the Python from the new English.
-The `locked_english_hash` field is plugin-internal — the engine does
-NOT read it; it is distinct from `english_hash` (B7.3, which the
-engine uses for slot-resolution cache invalidation). The two fields
-coexist by accident of feature timing: `locked_english_hash`
-predates the B7.3 unification; both happen to hash the English facet
-but serve different consumers. A future consolidation may unify them
-under a single field with two consumers; until then, notes in
-`edit_mode: python` may carry both fields with the same value.
-
-**Symmetric facet-mutex invariant.** When a
-note's `# English` and `# Python` headings are both present in
-the body, the facet-mutex maintains the invariant *exactly one
-facet visible at any time*. Two gestures trigger a flip:
-
-- *Expand inactive*: unfolding the currently-hidden facet flips
-  `edit_mode` to that facet and folds the other.
-- *Collapse active*: folding the currently-visible facet flips
-  `edit_mode` to the OTHER facet and expands it.
-
-Both gestures produce identical post-mutex state. Both-folded and
-both-visible are invalid states; the plugin asserts the invariant
-in a 100ms settle-window watchdog and surfaces violations via
-`console.warn`. This watchdog is a proactive, self-healing invariant
-check — not a caught runtime error — so `console.warn` is intentional
-here and sits outside the scope of the console.error-for-caught-errors
-discipline (cc-prompt-queue.md Hard rules). The invariant applies only
-to note files whose body contains BOTH headings; slot-free
-canonical notes (English + Dependencies only, no Python heading)
-are exempt.
-
-**B9.** *Note execution namespace and declared domains.* The
-runtime sandbox blocks `import` statements; notes cannot pull in
-modules at compute time. Instead, the engine pre-injects a fixed set
-of names as globals into each note's execution namespace. The base
-set — always injected regardless of domain — includes `random`,
-`math`, and `numpy`. Domain layers register additional names and
-`/generate` prompt fragments under a domain key (e.g. `music`:
-music21 modules + composition helpers; `moda`: `Particle` /
-`ParticleState`).
-
-A vault **declares the engine domains it relies on** via
-`domains = ["..."]` in `forge.toml`. The engine injects a domain's
-globals, and includes its `/generate` prompt fragment, **only for
-vaults that declare that domain**:
+A vault **declares the runtime domains it relies on** via
+`domains = ["..."]` in `forge.toml`. `forge-runtime` injects a
+domain's globals, and `forge-service` includes its `/generate`
+prompt fragment, **only for vaults that declare that domain**:
 
 - field present with values → exactly those domains' globals +
   fragments;
 - field present but empty (`domains = []`) → core-only: just the
   base globals and the base prompt, no domain extensions;
 - field absent → **all registered domains** (back-compat for vaults
-  authored before the field; the engine logs a one-line load-time
-  warning encouraging an explicit declaration).
+  authored before the field; `forge-runtime` logs a one-line
+  load-time warning encouraging an explicit declaration).
 
 The declared dependency is the contract: a vault that uses a
 domain-injected name (e.g. `Particle`) without declaring the
@@ -818,6 +601,257 @@ declared domains govern the whole execution including nested calls;
 per-callee-vault re-scoping is a recoverable future refinement, not a
 v1 guarantee. `forge-core`'s built-in vault is domain-neutral and
 available regardless of declared domains.
+
+### forge-service behavior
+
+**B5.** *(forge-service)* Generation: `forge-service`'s `/generate`
+produces a Recipe facet from the note's Description facet (V2), or a
+Python facet from its English facet (V1 legacy), augmented by
+read-only access to the vault's note inventory. For each note in
+scope, the LLM may consult the note's name, signature, and either
+its Description facet (action notes) or its `description` and
+`content_type` (data notes).
+
+The LLM may use this information either to call notes explicitly
+referenced in the Description of the note being authored, or to call
+notes it discovers while implementing the target facet. Other notes
+are treated as black boxes characterized by their declared intent
+and signature; the LLM does not see other notes' Python facets or
+their computed outputs at authoring time.
+
+Generation does not execute notes at authoring time. The LLM's
+decisions about which notes to call are based on what's documented
+(Description) and declared (signatures), not on what the notes
+actually compute.
+
+**B5.1.** *(forge-service)* *`generation_notes` frontmatter field.*
+A note's frontmatter may carry a `generation_notes` field — a
+free-text block consumed by `forge-service`'s `/generate` as
+additional authoring context for that specific note. The field
+captures machine-targeted guidance (data shapes the LLM should
+expect, idiomatic patterns specific to the domain, carve-out
+semantics, edge cases) that would clutter the Description if written
+there. The Description stays human-readable; the machine-targeted
+hints live in `generation_notes`.
+
+`generation_notes` is part of the note's authoring contract with
+the LLM, not part of its public interface. It is visible to
+`/generate` only when authoring *that* note's target facet; it is
+not exposed when the note appears in another note's authoring
+inventory (per B5). Consumers of the note see only its name,
+signature, and Description (or `description` for data notes) —
+implementation hints stay implementation-side. `forge-runtime`
+ignores the field; `forge-client-obsidian`'s rendered view does not
+display it prominently.
+
+**B7.** *(forge-service)* After `/generate` produces a Python facet,
+`forge-service` performs static analysis on the result to extract
+direct dependencies (calls to `context.compute(...)` with
+literal-string note IDs). These dependencies are written as a
+`Dependencies` section in the note's body, formatted as wikilinks.
+The section is delimited by a clearly-marked header indicating it is
+system-maintained. The section is updated at `/generate` time and on
+explicit user command; drift between the section and the current
+Python facet may occur if the user edits the Python directly. Drift
+is detected and surfaced by `forge-client-obsidian` but not
+automatically resolved.
+
+**B7.3.** *(forge-service)* *Value-slot resolution.*
+
+When a Recipe contains a `{{ free-text }}` value slot, resolution
+happens at **transpile time** via `forge-service`'s `/resolve-slot`
+endpoint (parallel to `/generate`, same bearer-token auth). The
+resolved expression is spliced into the transpiled Python; the
+result lands in the note's `# Python` facet — the same cache surface
+used by other transpile output. Hash-keyed bookkeeping that links
+slot text to its resolution lives transiently in memory during
+transpile and is never persisted as a user-facing artifact.
+
+**Cache only when the cache pays for itself.** Slot-free Recipes
+continue transpiling fresh on every compute; transpile is
+deterministic and fast, so caching adds file noise without saving
+cost. Only slot-bearing Recipes persist `# Python` because the LLM
+resolution cost must be amortized.
+
+Cache semantics follow S9's state machine. `forge-service` detects
+Recipe changes via `recipe_derived_from_description_hash` and
+re-resolves slots on hash mismatch. When Python is canonical
+(engineer-mode per S10), the cached Python is used unconditionally
+— engineer edits are the override path for any slot resolution they
+want to refine.
+
+**At runtime, `forge-runtime` MUST NOT hit the LLM.** If a note's
+`# Python` is missing and its Recipe contains slots, `forge-runtime`
+raises a cache-miss exception; `forge-client-obsidian` batches the
+missing slots into one `/resolve-slot` call to `forge-service`,
+`forge-service` returns resolutions, `forge-client-obsidian` writes
+the resulting Python to `# Python`, and re-fires compute. The
+user-visible flow is a single Forge-click; the miss + resolution +
+write-back are internal.
+
+The resolver is `forge-service`-side responsibility: `forge-runtime`
+sees only the resolved Python expression, never the LLM. Per the
+Mission's "low floor" property, cohort never sees an API key or
+per-note LLM cost.
+
+**Cache invalidation granularity is note-level.** Editing any
+character of the Recipe triggers a full re-transpile (and
+re-resolution of all slots) on the next compute. Region-level
+invalidation is a deliberate non-commitment — see Anticipated
+extensions. Rationale: notes are short per the Mission preamble,
+slot counts are small (1-2 typical), and slot resolutions are cheap;
+the architectural simplification of a single cache surface is worth
+more than the marginal cost of re-resolving unchanged slots on edits.
+
+See `docs/investigations/slot-resolution-design.md` for the
+wire-format details and the in-memory hash contract used by the
+transpile-time resolver.
+
+**Cache invalidation on switch-to-English.** When the user toggles
+`edit_mode` from `python` back to `english` (B8),
+`forge-client-obsidian` MUST delete the note's `english_hash`
+frontmatter field as part of the transition. This forces a cache
+miss + re-transpile on the next Forge-click, restoring
+`forge-service`'s English-as-source-of-truth contract. Without this
+rule, manual Python edits made during `python` mode would persist as
+the cached output even after the user signaled they want
+English-driven regeneration. The deletion is
+`forge-client-obsidian`-side (`forge-service` never reads
+`english_hash` for cache purposes outside this contract); it shares
+the same field name as `forge-service`'s slot-resolution cache key
+by construction.
+
+### forge-client-obsidian behavior
+
+**B7.2.** *(forge-client-obsidian)* *Builtin references.* Recipe uses
+`Call [[name]] with ...` for every function invocation, including
+Python builtins (`print`, `len`, `range`, etc.). When a wikilink
+target matches a known Python builtin, `forge-client-obsidian`
+intercepts the Obsidian wikilink-click and suppresses the default
+"create unresolved file" behavior. The user sees a tooltip or Notice
+naming the builtin; no stray file lands in the vault. Builtins are
+NOT Forge notes and do not require backing `.md` files.
+
+`forge-client-obsidian` maintains a vetted list of recognized
+builtin names — common Python globals (`print`, `len`, `range`,
+`str`, `int`, `float`, `bool`, `list`, `dict`, `set`, `tuple`,
+`enumerate`, `zip`, `map`, `filter`, `sorted`, `reversed`, `min`,
+`max`, `sum`, `abs`, `round`, `type`, `isinstance`, `getattr`,
+`setattr`, `hasattr`, `open`, `input`). Calls to non-listed names
+follow wikilink resolution per A4 + A4.1. Authors who want a
+less-common builtin can qualify it (`[[python:name]]`) or ship a
+sibling note that wraps it.
+
+**Rationale**: per the Mission's "low floor" property, every stray
+file the user has to clean up raises cost-to-tweak. Recipes that
+contain `print` references shouldn't pollute the vault when the user
+clicks the rendered wikilink.
+
+**B8.** *(forge-client-obsidian)* Action notes carry an `edit_mode`
+(`english` or `python`, defaulting to `english`). In `english` mode,
+the Python facet is read-only in the editor and regenerated from
+English when Forge runs the note. In `python` mode, the Python facet
+is editable and regeneration is skipped; the English facet remains
+as the canonical record. An explicit "Sync English to Python" action
+canonicalizes English from current Python via a one-shot LLM call
+(the inverse direction of B5). Round-trip regeneration is not
+automatic; mode-flips and sync are explicit user gestures, never
+side effects of edits.
+
+**Drift detection in `python` mode.** When the user switches to
+`python` mode, `forge-client-obsidian` snapshots `sha256(English
+facet)` into a `locked_english_hash` frontmatter field. On editor
+refresh, `forge-client-obsidian` recomputes the hash of the current
+English facet and compares. If they differ (the user edited English
+while in python mode), a yellow-tinted "drifted" indicator appears
+on the mode toggle button + a hover tooltip prompts the user to
+either run "Sync English ← Python" to canonicalize from the current
+Python, or switch back to `english` mode to regenerate the Python
+from the new English. The `locked_english_hash` field is
+`forge-client-obsidian`-internal — `forge-service` and
+`forge-runtime` do NOT read it; it is distinct from `english_hash`
+(B7.3, which `forge-service` uses for slot-resolution cache
+invalidation). The two fields coexist by accident of feature timing:
+`locked_english_hash` predates the B7.3 unification; both happen to
+hash the English facet but serve different consumers. A future
+consolidation may unify them under a single field with two
+consumers; until then, notes in `edit_mode: python` may carry both
+fields with the same value.
+
+**Symmetric facet-mutex invariant.** When a note's `# English` and
+`# Python` headings are both present in the body,
+`forge-client-obsidian`'s facet-mutex maintains the invariant
+*exactly one facet visible at any time*. Two gestures trigger a flip:
+
+- *Expand inactive*: unfolding the currently-hidden facet flips
+  `edit_mode` to that facet and folds the other.
+- *Collapse active*: folding the currently-visible facet flips
+  `edit_mode` to the OTHER facet and expands it.
+
+Both gestures produce identical post-mutex state. Both-folded and
+both-visible are invalid states; `forge-client-obsidian` asserts the
+invariant in a 100ms settle-window watchdog and surfaces violations
+via `console.warn`. This watchdog is a proactive, self-healing
+invariant check — not a caught runtime error — so `console.warn` is
+intentional here and sits outside the scope of the
+console.error-for-caught-errors discipline (cc-prompt-queue.md Hard
+rules). The invariant applies only to note files whose body contains
+BOTH headings; slot-free canonical notes (English + Dependencies
+only, no Python heading) are exempt.
+
+### Cross-component contracts
+
+Behaviors depending on interfaces that no single component owns. All
+three components honor these contracts.
+
+**B6.** *(cross-component)* The Python produced by `forge-service`'s
+`/generate` is then static code. It does not re-invoke `/generate`
+at runtime. Runtime LLM calls inside Python are allowed and
+explicit, distinct from the `/generate` mechanism. This is the
+load-bearing invariant that separates authoring-time LLM cost from
+runtime cost: `forge-runtime`, `forge-client-obsidian`, and
+`forge-service` all honor the boundary.
+
+**B7.1.** *(cross-component)* *Recipe grammar for calls.* Recipe is
+written in E-- (see `~/projects/e--/docs/spec.md` for the full
+grammar productions). The constitutional invariants of the grammar:
+
+- **Deterministic and parser-readable without LLM disambiguation.**
+- **Kwargs-only** for note calls: keyword arguments (`k=v`)
+  correspond to the callee's declared parameters. No positional
+  args.
+- **Wikilink-based note references**: callable targets appear as
+  `[[note_id]]`, qualified per A4 if needed.
+- **Value slots**: `{{ free-text }}` — resolved to a Python
+  expression at transpile time via `/resolve-slot` (see B7.3).
+- **Statement categories**: assignments (`Let X = ...`), calls
+  (`Call [[y]] with k=v.`), returns (`Return expr.`), control flow
+  (`If cond`, `Otherwise`, `For each ... In ...`, `Repeat N times`).
+
+**Consumers of this contract**:
+
+- `forge-service`'s `/generate` writes Recipe in this grammar.
+- `forge-service`'s transpile reads Recipe in this grammar.
+- `forge-service`'s `/resolve-slot` reads slot syntax.
+- `forge-client-obsidian`'s chip palette, static dependency analyzer,
+  wikilink-freeze affordance, and Obsidian graph-view edge rendering
+  all consume Recipe via this shape.
+
+Tooling that inserts calls (chip palette, chat) MUST produce text
+matching this contract; tooling that reads calls (static analysis,
+freeze) MUST accept text matching this contract. Grammar productions
+live in E-- spec and evolve there; the contract-level invariants
+above are constitutional.
+
+Examples:
+
+```
+Let result = Call [[fibonacci]] with n=7.
+Call [[print]] with text="hello world".
+Let chord = Call [[major_chord]] with root="C", inversion=2.
+Let song = Call [[compose_blues]] with bars=12, key="E".
+Return song.
+```
 
 ## Data notes
 
