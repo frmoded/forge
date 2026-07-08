@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v12)
+# Forge — Core Invariants and Discipline (V2a v13)
 
 ## Mission
 
@@ -130,6 +130,50 @@ the artifacts are alive rather than fixed. Snapshots and freezing exist
 so that the user can stabilize parts of the DAG at will, locking
 specific improvisations in place while the rest stays live.
 
+## Components
+
+Forge is three parts. Names below are canonical throughout this
+document.
+
+**`forge-client-obsidian`** — the Obsidian plugin. Scope: Obsidian
+I/O and local disk storage; nothing else. Owns commands, palette,
+hover previews, CM6 view decorations, event handlers, and sole
+ownership of note data on disk. On Forge click, bundles the action
+note's facets + frontmatter + resolved dependency subgraph and sends
+to `forge-service`. Applies returned mutations to disk; hands
+returned Python to `forge-runtime`. For view rendering, computes
+hexa-state suffixes locally via mechanical SHA compare
+(frontmatter-stored hash vs. current body hash). The S9 state
+machine itself lives in `forge-service`.
+
+**`forge-service`** — the hosted backend. Scope: all logic. Owns
+the S9 state machine, `/generate` (LLM Description → Recipe),
+transpile (Recipe → Python), `/resolve-slot` (LLM value-slot
+resolution), closure checks, dependency graph resolution, pipeline
+orchestration. Stateless — derives every decision from the bundle
+plugin sends. Primary surface is a `/forge` endpoint returning
+updated frontmatter + updated facet bodies + `python_to_execute`.
+
+The **registry** is a subcomponent of `forge-service`: a note store
+indexed by `(registry_id, version)`. Notes are dual-addressed —
+local vault path (plugin's concern) and registry ID + version
+(service's concern). `forge-client-obsidian` bundles local notes
+inline and published notes by reference; `forge-service` resolves
+registry references from its own store during dependency walk.
+Publish workflow and version semantics are deferred; the wire
+format admits references from day one.
+
+**`forge-runtime`** — the Python execution runtime. Scope:
+executing compiled Python. Pyodide-bundled, runs in-process inside
+`forge-client-obsidian`. Receives resolved Python + dependency
+values, executes, returns result + snapshot. Offline-safe. No
+state, no network.
+
+**Current implementation.** State machine logic currently lives in
+`forge-client-obsidian` rather than `forge-service`. Migration to
+this architecture is planned; drift between this section and code
+is expected until it lands.
+
 ## Core abstractions
 
 **S1.** A *note* is a markdown file with frontmatter and one or more
@@ -210,30 +254,20 @@ Every action note stores which facet is authoritative in a
 `description | recipe | python | synced`. The canonical facet
 drives runtime; other facets render lineage + freshness state.
 
-Facet-edit consequences — what happens when cohort edits each facet
-and clicks Forge:
+State machine — transitions:
 
-- **Edit Description** → `canonical_facet` becomes `description`.
-  Forge: LLM regenerates Recipe from Description → transpile
-  regenerates Python from Recipe → run.
-- **Edit Recipe** → `canonical_facet` becomes `recipe`. Forge:
-  transpile regenerates Python from Recipe (no LLM call) → run.
-- **Edit Python** → `canonical_facet` becomes `python`. Forge: run
-  Python as-authored (no regeneration).
-- **No edit since last forge** → `canonical_facet` stays `synced`.
-  Forge normalizes via Description (same behavior as
-  description-canonical).
-
-Write-time rules:
-- Hand-edits (buffer save with body-hash divergence from stored
-  hash) write `canonical_facet` to the edited facet.
-- Programmatic writes (transpile output, `/generate` write-back,
-  backfill migrations) do NOT overwrite an EXISTING
-  `canonical_facet`. Backfill DOES seed when the field is absent.
-- Hash-mismatch inference retains two fallback roles: seeding
-  legacy notes on first-open (upstream-wins tiebreak: Description
-  > Recipe > Python), and detecting external edits that bypass the
-  plugin's write path.
+| From | Event | Guard | To | Actions |
+|---|---|---|---|---|
+| any | hand-edit Description body | — | description | Write `canonical_facet=description`; update hash cache; view re-renders Recipe + Python as `— out of date` |
+| any | hand-edit Recipe body | — | recipe | Write `canonical_facet=recipe`; update hash cache; view re-renders Description `— ignored`, Python `— out of date` |
+| any | hand-edit Python body | — | python | Write `canonical_facet=python`; update hash cache; view re-renders Description + Recipe `— ignored` |
+| description | click Forge | — | description | LLM Description → Recipe (`dialect=recipe`); closure-check wikilinks. On pass: write Recipe, stamp `recipe_derived_from_description_hash`. Transpile Recipe → Python; stamp `python_derived_from_recipe_hash`. Run Python. |
+| recipe | click Forge | — | recipe | Transpile Recipe → Python (no LLM call); stamp `python_derived_from_recipe_hash`; run |
+| python | click Forge | — | python | Run Python as-authored; no regeneration |
+| synced | click Forge | — | synced | Same as `description` canonical (LLM regenerate → transpile → run) |
+| any | programmatic write (transpile output, `/generate` write-back) | `_programmaticWriteInFlight` = true | (unchanged) | Update stored `<facet>_hash` + derived-from stamps; do NOT overwrite existing `canonical_facet` |
+| (absent) | backfill on first-open per session | canonical_facet absent AND V2 note | inferred (upstream-wins: Description > Recipe > Python) | Seed `canonical_facet` via hash-mismatch inference; seed derived-from stamps |
+| any | external file rewrite (git checkout, `cp`, external editor) | multi-facet body-hash drift detected simultaneously | description | Write `canonical_facet=description` (CW-1800 upstream-wins tiebreak); refresh hash cache |
 
 Frontmatter schema for lineage tracking:
 - `description_hash`, `recipe_hash`, `python_hash` — SHA-256 of
