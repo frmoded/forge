@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v13)
+# Forge — Core Invariants and Discipline (V2a v14)
 
 ## Mission
 
@@ -1171,6 +1171,22 @@ These trade-offs are accepted as the cost of supporting the kind of
 creative work Forge is for: exploratory, improvisational,
 LLM-augmented composition where the artifacts are alive rather than
 fixed.
+
+## Licensing
+
+Forge is open-source. All code — `forge-client-obsidian`,
+`forge-service`, `forge-runtime`, forge-music, and future components
+including `forge-mcp` — ships under Apache 2.0 or MIT. Documentation
+(constitution, protocols, intuitions) ships under CC-BY-4.0.
+
+The hosted `forge-service` instance is a convenience default. Users
+may self-host from the open source. If usage grows, a paid tier for
+high-volume access remains a future option; the code stays open
+regardless.
+
+Cohort's own vaults, notes, and creative work are theirs — open
+source applies to Forge's implementation, not to what cohort authors
+with it.
 
 ## Portability
 
