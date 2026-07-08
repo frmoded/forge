@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v17)
+# Forge — Core Invariants and Discipline (V2a v18)
 
 ## Mission
 
@@ -114,6 +114,17 @@ naming as engine-code identifiers.
     chip in the palette corresponds to a note.
 13. **Chip palette** — the UI affordance for inserting chips into a
     Recipe. Not a model concept.
+14. **`forge-client-obsidian`** — the Obsidian plugin and the
+    primary client of `forge-service`. Other clients (agentic
+    clients, CLI, alternate editors) are possible and consume the
+    same `forge-service` interface. See Components.
+15. **`forge-service`** — the hosted backend. Owns all logic: S9
+    state machine, LLM edges, deterministic transpile, closure
+    checks, dependency graph resolution, pipeline orchestration.
+    Stateless. See Components for endpoint list.
+16. **`forge-runtime`** — the Python execution runtime. Pyodide-
+    bundled, in-process inside its host client. Executes compiled
+    Python. Offline-safe. See Components.
 
 ## Purpose
 
@@ -156,31 +167,43 @@ checks, dependency graph resolution, pipeline orchestration.
 Stateless — derives every decision from the bundle the client sends.
 Serves any client that speaks its HTTP surface.
 
-*Endpoints* (all authenticated via bearer token, HTTPS):
+*Endpoints* — all authenticated via bearer token, HTTPS. All are
+first-class public surfaces of `forge-service`.
 
 - **`/forge`** — primary orchestration endpoint. Input: bundle of
   facets + frontmatter + resolved dependency subgraph + optional
   registry references. Output: updated frontmatter + updated facet
   bodies + `python_to_execute` + notice text. Internally
-  orchestrates the S9 state machine and the sub-endpoints below as
-  needed.
+  orchestrates the S9 state machine, invokes `/generate` and
+  `/transpile` per canonical state, and calls `/resolve-slot` when
+  the Recipe contains slots.
 - **`/generate`** — LLM generation. Input: source facet body +
   dialect (`recipe` for Description → Recipe; `python` for legacy
   V1 English → Python) + vault note inventory as authoring context
   + optional `generation_notes` per B5.1. Output: generated body in
-  the target dialect.
+  the target dialect. Used by `/forge` and available to clients
+  that need standalone generation.
 - **`/transpile`** — deterministic Recipe → Python. Input: Recipe
   body + context/schema for wikilink resolution. Output: Python
-  code. No LLM; pure E-- transpile rules.
+  code. No LLM; pure E-- transpile rules. Used by `/forge` and
+  available to clients that need standalone transpile.
 - **`/resolve-slot`** — LLM value-slot resolution. Input: slot
   expression (`{{ ... }}` body) + surrounding context. Output:
   Python expression to splice into the transpiled Python. Called
   during transpile-time when the Recipe contains slots (see B7.3).
+  Available to clients that need standalone slot resolution.
+- **`/publish`** (registry — future) — publish a note into the
+  registry. Input: note body + frontmatter + declared scope
+  (global / cohort / private). Output: `(registry_id, version)`.
+  Deferred; the wire format admits registry references from day one.
+- **`/notes/{id}?version=X`** (registry — future) — fetch a
+  published note. Input: registry ID + optional version pin.
+  Output: note body + frontmatter. Deferred; used by `/forge`'s
+  dependency walk when the bundle contains registry references.
 
-The `/generate`, `/transpile`, and `/resolve-slot` endpoints may
-remain individually exposed for testability and client flexibility,
-or may fold entirely inside `/forge`'s internal pipeline. Both
-shapes conform to this section's contract.
+All endpoints are individually usable; `/forge` composes them for
+the common orchestration case. Clients may call sub-endpoints
+directly when they need finer-grained control.
 
 The **registry** is a subcomponent of `forge-service`: a note store
 indexed by `(registry_id, version)`. Notes are dual-addressed —
@@ -753,11 +776,6 @@ builtin names — common Python globals (`print`, `len`, `range`,
 follow wikilink resolution per A4 + A4.1. Authors who want a
 less-common builtin can qualify it (`[[python:name]]`) or ship a
 sibling note that wraps it.
-
-**Rationale**: per the Mission's "low floor" property, every stray
-file the user has to clean up raises cost-to-tweak. Recipes that
-contain `print` references shouldn't pollute the vault when the user
-clicks the rendered wikilink.
 
 **B8.** *(forge-client-obsidian)* Action notes carry an `edit_mode`
 (`english` or `python`, defaulting to `english`). In `english` mode,
