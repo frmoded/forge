@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v15)
+# Forge — Core Invariants and Discipline (V2a v16)
 
 ## Mission
 
@@ -135,39 +135,68 @@ specific improvisations in place while the rest stays live.
 Forge is three parts. Names below are canonical throughout this
 document.
 
-**`forge-client-obsidian`** — the Obsidian plugin. Scope: Obsidian
+**`forge-client-obsidian`** — the Obsidian plugin, and the primary
+client of `forge-service`. Other clients are possible (agentic
+clients, CLI, alternate editors) and consume the same
+`forge-service` interface; `forge-client-obsidian` is not privileged
+architecturally, it is the first-shipped client. Scope: Obsidian
 I/O and local disk storage; nothing else. Owns commands, palette,
 hover previews, CM6 view decorations, event handlers, and sole
-ownership of note data on disk. On Forge click, bundles the action
-note's facets + frontmatter + resolved dependency subgraph and sends
-to `forge-service`. Applies returned mutations to disk; hands
-returned Python to `forge-runtime`. For view rendering, computes
-hexa-state suffixes locally via mechanical SHA compare
-(frontmatter-stored hash vs. current body hash). The S9 state
-machine itself lives in `forge-service`.
+ownership of note data on disk (for cohort using this client). On
+Forge click, bundles the action note's facets + frontmatter +
+resolved dependency subgraph and sends to `forge-service`. Applies
+returned mutations to disk; hands returned Python to `forge-runtime`.
+For view rendering, computes hexa-state suffixes locally via
+mechanical SHA compare (frontmatter-stored hash vs. current body
+hash). The S9 state machine itself lives in `forge-service`.
 
 **`forge-service`** — the hosted backend. Scope: all logic. Owns
-the S9 state machine, `/generate` (LLM Description → Recipe),
-transpile (Recipe → Python), `/resolve-slot` (LLM value-slot
-resolution), closure checks, dependency graph resolution, pipeline
-orchestration. Stateless — derives every decision from the bundle
-plugin sends. Primary surface is a `/forge` endpoint returning
-updated frontmatter + updated facet bodies + `python_to_execute`.
+the S9 state machine, LLM edges, deterministic transpile, closure
+checks, dependency graph resolution, pipeline orchestration.
+Stateless — derives every decision from the bundle the client sends.
+Serves any client that speaks its HTTP surface.
+
+*Endpoints* (all authenticated via bearer token, HTTPS):
+
+- **`/forge`** — primary orchestration endpoint. Input: bundle of
+  facets + frontmatter + resolved dependency subgraph + optional
+  registry references. Output: updated frontmatter + updated facet
+  bodies + `python_to_execute` + notice text. Internally
+  orchestrates the S9 state machine and the sub-endpoints below as
+  needed.
+- **`/generate`** — LLM generation. Input: source facet body +
+  dialect (`recipe` for Description → Recipe; `python` for legacy
+  V1 English → Python) + vault note inventory as authoring context
+  + optional `generation_notes` per B5.1. Output: generated body in
+  the target dialect.
+- **`/transpile`** — deterministic Recipe → Python. Input: Recipe
+  body + context/schema for wikilink resolution. Output: Python
+  code. No LLM; pure E-- transpile rules.
+- **`/resolve-slot`** — LLM value-slot resolution. Input: slot
+  expression (`{{ ... }}` body) + surrounding context. Output:
+  Python expression to splice into the transpiled Python. Called
+  during transpile-time when the Recipe contains slots (see B7.3).
+
+The `/generate`, `/transpile`, and `/resolve-slot` endpoints may
+remain individually exposed for testability and client flexibility,
+or may fold entirely inside `/forge`'s internal pipeline. Both
+shapes conform to this section's contract.
 
 The **registry** is a subcomponent of `forge-service`: a note store
 indexed by `(registry_id, version)`. Notes are dual-addressed —
-local vault path (plugin's concern) and registry ID + version
-(service's concern). `forge-client-obsidian` bundles local notes
-inline and published notes by reference; `forge-service` resolves
-registry references from its own store during dependency walk.
-Publish workflow and version semantics are deferred; the wire
-format admits references from day one.
+local vault path (client's concern) and registry ID + version
+(service's concern). Clients bundle local notes inline and published
+notes by reference; `forge-service` resolves registry references
+from its own store during dependency walk. Publish workflow and
+version semantics are deferred; the wire format admits references
+from day one.
 
 **`forge-runtime`** — the Python execution runtime. Scope:
 executing compiled Python. Pyodide-bundled, runs in-process inside
-`forge-client-obsidian`. Receives resolved Python + dependency
-values, executes, returns result + snapshot. Offline-safe. No
-state, no network.
+`forge-client-obsidian` (and in-process inside any future client
+that ships it). Receives resolved Python + dependency values,
+executes, returns result + snapshot. Offline-safe. No state, no
+network.
 
 **Current implementation.** State machine logic currently lives in
 `forge-client-obsidian` rather than `forge-service`. Migration to
@@ -258,9 +287,9 @@ State machine — transitions:
 
 | From | Event | Guard | To | Actions |
 |---|---|---|---|---|
-| any | hand-edit Description body | — | description | Write `canonical_facet=description`; update hash cache; view re-renders Recipe + Python as `— out of date` |
-| any | hand-edit Recipe body | — | recipe | Write `canonical_facet=recipe`; update hash cache; view re-renders Description `— ignored`, Python `— out of date` |
-| any | hand-edit Python body | — | python | Write `canonical_facet=python`; update hash cache; view re-renders Description + Recipe `— ignored` |
+| any | Description body modified | not a programmatic write | description | Write `canonical_facet=description`; update hash cache; view re-renders Recipe + Python as `— out of date` |
+| any | Recipe body modified | not a programmatic write | recipe | Write `canonical_facet=recipe`; update hash cache; view re-renders Description `— ignored`, Python `— out of date` |
+| any | Python body modified | not a programmatic write | python | Write `canonical_facet=python`; update hash cache; view re-renders Description + Recipe `— ignored` |
 | description | click Forge | — | description | LLM Description → Recipe (`dialect=recipe`); closure-check wikilinks. On pass: write Recipe, stamp `recipe_derived_from_description_hash`. Transpile Recipe → Python; stamp `python_derived_from_recipe_hash`. Run Python. |
 | recipe | click Forge | — | recipe | Transpile Recipe → Python (no LLM call); stamp `python_derived_from_recipe_hash`; run |
 | python | click Forge | — | python | Run Python as-authored; no regeneration |
@@ -1210,19 +1239,32 @@ fixed.
 
 ## Licensing
 
-Forge is open-source. All code — `forge-client-obsidian`,
-`forge-service`, `forge-runtime`, forge-music, and future components
-including `forge-mcp` — ships under Apache 2.0 or MIT. Documentation
-(constitution, protocols, intuitions) ships under CC-BY-4.0.
+Forge is open-source.
 
-The hosted `forge-service` instance is a convenience default. Users
-may self-host from the open source. If usage grows, a paid tier for
-high-volume access remains a future option; the code stays open
-regardless.
+**Code** — `forge-client-obsidian`, `forge-service`, `forge-runtime`,
+`forge-music`, and any future implementation components — ships under
+**Apache 2.0**. Apache's explicit patent grant matters for a project
+touching LLM tooling.
 
-Cohort's own vaults, notes, and creative work are theirs — open
-source applies to Forge's implementation, not to what cohort authors
-with it.
+**Documentation** — constitution, protocols, intuitions, deliverables
+docs, blog posts, READMEs — ships under **CC-BY-4.0**. Attribution
+required; commercial redistribution allowed; encourages citation of
+architectural and methodological artifacts.
+
+**Hosted `forge-service` instance** — convenience default, offered by
+the project maintainer at project cost. Users may consume the default
+instance (free at cohort scale), self-host from the open source, or
+BYOK for LLM calls if self-hosting. If usage of the default instance
+grows to require sustained hosting cost, a paid tier for high-volume
+access may be introduced; the code stays open regardless.
+
+**Cohort content** — vaults, notes, music, simulations, and creative
+work authored by cohort — is theirs. Forge's license applies only to
+Forge's implementation, not to what cohort produces with it. Cohort
+may license their own work under whatever they choose.
+
+Companion doc: `LICENSE-STRATEGY.md` (dependencies, contribution
+model, third-party attribution).
 
 ## Portability
 
