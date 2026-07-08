@@ -62,7 +62,15 @@ def bar(
   number: int | None = None,
 ) -> stream.Measure:
   """Build a Measure from notes/rests, padding with a trailing Rest if the
-  items are shorter than the bar length. Defaults to 4/4."""
+  items are shorter than the bar length. Defaults to 4/4.
+
+  Common item fills (quarterLength durations):
+    Quarter notes: 4 items of duration=1.0 in 4/4 (4 quarters)
+    8th notes:     8 items of duration=0.5
+    16th notes:    16 items of duration=0.25
+    Mixed dotted:  duration=0.375 (dotted 8th) + duration=0.125 (16th),
+                   repeated fills a beat
+  """
   ts = time_signature if time_signature is not None else meter.TimeSignature('4/4')
   bar_ql = ts.barDuration.quarterLength
 
@@ -726,6 +734,14 @@ def play_at_beats(instrument, beats):
       positions ([1, 1.5, 2, 2.5] is straight eighths). An empty list
       returns a Part with just the instrument attached.
 
+      For explicit subdivision control (16th notes, dotted patterns,
+      triplets, multi-bar patterns), use [[play_at_offsets]] with 0-
+      indexed offsets and a matching `duration`. Example: 16th-note
+      hihat groove is `Call [[play_at_offsets]] with instrument=
+      [[closed_hihat]], offsets=[0, 0.25, 0.5, 0.75, 1, 1.25, 1.5,
+      1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75], duration=0.25`.
+      This chip's `beats` convention is quarter-note grid only.
+
   Returns:
     music21.stream.Part with the instrument inserted at offset 0 and
     one quarterLength=1 Note per beat position. Note pitch normalized
@@ -800,7 +816,10 @@ def bar_list(items, time_signature=None, number=None):
   variadic-positional `*items` isn't directly expressible. Pass the items
   as a list:
       Call [[bar_list]] with items=[n1, n2, n3], time_signature=ts.
-  Equivalent to `bar(n1, n2, n3, time_signature=ts)`."""
+  Equivalent to `bar(n1, n2, n3, time_signature=ts)`.
+
+  See [[bar]] for common item-fill examples across subdivisions
+  (quarters, 8ths, 16ths, dotted patterns)."""
   return bar(*items, time_signature=time_signature, number=number)
 
 
@@ -829,6 +848,19 @@ def play_at_offsets(
           cycled when `bars` exceeds `len(offsets)`.
     duration: per-hit quarterLength (default 0.25 = 16th note).
     bars: total bars in this Part.
+
+  Common subdivisions in 4/4 (offsets + matching duration):
+    Quarter notes:      offsets=[0, 1, 2, 3],                   duration=1.0
+    8th notes:          offsets=[0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5], duration=0.5
+    16th notes:         offsets=[0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75,
+                                 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75],
+                         duration=0.25
+    Dotted 8ths:        offsets=[0, 0.75, 1.5, 2.25, 3],         duration=0.375
+    8th-note triplets   offsets=[0, 0.667, 1.333, 2, 2.667, 3.333],
+      (approx over bar): duration=0.667
+    Downbeats-only:     offsets=[0, 2],                           duration=1.0
+    Backbeats-only:     offsets=[1, 3],                           duration=1.0
+
     time_signature: e.g. '4/4'. Inserted on measure 1.
     tempo_bpm: MetronomeMark BPM on measure 1.
     velocity: int (1-127) for fixed velocity, OR string profile name
