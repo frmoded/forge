@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v16)
+# Forge — Core Invariants and Discipline (V2a v17)
 
 ## Mission
 
@@ -429,26 +429,9 @@ resolver applies the following ordered probes:
    match.
 
 Qualified references (per A4) are unaffected — they dispatch directly
-to the named vault. This refinement lets notes within one library
-subdirectory reference siblings in the same vault by bare ID (e.g.
-`[[chorus]]` from `forge-music/blues/song` resolves to
-`forge-music/blues/chorus` via probe 1; `[[solitary]]` from
-`forge-music/percussion/murmuration` resolves to
-`forge-music/percussion_lab/solitary` via probe 2 when there's no
-`forge-music/percussion/solitary`). The caller's directory takes
-priority over siblings; ambiguous bare references across siblings
-are an authoring error to be resolved by explicit qualification.
-
-**Rationale for probe 2** (added V2a v8 per forge-music v0.3.9
-percussion-lab decomposition): authors commonly refactor a single
-subdir into a content cluster + lab cluster (e.g. `percussion/`
-holds shipping pieces, `percussion_lab/` holds the section notes
-the pieces compose from). Without probe 2, every cross-cluster
-call must be qualified or every lab note must live in the same
-directory as its caller — both raise the cost of intra-vault
-composability against the Mission's "composable" property. Probe 2
-preserves bare-ID composability across same-vault siblings while
-keeping caller-locality as the primary tie-breaker.
+to the named vault. Caller directory takes priority over siblings.
+Ambiguous bare references across siblings are an authoring error,
+resolved by explicit qualification.
 
 **A5.** Vaults are distributed via per-vault GitHub repositories, with
 tagged tarballs and SHA-256 integrity verification at install time.
