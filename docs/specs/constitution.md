@@ -1058,15 +1058,17 @@ template; absent that field, the palette uses a plain wikilink.
 
 **I1.** Python is the realization language for action notes.
 
-**I2.** Forge is delivered as an Obsidian plugin. The plugin bundles
-Pyodide and runs the engine in-process inside the Obsidian renderer;
-the user's machine requires no Python install and no local backend.
-LLM-driven `/generate` requests go to a hosted transpile service over
+**I2.** Forge is delivered as an Obsidian plugin (`forge-client-obsidian`).
+The plugin bundles Pyodide and runs `forge-runtime` (the Python
+execution engine) in-process inside the Obsidian renderer; the user's
+machine requires no Python install and no local backend. LLM-driven
+`/generate` requests go to `forge-service` (the hosted backend) over
 HTTPS (authenticated via a shared bearer token); all other compute
 paths — `/compute`, note resolution, snapshot read/write — execute
-locally inside the plugin process via Pyodide. A legacy HTTP backend
-mode (Python uvicorn serving the engine) remains supported for engine
-development workflows but is not exercised on cohort installs.
+locally inside `forge-client-obsidian`'s process via Pyodide. A legacy
+HTTP backend mode (Python uvicorn serving the runtime) remains
+supported for engine development workflows but is not exercised on
+cohort installs.
 
 **I3.** The plugin's renderer set is fixed at build time: SVG (browser
 native), MusicXML (Verovio). New formats added through plugin updates.
