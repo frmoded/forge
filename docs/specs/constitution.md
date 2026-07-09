@@ -87,7 +87,7 @@ naming as `forge-runtime` code identifiers.
    `Call [[note]] with k=v.`, `Return X.`, `If/Otherwise`,
    `For each/Repeat`, `{{...}}` slots.
 6. **Python** — the compiled-from-Recipe Python facet. Always present
-   at compute time; this is what the engine executes at runtime. What
+   at compute time; this is what `forge-runtime` executes at runtime. What
    Python content contains depends on S9's state machine: if
    Description was last hand-edited, Python is regenerated via
    Description → Recipe → Python; if Recipe was last hand-edited,
@@ -290,8 +290,8 @@ three facets, in this order in the markdown body:
    for `/generate` (LLM reads it to produce Recipe) and for cohort
    comprehension.
 2. `# Recipe` — required. Structured grammar that compiles to Python
-   via the transpile service. Uses chip-call syntax (per Vocabulary
-   item 5).
+   via `forge-service`'s transpile. Uses chip-call syntax (per
+   Vocabulary item 5).
 3. `# Python` — required. Templates seed Python with
    `def compute(context): return None` so the section is populated
    from creation.
@@ -390,7 +390,7 @@ Convention:
    Recipe body is a single HTML comment indicating engineer-mode
    (`<!-- engineer-mode: logic in # Python; edit_mode: python
    routes Forge-click to run Python directly. -->`).
-3. **Routing precedence**: the engine's action-code resolver MUST
+3. **Routing precedence**: `forge-runtime`'s action-code resolver MUST
    check `edit_mode: python` BEFORE shape-based detection. The
    short-circuit ensures engineer-mode notes never route through
    Recipe transpilation.
@@ -488,23 +488,23 @@ wins. `role` is purely an installer affordance.
 
 **A5.3.** *Bundled distribution (V1).* For closed beta, a fixed set
 of vaults (the "bundled libraries" — currently `forge-moda` and
-`forge-music`) ships inside the plugin at
-`<plugin>/assets/vaults/<library-name>/`. The engine mounts these
-at startup and treats them per A5.1 (library-subdirectory
+`forge-music`) ships inside `forge-client-obsidian` at
+`<plugin>/assets/vaults/<library-name>/`. `forge-runtime` mounts
+these at startup and treats them per A5.1 (library-subdirectory
 convention) without an install step. A user vault declares its use
 of a bundled library by listing the corresponding domain in
-`forge.toml` (per B9); the plugin extracts the bundle into the
-user's vault root as editable `.md` files only when the domain is
-declared. Registry-fetched distribution per A5 remains the path
-for v1.1+ vaults not in the bundle. Bundled-vault content updates
-ship via plugin releases; user-edited copies in the vault root take
-precedence via A4 shadowing.
+`forge.toml` (per B9); `forge-client-obsidian` extracts the bundle
+into the user's vault root as editable `.md` files only when the
+domain is declared. Registry-fetched distribution per A5 remains
+the path for v1.1+ vaults not in the bundle. Bundled-vault content
+updates ship via `forge-client-obsidian` releases; user-edited
+copies in the vault root take precedence via A4 shadowing.
 
 **A5.4.** *Inlined-asset version stamping.* When the runtime
-distribution channel does not deliver the plugin's `assets/` tree
-alongside `main.js` (BRAT being the canonical example — it pulls
-only `main.js`, `manifest.json`, `styles.css`, `data.json`), the
-plugin MUST:
+distribution channel does not deliver `forge-client-obsidian`'s
+`assets/` tree alongside `main.js` (BRAT being the canonical example
+— it pulls only `main.js`, `manifest.json`, `styles.css`,
+`data.json`), `forge-client-obsidian` MUST:
 
 1. Inline the required assets into `main.js` at build time and
    ship a runtime restore step on plugin onload that writes any
@@ -1000,11 +1000,12 @@ computes the callee normally on each call and updates the snapshot
 afterward. In the *frozen* state, Forge skips computation and returns
 the snapshot's stored value.
 
-**F5.** Freezing an edge is a user action (UI gesture in the plugin,
-or command). The user identifies the edge — the dependency from a
-specific caller to a specific callee — and toggles its state.
-Freezing requires that a snapshot already exists for the edge (the
-edge has been traversed at least once in a previous compute).
+**F5.** Freezing an edge is a user action (UI gesture in
+`forge-client-obsidian`, or command). The user identifies the edge
+— the dependency from a specific caller to a specific callee — and
+toggles its state. Freezing requires that a snapshot already exists
+for the edge (the edge has been traversed at least once in a
+previous compute).
 
 **F6.** Unfreezing an edge returns it to the live state. Subsequent
 computes recompute and overwrite the snapshot. The previously-frozen
@@ -1106,12 +1107,13 @@ returning must account for the one-tick lag in its English facet.
 
 **C9.** *Vault-driven authoring affordances.* Vaults may ship data
 notes (conventionally prefixed `_*.md` at the vault root or in
-installed domain subdirectories) that the plugin reads to surface
-domain-specific UI affordances. The plugin's UI shells — sidebar
-palettes, menus, modals — are domain-neutral; the content of these
-data notes defines what's available. Future conventions
-(`_templates.md`, `_examples.md`) may define such affordances.
-Authors shape the UI by editing markdown, not plugin code.
+installed domain subdirectories) that `forge-client-obsidian` reads
+to surface domain-specific UI affordances. `forge-client-obsidian`'s
+UI shells — sidebar palettes, menus, modals — are domain-neutral;
+the content of these data notes defines what's available. Future
+conventions (`_templates.md`, `_examples.md`) may define such
+affordances. Authors shape the UI by editing markdown, not plugin
+code.
 
 The chip palette is NOT a vault-driven affordance — palette entries
 come from `type: action` notes discovered in the vault + installed
@@ -1139,8 +1141,9 @@ cohort installs.
 native), MusicXML (Verovio). New formats added through plugin updates.
 
 **I4.** Heavy computation (e.g., music engraving prep, geometric
-operations) happens server-side in Python; the plugin renders
-pre-computed structured outputs without performing domain computation.
+operations) happens server-side in Python; `forge-client-obsidian`
+renders pre-computed structured outputs without performing domain
+computation.
 
 **I5.** The bundled LLM provider is Anthropic; configurable to others
 via environment variable.
@@ -1192,7 +1195,7 @@ versions when the use case demands them.
 - **Snapshot promotion** — converting a system-generated snapshot
   into a hand-authored data note for sharing or version control.
 - **Per-vault Python virtualenvs** — vaults declare their Python
-  dependencies; the engine manages venv isolation.
+  dependencies; `forge-runtime` manages venv isolation.
 - **Cassette-style record-and-replay** for testing — captured LLM
   responses and compute outputs replayed deterministically in test
   mode.
