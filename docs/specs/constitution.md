@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v19)
+# Forge — Core Invariants and Discipline (V2a v20)
 
 ## Mission
 
@@ -743,7 +743,9 @@ See `docs/investigations/slot-resolution-design.md` for the
 wire-format details and the in-memory hash contract used by the
 transpile-time resolver.
 
-**Cache invalidation on switch-to-English.** When the user toggles
+**Cache invalidation on switch-to-English** (V1 legacy). Applies only
+to V1-shape notes (English + Python facets); V2 notes use S9's
+state machine and do not have this concern. When the user toggles
 `edit_mode` from `python` back to `english` (B8),
 `forge-client-obsidian` MUST delete the note's `english_hash`
 frontmatter field as part of the transition. This forces a cache
@@ -778,7 +780,13 @@ follow wikilink resolution per A4 + A4.1. Authors who want a
 less-common builtin can qualify it (`[[python:name]]`) or ship a
 sibling note that wraps it.
 
-**B8.** *(forge-client-obsidian)* Action notes carry an `edit_mode`
+**B8** (V1 legacy). *(forge-client-obsidian)* This clause governs V1-shape
+notes (English + Python facets). V2-shape notes (Description + Recipe +
+Python) use S9's canonical_facet state machine instead; this section
+is preserved for grandfathered V1 vaults but does not apply to V2 note
+authoring.
+
+Action notes carry an `edit_mode`
 (`english` or `python`, defaulting to `english`). In `english` mode,
 the Python facet is read-only in the editor and regenerated from
 English when Forge runs the note. In `python` mode, the Python facet
