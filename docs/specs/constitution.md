@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v18)
+# Forge — Core Invariants and Discipline (V2a v19)
 
 ## Mission
 
@@ -70,9 +70,10 @@ When a decision is unclear, the mission is the yardstick.
 
 ## Vocabulary
 
-These terms are authoritative throughout this document and the engine.
+These terms are authoritative throughout this document and across
+`forge-client-obsidian`, `forge-service`, and `forge-runtime`.
 `snippet_id` and `AmbiguousSnippetResolutionError` retain historical
-naming as engine-code identifiers.
+naming as `forge-runtime` code identifiers.
 
 1. **Note** — the file unit. A `.md` file with frontmatter and one or
    more facets. Umbrella term covering both shapes below.
@@ -92,7 +93,7 @@ naming as engine-code identifiers.
    Description → Recipe → Python; if Recipe was last hand-edited,
    Python is regenerated via Recipe → Python (no LLM call); if Python
    was last hand-edited, Python content stays as authored.
-7. **Library note** — a callable action note shipped by the engine.
+7. **Library note** — a callable action note shipped by `forge-runtime`.
    Python lives in `forge/forge/<domain>/lib.py`; facets are served
    read-only via the library-note view (Description from docstring,
    Recipe from synthetic signature, Python from function source).
@@ -246,8 +247,8 @@ on other vaults.
 **S3.** The *registry* is a JSON catalog mapping vault names to versioned
 tarball URLs with SHA-256 integrity hashes.
 
-**S4.** The *built-in vault* (`forge`) is bundled inside the engine and
-contains platform machinery (install, registry/lookup, etc.).
+**S4.** The *built-in vault* (`forge`) is bundled inside `forge-runtime`
+and contains platform machinery (install, registry/lookup, etc.).
 
 **S5.** A *data note* is a note whose stored content (rather than
 executable Python) is the value it represents. Content lives inline in
@@ -406,8 +407,8 @@ routing decision is authoritative.
 
 ## Architectural guarantees
 
-These are structural and behavioral properties the engine guarantees by
-construction (independent of what users write inside their notes).
+These are structural and behavioral properties `forge-runtime` guarantees
+by construction (independent of what users write inside their notes).
 
 **A1.** Every action note has three facets: Description (prose
 intent), Recipe (structured grammar), and Python (executable code).
@@ -417,9 +418,9 @@ sibling asset file (binary content types).
 
 **A2.** Action note Python facets define a top-level `compute`
 function whose first parameter is `context`. Additional parameters
-are bound by name from the engine's input dict at compute time; the
-engine invokes the function as `fn(context, *args, **inputs)` where
-`inputs` is the kwargs dict derived per B5.2. Any of the following
+are bound by name from `forge-runtime`'s input dict at compute time;
+`forge-runtime` invokes the function as `fn(context, *args, **inputs)`
+where `inputs` is the kwargs dict derived per B5.2. Any of the following
 shapes are valid: `def compute(context)`, `def compute(context, x, y)`,
 `def compute(context, name)`, `def compute(context, *args, **kwargs)`,
 etc. The function returns a value, which must be wire-serializable
@@ -462,16 +463,16 @@ tagged tarballs and SHA-256 integrity verification at install time.
 **A5.1.** *Library-vault subdirectory convention.* When the installer
 fetches a library vault into a user's vault, it places it at
 `<user-vault>/<library-name>/` — the subdirectory name matches the
-library's manifest `name`. The engine treats any top-level
+library's manifest `name`. `forge-runtime` treats any top-level
 subdirectory of a vault that contains its own `forge.toml` as a
-library vault, indexes its notes under the library's namespace,
-and walks them in the parent vault's declared `dependencies` order
-when resolving bare references (per A4). This is a fixed convention,
-not user-configurable: renaming the subdirectory breaks resolution
-because the engine looks up the library by directory name + manifest.
-Shadow files (a same-bare-id note at the user-vault root) override
-the library version by A4 order; deleting the shadow restores the
-library version with no copy needed.
+library vault, indexes its notes under the library's namespace, and
+walks them in the parent vault's declared `dependencies` order when
+resolving bare references (per A4). This is a fixed convention, not
+user-configurable: renaming the subdirectory breaks resolution
+because `forge-runtime` looks up the library by directory name +
+manifest. Shadow files (a same-bare-id note at the user-vault root)
+override the library version by A4 order; deleting the shadow
+restores the library version with no copy needed.
 
 **A5.2.** *Role tagging on library notes.* Library notes carry
 an optional `role: root | leaf` frontmatter field that the installer
