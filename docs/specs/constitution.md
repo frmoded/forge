@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v20)
+# Forge — Core Invariants and Discipline (V2a v21)
 
 ## Mission
 
@@ -300,27 +300,36 @@ All three facets are always visible and always editable in the
 source markdown. Python is not hidden by default — it IS what the
 engine runs, so masking it would obscure "which layer is running?".
 
-**S9.** *Canonical state machine for action notes.*
+**S9.** *Source-facet state machine for action notes.*
 
 Every action note stores which facet is authoritative in a
-`canonical_facet` frontmatter field with values
-`description | recipe | python | synced`. The canonical facet
+`source_facet` frontmatter field with values
+`description | recipe | python | synced`. The source facet
 drives runtime; other facets render lineage + freshness state.
+
+*Field name.* `source_facet` replaces the earlier `canonical_facet`
+name (V2a v21). Legacy notes carrying only `canonical_facet` are
+read-tolerant: the field is honored on load, and the next write
+migrates the note to `source_facet` (deleting `canonical_facet`).
+The value grammar (`description | recipe | python | synced`) is
+unchanged. Other uses of "canonical" in Forge (canonical URL,
+canonical form of a note's compute, E-- canonical grammar) name
+different concepts and are not affected.
 
 State machine — transitions:
 
 | From | Event | Guard | To | Actions |
 |---|---|---|---|---|
-| any | Description body modified | not a programmatic write | description | Write `canonical_facet=description`; update hash cache; view re-renders Recipe + Python as `— out of date` |
-| any | Recipe body modified | not a programmatic write | recipe | Write `canonical_facet=recipe`; update hash cache; view re-renders Description `— ignored`, Python `— out of date` |
-| any | Python body modified | not a programmatic write | python | Write `canonical_facet=python`; update hash cache; view re-renders Description + Recipe `— ignored` |
+| any | Description body modified | not a programmatic write | description | Write `source_facet=description`; update hash cache; view re-renders Recipe + Python as `— out of date` |
+| any | Recipe body modified | not a programmatic write | recipe | Write `source_facet=recipe`; update hash cache; view re-renders Description `— ignored`, Python `— out of date` |
+| any | Python body modified | not a programmatic write | python | Write `source_facet=python`; update hash cache; view re-renders Description + Recipe `— ignored` |
 | description | click Forge | — | description | LLM Description → Recipe (`dialect=recipe`); closure-check wikilinks. On pass: write Recipe, stamp `recipe_derived_from_description_hash`. Transpile Recipe → Python; stamp `python_derived_from_recipe_hash`. Run Python. |
 | recipe | click Forge | — | recipe | Transpile Recipe → Python (no LLM call); stamp `python_derived_from_recipe_hash`; run |
 | python | click Forge | — | python | Run Python as-authored; no regeneration |
-| synced | click Forge | — | synced | Same as `description` canonical (LLM regenerate → transpile → run) |
-| any | programmatic write (transpile output, `/generate` write-back) | `_programmaticWriteInFlight` = true | (unchanged) | Update stored `<facet>_hash` + derived-from stamps; do NOT overwrite existing `canonical_facet` |
-| (absent) | backfill on first-open per session | canonical_facet absent AND V2 note | inferred (upstream-wins: Description > Recipe > Python) | Seed `canonical_facet` via hash-mismatch inference; seed derived-from stamps |
-| any | external file rewrite (git checkout, `cp`, external editor) | multi-facet body-hash drift detected simultaneously | description | Write `canonical_facet=description` (CW-1800 upstream-wins tiebreak); refresh hash cache |
+| synced | click Forge | — | synced | Same as `description` source (LLM regenerate → transpile → run) |
+| any | programmatic write (transpile output, `/generate` write-back) | `_programmaticWriteInFlight` = true | (unchanged) | Update stored `<facet>_hash` + derived-from stamps; do NOT overwrite existing `source_facet` |
+| (absent) | backfill on first-open per session | source_facet absent AND V2 note | inferred (upstream-wins: Description > Recipe > Python) | Seed `source_facet` via hash-mismatch inference; seed derived-from stamps |
+| any | external file rewrite (git checkout, `cp`, external editor) | multi-facet body-hash drift detected simultaneously | description | Write `source_facet=description` (CW-1800 upstream-wins tiebreak); refresh hash cache |
 
 Frontmatter schema for lineage tracking:
 - `description_hash`, `recipe_hash`, `python_hash` — SHA-256 of
@@ -782,7 +791,7 @@ sibling note that wraps it.
 
 **B8** (V1 legacy). *(forge-client-obsidian)* This clause governs V1-shape
 notes (English + Python facets). V2-shape notes (Description + Recipe +
-Python) use S9's canonical_facet state machine instead; this section
+Python) use S9's source_facet state machine instead; this section
 is preserved for grandfathered V1 vaults but does not apply to V2 note
 authoring.
 

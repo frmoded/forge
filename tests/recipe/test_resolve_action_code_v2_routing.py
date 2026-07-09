@@ -64,16 +64,20 @@ returns None per resolve_action_code's contract.
 
 
 class TestRoutingSignalL45:
-  """v0.2.252 drain 2026-07-03-1000 §3.3 — plugin's canonical_layer
+  """v0.2.252 drain 2026-07-03-1000 §3.3 — plugin's source_layer
   signal short-circuits Recipe parse when Python is the source.
 
   Driver scenario reproduced: broken Recipe (parse error) + valid
   hand-authored Python. Pre-v0.2.252 the engine parsed Recipe first,
   hit ParseError, blocked execution — even though plugin declared
-  python-canonical. Post-v0.2.252 the engine honors the signal and
-  returns Python directly."""
+  python-source. Post-v0.2.252 the engine honors the signal and
+  returns Python directly.
 
-  def test_canonical_python_short_circuits_broken_recipe(self):
+  v0.2.286 — routing signal was renamed `source_layer` (from
+  `canonical_layer`). The deprecated kwarg still works; a dedicated
+  back-compat case at the bottom of this class covers it."""
+
+  def test_source_python_short_circuits_broken_recipe(self):
     # Recipe has a syntax error that would throw ParseError on the
     # V2 parse path. Python is valid.
     body = """---
@@ -97,15 +101,15 @@ def compute(context):
     return 42
 ```
 """
-    code = resolve_action_code(_mksnip(body), canonical_layer="python")
-    # Plugin declared python canonical → engine returns extracted
-    # Python directly, no V2 parse attempted.
+    code = resolve_action_code(_mksnip(body), source_layer="python")
+    # Plugin declared Python the source facet → engine returns
+    # extracted Python directly, no V2 parse attempted.
     assert code is not None
     assert "hand-authored python wins" in code
     assert "return 42" in code
 
-  def test_canonical_description_short_circuits_to_none(self):
-    # Description-canonical means Recipe + Python are stale.
+  def test_source_description_short_circuits_to_none(self):
+    # Description-source means Recipe + Python are stale.
     # Engine returns None so caller routes to /generate.
     body = """---
 type: action
@@ -127,11 +131,11 @@ def compute(context):
     return "stale"
 ```
 """
-    code = resolve_action_code(_mksnip(body), canonical_layer="description")
+    code = resolve_action_code(_mksnip(body), source_layer="description")
     assert code is None
 
-  def test_canonical_recipe_uses_v2_parse_path(self):
-    # Recipe-canonical → engine parses Recipe normally.
+  def test_source_recipe_uses_v2_parse_path(self):
+    # Recipe-source → engine parses Recipe normally.
     body = """---
 type: action
 recipe_hash: RRR
@@ -141,11 +145,11 @@ recipe_hash: RRR
 
 Return 42.
 """
-    code = resolve_action_code(_mksnip(body), canonical_layer="recipe")
+    code = resolve_action_code(_mksnip(body), source_layer="recipe")
     assert code is not None
     assert "return 42" in code
 
-  def test_canonical_synced_preserves_existing_behavior(self):
+  def test_source_synced_preserves_existing_behavior(self):
     # synced → same as pre-v0.2.252 behavior (V2 parse if V2 note).
     body = """---
 type: action
@@ -155,12 +159,12 @@ type: action
 
 Return 42.
 """
-    code = resolve_action_code(_mksnip(body), canonical_layer="synced")
+    code = resolve_action_code(_mksnip(body), source_layer="synced")
     assert code is not None
     assert "return 42" in code
 
-  def test_no_canonical_layer_preserves_pre_v0_2_252_behavior(self):
-    # Backward compat: when caller doesn't pass canonical_layer, the
+  def test_no_source_layer_preserves_pre_v0_2_252_behavior(self):
+    # Backward compat: when caller doesn't pass source_layer, the
     # V2 parse path fires as before. Regression check for existing
     # callers (moda dispatch, legacy plugin state).
     body = """---
@@ -174,3 +178,33 @@ Return 42.
     code = resolve_action_code(_mksnip(body))
     assert code is not None
     assert "return 42" in code
+
+  def test_canonical_layer_kwarg_still_works_v0_2_286(self):
+    # v0.2.286 back-compat: the previous kwarg name `canonical_layer`
+    # must still route to the same short-circuit as the new
+    # `source_layer`. Plugin's bundled engine may be older than the
+    # forge repo during a rolling upgrade; this guarantee lets the
+    # plugin migrate on its own cadence.
+    body = """---
+type: action
+python_hash: PPP
+---
+
+# Description
+
+Just some words.
+
+# Recipe
+
+Call [[print]] with a text="broken".
+
+# Python
+
+```python
+def compute(context):
+    return "legacy-kwarg"
+```
+"""
+    code = resolve_action_code(_mksnip(body), canonical_layer="python")
+    assert code is not None
+    assert "legacy-kwarg" in code
