@@ -74,6 +74,9 @@ try:
     "vocal_phrase_b": _music_lib.vocal_phrase_b,
     "phase_cell": _music_lib.phase_cell,
     "phase_shifter": _music_lib.phase_shifter,
+    # Drain 2026-07-10-1400 phase 1 — walking upright/electric bass over
+    # a harmonic form. Deterministic per the pinned design decisions.
+    "walking_bass_line": _music_lib.walking_bass_line,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}

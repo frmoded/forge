@@ -1371,6 +1371,172 @@ def form(*, key_name="E", mode_name="major", tempo_bpm=70,
   return score
 
 
+def walking_bass_line(harmony, *, style="swing", feel="medium",
+                     instrument_name="double_bass"):
+  """Walking bass line over a harmonic form.
+
+  Drain 2026-07-10-1400 phase 1. Deterministic scaffold per pinned
+  design decisions (D-note-3-A through D-note-3-D):
+
+  - **Beat 1**: chord root.
+  - **Beat 2**: chord third (chord tone).
+  - **Beat 3**: chord fifth.
+  - **Beat 4**: chromatic approach to next measure's root (or chord
+    third if this is the last measure).
+
+  Register: bass clef, octave 2-3 (E2-C4 typical playable range).
+  Instrument: `music21.instrument.Contrabass` for `"double_bass"`,
+  `music21.instrument.ElectricBass` for `"electric_bass"`.
+
+  In 4/4: 4 quarter notes per bar (quarterLength=1.0). In 12/8: 4
+  dotted-quarter notes per bar (quarterLength=1.5) — the compound
+  meter carries the swing feel implicitly. `style="swing"` /
+  `"straight"` and `feel="medium"` are accepted for API stability
+  but don't currently alter the quarter/dotted-quarter walk; they're
+  provided so callers can specify their intent and future revisions
+  can layer articulation/velocity without a signature break.
+
+  Ghost notes + chromatic embellishment beyond the beat-4 approach
+  are intentionally OUT of scope per D-note-3-D — LLM can add via a
+  future `embellish={{ ... }}` slot.
+
+  Args:
+    harmony: a `stream.Score` or `stream.Part` produced by `form(...)`
+      or an equivalent chip. Each measure must contain a
+      `chord.Chord` at offset 0 whose pitches expose `.root()`.
+    style: `"swing"` (default) or `"straight"`.
+    feel: `"medium"` (default). Reserved for future use.
+    instrument_name: `"double_bass"` (default) or `"electric_bass"`.
+
+  Returns:
+    A `stream.Part` with one Measure per input measure, each holding
+    4 notes on the beats. The Part's first element is the specified
+    bass instrument.
+  """
+  if chord is None:
+    raise ImportError("music21.chord is required for walking_bass_line")
+
+  if instrument_name == "double_bass":
+    inst = instrument.Contrabass()
+  elif instrument_name == "electric_bass":
+    inst = instrument.ElectricBass()
+  else:
+    raise ValueError(
+      f"walking_bass_line: instrument_name must be 'double_bass' or "
+      f"'electric_bass'; got {instrument_name!r}"
+    )
+  if style not in ("swing", "straight"):
+    raise ValueError(
+      f"walking_bass_line: style must be 'swing' or 'straight'; "
+      f"got {style!r}"
+    )
+
+  # Reach the Part carrying the measures. `form()` returns a Score
+  # wrapping one Part; also accept a Part directly.
+  if isinstance(harmony, stream.Score):
+    parts = list(harmony.getElementsByClass(stream.Part))
+    if not parts:
+      raise ValueError("walking_bass_line: harmony Score has no Part")
+    source_part = parts[0]
+  elif isinstance(harmony, stream.Part):
+    source_part = harmony
+  else:
+    raise TypeError(
+      f"walking_bass_line: harmony must be a Score or Part; "
+      f"got {type(harmony).__name__}"
+    )
+
+  measures = list(source_part.getElementsByClass(stream.Measure))
+  if not measures:
+    raise ValueError("walking_bass_line: harmony has no Measures")
+
+  # Time signature: from the first measure that carries one, else 4/4.
+  ts = None
+  for m in measures:
+    found_ts = m.getElementsByClass(meter.TimeSignature)
+    if found_ts:
+      ts = found_ts[0]
+      break
+  if ts is None:
+    ts = meter.TimeSignature("4/4")
+  bar_ql = ts.barDuration.quarterLength
+
+  # 4 notes per bar: quarterLength = bar_ql / 4.
+  # In 4/4: 1.0 (quarter). In 12/8: 1.5 (dotted quarter).
+  note_ql = bar_ql / 4.0
+
+  def _get_chord(m):
+    """Return the first chord.Chord in the measure, or None."""
+    chords = m.getElementsByClass(chord.Chord)
+    return chords[0] if chords else None
+
+  def _in_bass_register(p):
+    """Transpose `p` into octave 2-3 for bass register. Preserves
+    pitch class; sets octave to 2 for tonic-range notes."""
+    q = pitch.Pitch(p.name)
+    q.octave = 2
+    return q
+
+  def _chromatic_approach(target_root):
+    """A pitch one semitone below `target_root`, in bass register."""
+    q = pitch.Pitch(target_root.name)
+    q.octave = 2
+    q.midi = q.midi - 1
+    return q
+
+  out = stream.Part()
+  out.append(inst)
+  first_measure = True
+
+  for i, m in enumerate(measures):
+    ch = _get_chord(m)
+    if ch is None:
+      raise ValueError(
+        f"walking_bass_line: measure {i + 1} has no chord.Chord "
+        f"(need harmony from form() or similar)"
+      )
+    chord_pitches = list(ch.pitches)
+    # Root, third, fifth — assume triadic; take first three pitches
+    # from the chord in root position.
+    root_p = ch.root() if hasattr(ch, "root") and ch.root() is not None \
+        else chord_pitches[0]
+    third_p = chord_pitches[1] if len(chord_pitches) >= 2 else root_p
+    fifth_p = chord_pitches[2] if len(chord_pitches) >= 3 else root_p
+
+    # Beat 4 approach: chromatic to NEXT measure's root, or the chord
+    # third of THIS measure if this is the last bar (no next root).
+    if i < len(measures) - 1:
+      next_ch = _get_chord(measures[i + 1])
+      next_root_p = next_ch.root() if next_ch is not None \
+          and hasattr(next_ch, "root") and next_ch.root() is not None \
+          else chord_pitches[0]
+      approach_p = _chromatic_approach(next_root_p)
+    else:
+      approach_p = _in_bass_register(third_p)
+
+    n1 = note.Note(_in_bass_register(root_p).nameWithOctave,
+                   quarterLength=note_ql)
+    n2 = note.Note(_in_bass_register(third_p).nameWithOctave,
+                   quarterLength=note_ql)
+    n3 = note.Note(_in_bass_register(fifth_p).nameWithOctave,
+                   quarterLength=note_ql)
+    n4 = note.Note(approach_p.nameWithOctave, quarterLength=note_ql)
+
+    out_m = stream.Measure(number=i + 1)
+    if first_measure:
+      # Attach metadata to the FIRST measure only — see the Music21
+      # idioms rules at the top of this file.
+      out_m.append(copy.deepcopy(ts))
+      first_measure = False
+    out_m.append(n1)
+    out_m.append(n2)
+    out_m.append(n3)
+    out_m.append(n4)
+    out.append(out_m)
+
+  return out
+
+
 def drum_chorus(*, profile="standard"):
   """One 12-bar drum chorus parameterized by a profile name (`'sparse'`,
   `'standard'`, or `'driving'`). Used by `slow_burn.md` to give the
