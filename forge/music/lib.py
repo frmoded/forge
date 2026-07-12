@@ -1537,6 +1537,696 @@ def walking_bass_line(harmony, *, style="swing", feel="medium",
   return out
 
 
+# Optional music21 submodules used by piano_voicing / violin_bowing /
+# vocal_line. Each import is independent so a partial wheel that's
+# missing (e.g.) `articulations` doesn't kill the whole lib.
+try:
+  from music21 import articulations as _articulations
+except ImportError:
+  _articulations = None
+try:
+  from music21 import spanner as _spanner
+except ImportError:
+  _spanner = None
+try:
+  from music21 import dynamics as _dynamics_mod
+except ImportError:
+  _dynamics_mod = None
+
+
+# Register bounds for piano_voicing / vocal_line, keyed by name. Each
+# entry is (low_midi, high_midi) inclusive. The MIDI-integer form makes
+# the "pitch in range" check cheap and unambiguous. C2=36, C3=48, C4=60,
+# C5=72, C6=84; F2=41, F4=65; G3=55, G5=79; E6=88; A5=81.
+_PIANO_REGISTER_BOUNDS = {
+  "low":  (36, 60),  # C2-C4
+  "mid":  (48, 72),  # C3-C5
+  "high": (60, 84),  # C4-C6
+}
+
+_VIOLIN_REGISTER_BOUNDS = {
+  "d4_a5": (62, 81),  # D4-A5 (comfort range)
+  "g3_e6": (55, 88),  # G3-E6 (full violin range)
+}
+
+_VOCAL_REGISTER_BOUNDS = {
+  "soprano":  (60, 84),  # C4-C6
+  "alto":     (55, 79),  # G3-G5
+  "tenor":    (48, 72),  # C3-C5
+  "baritone": (41, 65),  # F2-F4
+}
+
+
+def _fit_pitch_into_register(p, midi_low, midi_high):
+  """Return a deepcopy of `p` transposed by octaves so its MIDI value
+  lies within [midi_low, midi_high] (inclusive). Preserves pitch class.
+  If the register is narrower than one octave and the pitch class
+  doesn't fit, returns the closest boundary transposition (may fall
+  slightly outside — narrower-than-octave registers are not expected
+  in this lib).
+
+  Bare pitches with no octave (e.g., `pitch.Pitch('E')`) are anchored
+  to octave 4 before fitting so `.octave` arithmetic is well-defined
+  and `.nameWithOctave` includes the octave suffix."""
+  # Normalize: ensure the pitch has an explicit octave.
+  q = pitch.Pitch(p.name)
+  q.octave = p.octave if p.octave is not None else 4
+  # Move up while below low bound.
+  while q.midi < midi_low:
+    q.octave += 1
+  # Move down while above high bound.
+  while q.midi > midi_high:
+    q.octave -= 1
+  return q
+
+
+def piano_voicing(harmony, *, style="rootless", register="mid",
+                  rhythm="charleston"):
+  """Piano accompaniment part over a harmonic form.
+
+  Drain 2026-07-10-1340 phase 2 (D-note-1). Deterministic per the
+  pinned design decisions:
+
+  - **style**: `"rootless"` (default, 4 pitches — 3-5-7-9 extensions
+    where available; falls back to 3-5-7 built from the chord root
+    when the input is a plain triad), `"stride"` (5 pitches — root +
+    fifth in the left hand octave-below plus root/3/5 in the right
+    hand), `"block"` (4 pitches — four-way close: root, 3rd, 5th,
+    b7). The 7th/9th used for rootless/block are computed from the
+    chord root (major 3rd, perfect 5th, minor 7th (blues idiom),
+    9th) rather than read from the input chord, which is typically a
+    plain triad from `form()`.
+  - **register**: `"low"` (C2-C4), `"mid"` (default, C3-C5), or
+    `"high"` (C4-C6). Every pitch in every voicing is transposed by
+    octaves to fit within the register.
+  - **rhythm**: `"charleston"` (default) — chord on beat 1
+    (dotted-quarter) + chord on beat 3 (dotted-quarter). In 4/4
+    (bar_ql=4): 1.5 + 0.5 + 2.0 (dotted-quarter, eighth, half — the
+    classic charleston figure). In 12/8 (bar_ql=6): 1.5 + rest 1.5 +
+    1.5 + rest 1.5 (two dotted-quarter hits on beats 1 and 3).
+    `"straight_quarters"` — 4 chord hits per bar at bar_ql/4.
+    `"eighth_comping"` — 8 hits (or 12 in 12/8) at bar_ql/8 (or
+    bar_ql/12).
+
+  Instrument: `music21.instrument.Piano`.
+
+  Args:
+    harmony: a `stream.Score` or `stream.Part` produced by `form(...)`
+      or an equivalent chip. Each measure must contain a
+      `chord.Chord` at offset 0.
+    style: `"rootless"` | `"stride"` | `"block"`. Default `"rootless"`.
+    register: `"low"` | `"mid"` | `"high"`. Default `"mid"`.
+    rhythm: `"charleston"` | `"straight_quarters"` | `"eighth_comping"`.
+      Default `"charleston"`.
+
+  Returns:
+    A `stream.Part` with one Measure per input measure, each holding
+    one or more `chord.Chord` voicings on the pattern's rhythm.
+    First element is a `Piano` instrument.
+  """
+  if chord is None:
+    raise ImportError("music21.chord is required for piano_voicing")
+
+  if style not in ("rootless", "stride", "block"):
+    raise ValueError(
+      f"piano_voicing: style must be one of "
+      f"'rootless', 'stride', 'block'; got {style!r}"
+    )
+  if register not in _PIANO_REGISTER_BOUNDS:
+    raise ValueError(
+      f"piano_voicing: register must be one of "
+      f"'low', 'mid', 'high'; got {register!r}"
+    )
+  if rhythm not in ("charleston", "straight_quarters", "eighth_comping"):
+    raise ValueError(
+      f"piano_voicing: rhythm must be one of "
+      f"'charleston', 'straight_quarters', 'eighth_comping'; "
+      f"got {rhythm!r}"
+    )
+
+  # Reach the Part carrying the measures.
+  if isinstance(harmony, stream.Score):
+    parts = list(harmony.getElementsByClass(stream.Part))
+    if not parts:
+      raise ValueError("piano_voicing: harmony Score has no Part")
+    source_part = parts[0]
+  elif isinstance(harmony, stream.Part):
+    source_part = harmony
+  else:
+    raise TypeError(
+      f"piano_voicing: harmony must be a Score or Part; "
+      f"got {type(harmony).__name__}"
+    )
+
+  measures = list(source_part.getElementsByClass(stream.Measure))
+  if not measures:
+    raise ValueError("piano_voicing: harmony has no Measures")
+
+  # Time signature: from the first measure that carries one, else 4/4.
+  ts = None
+  for m in measures:
+    found_ts = m.getElementsByClass(meter.TimeSignature)
+    if found_ts:
+      ts = found_ts[0]
+      break
+  if ts is None:
+    ts = meter.TimeSignature("4/4")
+  bar_ql = ts.barDuration.quarterLength
+
+  reg_low, reg_high = _PIANO_REGISTER_BOUNDS[register]
+
+  def _get_chord(m):
+    """Return the first non-ChordSymbol chord.Chord in the measure,
+    falling back to the first chord (which may be a ChordSymbol from
+    harmony.ChordSymbol, a chord.Chord subclass)."""
+    chords = list(m.getElementsByClass(chord.Chord))
+    if not chords:
+      return None
+    if harmony is not None:
+      for c in chords:
+        try:
+          from music21 import harmony as _harm
+          if not isinstance(c, _harm.ChordSymbol):
+            return c
+        except ImportError:
+          pass
+    return chords[0]
+
+  def _voicing_pitches(source_chord):
+    """Build the list of pitches for one voicing based on style.
+
+    Rootless (4): 3rd, 5th, b7, 9 built from root + semitones.
+    Stride (5):   root_below, 5th_below, root, 3rd, 5th.
+    Block (4):    root, 3rd, 5th, b7.
+    """
+    root_p = source_chord.root()
+    root_name = root_p.name
+    r = pitch.Pitch(root_name)
+    r.octave = 4  # anchor before register-fitting
+
+    def _p_from(semitones_above_root):
+      q = pitch.Pitch(root_name)
+      q.octave = 4
+      q.midi = q.midi + semitones_above_root
+      return q
+
+    if style == "rootless":
+      # 3rd (M3=+4), 5th (P5=+7), b7 (+10), 9 (+14).
+      raw = [_p_from(4), _p_from(7), _p_from(10), _p_from(14)]
+    elif style == "block":
+      # root, 3rd, 5th, b7 — closed 7-chord voicing.
+      raw = [_p_from(0), _p_from(4), _p_from(7), _p_from(10)]
+    else:  # stride
+      # LH root octave-below + LH 5th octave-below + RH triad.
+      raw = [_p_from(-12), _p_from(-5), _p_from(0), _p_from(4), _p_from(7)]
+
+    return [_fit_pitch_into_register(p, reg_low, reg_high) for p in raw]
+
+  def _rhythm_slots():
+    """Return a list of (offset, quarterLength) slots for one bar.
+
+    charleston in 12/8: two dotted-quarter hits at 0.0 and 3.0.
+    charleston in 4/4: dotted-quarter, eighth, half (offsets 0, 1.5, 2).
+    straight_quarters: 4 hits, each bar_ql/4.
+    eighth_comping in 12/8: 12 hits at ql=0.5.
+    eighth_comping in 4/4: 8 hits at ql=0.5.
+    """
+    if rhythm == "charleston":
+      if abs(bar_ql - 6.0) < 1e-6:
+        return [(0.0, 1.5), (3.0, 1.5)]
+      # 4/4 (or any non-12/8): dotted-quarter + eighth + half.
+      return [(0.0, 1.5), (1.5, 0.5), (2.0, bar_ql - 2.0)]
+    if rhythm == "straight_quarters":
+      hit_ql = bar_ql / 4.0
+      return [(i * hit_ql, hit_ql) for i in range(4)]
+    # eighth_comping
+    if abs(bar_ql - 6.0) < 1e-6:
+      hit_ql = bar_ql / 12.0
+      return [(i * hit_ql, hit_ql) for i in range(12)]
+    hit_ql = bar_ql / 8.0
+    return [(i * hit_ql, hit_ql) for i in range(8)]
+
+  slots = _rhythm_slots()
+
+  out = stream.Part()
+  out.append(instrument.Piano())
+  first_measure = True
+
+  for i, m in enumerate(measures):
+    ch = _get_chord(m)
+    if ch is None:
+      raise ValueError(
+        f"piano_voicing: measure {i + 1} has no chord.Chord "
+        f"(need harmony from form() or similar)"
+      )
+    voicing = _voicing_pitches(ch)
+
+    out_m = stream.Measure(number=i + 1)
+    if first_measure:
+      out_m.append(copy.deepcopy(ts))
+      first_measure = False
+
+    cursor = 0.0
+    for off, ql in slots:
+      if off > cursor:
+        out_m.insert(cursor, note.Rest(quarterLength=off - cursor))
+        cursor = off
+      c = chord.Chord([p.nameWithOctave for p in voicing],
+                      quarterLength=ql)
+      out_m.insert(off, c)
+      cursor = off + ql
+    if cursor < bar_ql - 1e-6:
+      out_m.insert(cursor, note.Rest(quarterLength=bar_ql - cursor))
+    out.append(out_m)
+
+  return out
+
+
+def violin_bowing(harmony, *, style="legato", dynamic="mf",
+                  register="d4_a5", melody=""):
+  """Violin melodic line over a harmonic form, with bowing conventions.
+
+  Drain 2026-07-10-1340 phase 3 (D-note-2). Deterministic scaffold:
+
+  - **style**: `"legato"` (default — wraps each measure's notes in a
+    `music21.spanner.Slur` for slurred phrasing; music21 has no
+    `articulations.Slur`, so we use the Spanner form as
+    documented). `"detache"` (no articulations added — the default
+    note-by-note bowing). `"marcato"`
+    (`music21.articulations.Accent` on every note). `"portato"`
+    (`music21.articulations.Staccato` + `music21.articulations.Tenuto`
+    on every note).
+  - **dynamic**: one of `pp, p, mp, mf, f, ff`. Emitted as a
+    `music21.dynamics.Dynamic` inserted at offset 0 of measure 1.
+  - **register**: `"d4_a5"` (default — D4 to A5, playable comfort
+    range) or `"g3_e6"` (G3 to E6, full violin range). Every pitch
+    is octave-fit into this range.
+  - **melody**: if `""`, deterministic chord-tone walker (see below).
+    If non-empty, treated as a whitespace-separated list of pitch
+    names (e.g., `"E5 G5 A5 B5"`) applied verbatim across the whole
+    part — one note per token per bar, cycled if bars > tokens.
+    Tokens are validated via `pitch.Pitch(token)`.
+
+  Deterministic walker (when `melody == ""`): for each bar, emit four
+  notes at ql = bar_ql / 4 — chord tone 1 (root), chord tone 2
+  (third), chord tone 3 (fifth), then the NEXT bar's chord root as an
+  approach note. Final bar's fourth note repeats its own root.
+
+  Instrument: `music21.instrument.Violin`.
+
+  Args:
+    harmony: `stream.Score` or `stream.Part` from `form(...)`.
+    style: `"legato"` | `"detache"` | `"marcato"` | `"portato"`.
+    dynamic: `pp` | `p` | `mp` | `mf` | `f` | `ff`.
+    register: `"d4_a5"` | `"g3_e6"`.
+    melody: literal whitespace-separated pitch list, or `""` for
+      the deterministic walker.
+
+  Returns:
+    A `stream.Part` with one Measure per input measure.
+  """
+  if chord is None:
+    raise ImportError("music21.chord is required for violin_bowing")
+
+  if style not in ("legato", "detache", "marcato", "portato"):
+    raise ValueError(
+      f"violin_bowing: style must be one of "
+      f"'legato', 'detache', 'marcato', 'portato'; got {style!r}"
+    )
+  if dynamic not in ("pp", "p", "mp", "mf", "f", "ff"):
+    raise ValueError(
+      f"violin_bowing: dynamic must be one of "
+      f"'pp', 'p', 'mp', 'mf', 'f', 'ff'; got {dynamic!r}"
+    )
+  if register not in _VIOLIN_REGISTER_BOUNDS:
+    raise ValueError(
+      f"violin_bowing: register must be one of "
+      f"'d4_a5', 'g3_e6'; got {register!r}"
+    )
+
+  # Reach the Part carrying the measures.
+  if isinstance(harmony, stream.Score):
+    parts = list(harmony.getElementsByClass(stream.Part))
+    if not parts:
+      raise ValueError("violin_bowing: harmony Score has no Part")
+    source_part = parts[0]
+  elif isinstance(harmony, stream.Part):
+    source_part = harmony
+  else:
+    raise TypeError(
+      f"violin_bowing: harmony must be a Score or Part; "
+      f"got {type(harmony).__name__}"
+    )
+
+  measures = list(source_part.getElementsByClass(stream.Measure))
+  if not measures:
+    raise ValueError("violin_bowing: harmony has no Measures")
+
+  ts = None
+  for m in measures:
+    found_ts = m.getElementsByClass(meter.TimeSignature)
+    if found_ts:
+      ts = found_ts[0]
+      break
+  if ts is None:
+    ts = meter.TimeSignature("4/4")
+  bar_ql = ts.barDuration.quarterLength
+  note_ql = bar_ql / 4.0
+
+  reg_low, reg_high = _VIOLIN_REGISTER_BOUNDS[register]
+
+  # Parse literal melody tokens if provided.
+  literal_pitches = None
+  if melody:
+    tokens = melody.split()
+    literal_pitches = []
+    for tok in tokens:
+      try:
+        literal_pitches.append(pitch.Pitch(tok))
+      except Exception as exc:
+        raise ValueError(
+          f"violin_bowing: melody token {tok!r} is not a valid pitch: {exc}"
+        )
+    if not literal_pitches:
+      raise ValueError("violin_bowing: melody string is empty")
+
+  def _get_chord(m):
+    chords = list(m.getElementsByClass(chord.Chord))
+    if not chords:
+      return None
+    try:
+      from music21 import harmony as _harm
+      for c in chords:
+        if not isinstance(c, _harm.ChordSymbol):
+          return c
+    except ImportError:
+      pass
+    return chords[0]
+
+  # Precompute per-measure chord tones for the walker.
+  chord_infos = []
+  for i, m in enumerate(measures):
+    ch = _get_chord(m)
+    if ch is None:
+      raise ValueError(
+        f"violin_bowing: measure {i + 1} has no chord.Chord"
+      )
+    chord_infos.append(ch)
+
+  out = stream.Part()
+  out.append(instrument.Violin())
+
+  # Attach dynamic to the very first measure (offset 0).
+  first_measure = True
+  # Track literal-melody cursor across bars.
+  literal_cursor = 0
+
+  for i, m in enumerate(measures):
+    ch = chord_infos[i]
+    chord_pitches = list(ch.pitches)
+    root_p = ch.root() if hasattr(ch, "root") and ch.root() is not None \
+        else chord_pitches[0]
+    third_p = chord_pitches[1] if len(chord_pitches) >= 2 else root_p
+    fifth_p = chord_pitches[2] if len(chord_pitches) >= 3 else root_p
+
+    if literal_pitches is not None:
+      # Four pitches per bar cycled from the literal list.
+      raw = []
+      for _ in range(4):
+        raw.append(literal_pitches[literal_cursor % len(literal_pitches)])
+        literal_cursor += 1
+      bar_pitches = [_fit_pitch_into_register(p, reg_low, reg_high)
+                     for p in raw]
+    else:
+      # Deterministic walker: root, third, fifth, next-root approach.
+      if i < len(measures) - 1:
+        next_root = chord_infos[i + 1].root()
+      else:
+        next_root = root_p
+      raw = [root_p, third_p, fifth_p, next_root]
+      bar_pitches = [_fit_pitch_into_register(p, reg_low, reg_high)
+                     for p in raw]
+
+    notes_in_bar = []
+    for p in bar_pitches:
+      n = note.Note(p.nameWithOctave, quarterLength=note_ql)
+      notes_in_bar.append(n)
+
+    # Apply per-note articulations based on style.
+    if _articulations is not None:
+      if style == "marcato":
+        for n in notes_in_bar:
+          n.articulations.append(_articulations.Accent())
+      elif style == "portato":
+        for n in notes_in_bar:
+          n.articulations.append(_articulations.Staccato())
+          n.articulations.append(_articulations.Tenuto())
+      # legato & detache do NOT add per-note articulations.
+
+    out_m = stream.Measure(number=i + 1)
+    if first_measure:
+      out_m.append(copy.deepcopy(ts))
+      if _dynamics_mod is not None:
+        out_m.insert(0, _dynamics_mod.Dynamic(dynamic))
+      first_measure = False
+    for n in notes_in_bar:
+      out_m.append(n)
+
+    # Legato: wrap the bar's notes in a Slur spanner (inserted on the
+    # measure so the spanner references the notes at that scope).
+    if style == "legato" and _spanner is not None and notes_in_bar:
+      slur = _spanner.Slur(notes_in_bar)
+      out_m.insert(0, slur)
+
+    out.append(out_m)
+
+  return out
+
+
+def vocal_line(harmony, *, voice_type="alto", lyrics="", form="AAB",
+               style="blues"):
+  """Vocal melody with lyrics over a 12-bar harmonic form.
+
+  Drain 2026-07-10-1340 phase 4 (D-note-4). Deterministic per pinned
+  design decisions:
+
+  - **voice_type**: `"soprano"` (C4-C6), `"alto"` (default, G3-G5),
+    `"tenor"` (C3-C5), or `"baritone"` (F2-F4). Each pitch is
+    octave-fit to the voice's register bounds.
+
+    Instrument: attempt `music21.instrument.<VoiceType>` (Soprano /
+    Alto / Tenor / Baritone all exist in current music21). If the
+    class is not present, fall back to `music21.instrument.Vocalist`.
+  - **lyrics**: `""` (default) → no Lyric annotations (blank vocals /
+    hum). Non-empty → split on whitespace; one word per note. If
+    there are fewer words than notes, remaining notes get no lyric;
+    if more, extra words are dropped (spread evenly by index).
+    Slot resolution is a transpiler-layer concern; the chip only
+    handles literal strings.
+  - **form**: `"AAB"` only (v1). Raises ValueError for others. Splits
+    the 12 measures into 4 + 4 + 4. Phrase A: chord-tone walker
+    (root, third, fifth, next-root approach). Phrase A': same shape
+    with the last note swapped for a small variation. Phrase B:
+    resolve to tonic — the very final note is placed at the key's
+    tonic (in the voice's register).
+  - **style**: `"blues"` only (v1); accepted for API stability but
+    doesn't currently alter behaviour.
+
+  Args:
+    harmony: `stream.Score` or `stream.Part` from `form(...)` — must
+      have exactly 12 measures.
+    voice_type: `"soprano"` | `"alto"` | `"tenor"` | `"baritone"`.
+    lyrics: literal whitespace-separated words, or `""` for blanks.
+    form: `"AAB"` only.
+    style: `"blues"` only.
+
+  Returns:
+    A `stream.Part` with 12 Measures, four notes each.
+  """
+  if chord is None:
+    raise ImportError("music21.chord is required for vocal_line")
+
+  if voice_type not in _VOCAL_REGISTER_BOUNDS:
+    raise ValueError(
+      f"vocal_line: voice_type must be one of "
+      f"'soprano', 'alto', 'tenor', 'baritone'; got {voice_type!r}"
+    )
+  if form != "AAB":
+    raise ValueError(
+      f"vocal_line: form must be 'AAB' (v1); got {form!r}"
+    )
+  if style != "blues":
+    raise ValueError(
+      f"vocal_line: style must be 'blues' (v1); got {style!r}"
+    )
+
+  # Reach the Part carrying the measures.
+  if isinstance(harmony, stream.Score):
+    parts = list(harmony.getElementsByClass(stream.Part))
+    if not parts:
+      raise ValueError("vocal_line: harmony Score has no Part")
+    source_part = parts[0]
+  elif isinstance(harmony, stream.Part):
+    source_part = harmony
+  else:
+    raise TypeError(
+      f"vocal_line: harmony must be a Score or Part; "
+      f"got {type(harmony).__name__}"
+    )
+
+  measures = list(source_part.getElementsByClass(stream.Measure))
+  if len(measures) != 12:
+    raise ValueError(
+      f"vocal_line: form='AAB' requires 12 measures; "
+      f"got {len(measures)}"
+    )
+
+  # Time signature.
+  ts = None
+  found_key = None
+  for m in measures:
+    found_ts = m.getElementsByClass(meter.TimeSignature)
+    if found_ts and ts is None:
+      ts = found_ts[0]
+    found_keys = m.getElementsByClass(key.Key)
+    if found_keys and found_key is None:
+      found_key = found_keys[0]
+    if ts is not None and found_key is not None:
+      break
+  if ts is None:
+    ts = meter.TimeSignature("4/4")
+  bar_ql = ts.barDuration.quarterLength
+  note_ql = bar_ql / 4.0
+
+  reg_low, reg_high = _VOCAL_REGISTER_BOUNDS[voice_type]
+
+  # Instrument: try voice-specific class, fall back to Vocalist.
+  voice_class_name = voice_type.capitalize()
+  voice_cls = getattr(instrument, voice_class_name, None)
+  if voice_cls is None:
+    voice_cls = getattr(instrument, "Vocalist", None)
+  if voice_cls is None:
+    # Last-ditch fallback (music21 must have something).
+    voice_cls = instrument.Instrument
+  inst_obj = voice_cls()
+
+  def _get_chord(m):
+    chords = list(m.getElementsByClass(chord.Chord))
+    if not chords:
+      return None
+    try:
+      from music21 import harmony as _harm
+      for c in chords:
+        if not isinstance(c, _harm.ChordSymbol):
+          return c
+    except ImportError:
+      pass
+    return chords[0]
+
+  chord_infos = []
+  for i, m in enumerate(measures):
+    ch = _get_chord(m)
+    if ch is None:
+      raise ValueError(
+        f"vocal_line: measure {i + 1} has no chord.Chord"
+      )
+    chord_infos.append(ch)
+
+  # Tonic pitch class (fall back to first chord's root name).
+  if found_key is not None:
+    tonic_name = found_key.tonic.name
+  else:
+    tonic_name = chord_infos[0].root().name
+
+  def _walker_pitches_for_bar(i, variation_last=False):
+    """Return four raw Pitches for bar i: root, 3rd, 5th, next-root
+    (or, when variation_last, tonic instead of next-root)."""
+    ch = chord_infos[i]
+    chord_pitches = list(ch.pitches)
+    root_p = ch.root() if hasattr(ch, "root") and ch.root() is not None \
+        else chord_pitches[0]
+    third_p = chord_pitches[1] if len(chord_pitches) >= 2 else root_p
+    fifth_p = chord_pitches[2] if len(chord_pitches) >= 3 else root_p
+    if variation_last:
+      approach_p = pitch.Pitch(tonic_name)
+    elif i < len(measures) - 1:
+      approach_p = chord_infos[i + 1].root()
+    else:
+      approach_p = root_p
+    return [root_p, third_p, fifth_p, approach_p]
+
+  # Build 48 raw pitches (12 bars × 4 notes each) by phrase.
+  #
+  # AAB melodic form (per drain §D-note-4-C, "strict AAB as default"):
+  # - Phrase A: chord-tone walker over bars 0-3.
+  # - Phrase A': literal repeat of phrase A's pitch sequence for
+  #   bars 4-7, with only the final note of the phrase swapped to a
+  #   variation (tonic) so A' is distinguishable from A. This means
+  #   the melody sits ATOP the underlying chord changes rather than
+  #   walking them — the blues AA' convention repeats the vocal line
+  #   over I / IV chord swaps rather than re-deriving the melody per
+  #   bar. Downstream lyrics parallel the call-and-response.
+  # - Phrase B: walker over bars 8-11, with the final note forced to
+  #   the key tonic for cadential resolution.
+  phrase_a = []
+  for i in range(0, 4):
+    phrase_a.extend(_walker_pitches_for_bar(i))
+  # Phrase A' is a literal repeat with the last note swapped to tonic.
+  phrase_a_prime = list(phrase_a)
+  phrase_a_prime[-1] = pitch.Pitch(tonic_name)
+  phrase_b = []
+  for i in range(8, 12):
+    phrase_b.extend(_walker_pitches_for_bar(i))
+  # Force final note of phrase B to tonic (cadence).
+  phrase_b[-1] = pitch.Pitch(tonic_name)
+  all_pitches = phrase_a + phrase_a_prime + phrase_b
+
+  # Fit each raw pitch into the voice's register.
+  fit_pitches = [
+    _fit_pitch_into_register(p, reg_low, reg_high) for p in all_pitches
+  ]
+
+  # Parse lyrics.
+  words = lyrics.split() if lyrics else []
+
+  # Build notes.
+  out = stream.Part()
+  out.append(inst_obj)
+  first_measure = True
+
+  for i, m in enumerate(measures):
+    out_m = stream.Measure(number=i + 1)
+    if first_measure:
+      out_m.append(copy.deepcopy(ts))
+      first_measure = False
+    for j in range(4):
+      p = fit_pitches[i * 4 + j]
+      n = note.Note(p.nameWithOctave, quarterLength=note_ql)
+      out_m.append(n)
+    out.append(out_m)
+
+  # Attach lyrics: iterate output notes and assign words.
+  if words:
+    out_notes = list(out.recurse().notes)
+    n_notes = len(out_notes)
+    n_words = len(words)
+    if n_words == n_notes:
+      for n, w in zip(out_notes, words):
+        n.addLyric(w)
+    elif n_words < n_notes:
+      # Spread words evenly by index (words earlier in the phrase get
+      # note 0, then step through in order).
+      for k, w in enumerate(words):
+        n_idx = int(k * n_notes / n_words)
+        out_notes[n_idx].addLyric(w)
+    else:
+      # More words than notes — one word per note, drop extras.
+      for n, w in zip(out_notes, words[:n_notes]):
+        n.addLyric(w)
+
+  return out
+
+
 def drum_chorus(*, profile="standard"):
   """One 12-bar drum chorus parameterized by a profile name (`'sparse'`,
   `'standard'`, or `'driving'`). Used by `slow_burn.md` to give the

@@ -77,6 +77,12 @@ try:
     # Drain 2026-07-10-1400 phase 1 — walking upright/electric bass over
     # a harmonic form. Deterministic per the pinned design decisions.
     "walking_bass_line": _music_lib.walking_bass_line,
+    # Drain 2026-07-10-1340 phases 2-4 — piano voicings, violin bowing,
+    # vocal line. Deterministic per the pinned design decisions
+    # (D-note-1, D-note-2, D-note-4).
+    "piano_voicing": _music_lib.piano_voicing,
+    "violin_bowing": _music_lib.violin_bowing,
+    "vocal_line": _music_lib.vocal_line,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}
