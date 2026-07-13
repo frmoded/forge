@@ -897,8 +897,8 @@ Examples:
 Let result = Call [[fibonacci]] with n=7.
 Call [[print]] with text="hello world".
 Let chord = Call [[major_chord]] with root="C", inversion=2.
-Let song = Call [[compose_blues]] with bars=12, key="E".
-Return song.
+Let harmony = Call [[form]] with key_name="E", mode_name="major", tempo_bpm=70, ts_str="12/8".
+Return harmony.
 ```
 
 ## Data notes
