@@ -161,3 +161,71 @@ class TestErrors:
   def test_unrecognized_statement(self):
     with pytest.raises(ParseError):
       parse("Frobnicate 5.")
+
+
+# ---------------------------------------------------------------------------
+# Drain 2026-07-14-1235 — ParseError structured lineno/col_offset.
+#
+# Pre-drain, every raise site embedded location in the message string
+# ("unexpected char '=' at line 3, col 12") and `.lineno` was None.
+# Downstream consumers (forge-transpile's /compile → ParseErrorDetail,
+# plugin's Recipe error UI) had to regex-parse the message. Post-drain
+# every raise site with a token in scope sets `.lineno` + `.col_offset`
+# structurally and drops the "at line X, col Y" tail from the message.
+# ---------------------------------------------------------------------------
+
+
+class TestParseErrorLocation:
+  def test_parse_error_sets_lineno_on_unexpected_token(self):
+    """Drain §5 test #1 — syntax error on line 3 sets `.lineno == 3`."""
+    src = "Let a = 1.\nLet b = 2.\nLet bad === 5.\nReturn a.\n"
+    with pytest.raises(ParseError) as exc_info:
+      parse(src)
+    assert exc_info.value.lineno == 3
+
+  def test_parse_error_sets_col_offset_when_available(self):
+    """Drain §5 test #2 — col_offset carries the offending token's
+    column. `Let bad === 5.` — the parser trips on the second `=` after
+    consuming `Let bad =`, so column should be >= 1 (parser tokens are
+    1-indexed)."""
+    src = "Let bad === 5.\n"
+    with pytest.raises(ParseError) as exc_info:
+      parse(src)
+    assert exc_info.value.col_offset is not None
+    assert exc_info.value.col_offset >= 1
+    # SyntaxError-standard .offset mirrors .col_offset (both are set).
+    assert exc_info.value.offset == exc_info.value.col_offset
+
+  def test_parse_error_message_does_not_embed_location(self):
+    """Drain §5 test #3 — when structured fields are set, the message
+    text no longer duplicates "at line X, col Y" / "on line X"."""
+    src = "Let x === 5.\n"
+    with pytest.raises(ParseError) as exc_info:
+      parse(src)
+    msg = str(exc_info.value)
+    assert "at line" not in msg
+    assert "on line" not in msg
+    # But the original substantive content is preserved — this is a
+    # tokenizer-level "unexpected char" for the extra `=`.
+    assert "unexpected char" in msg or "expected" in msg
+
+  def test_parse_error_lineno_None_when_context_unknown(self):
+    """Drain §5 test #4 — raise sites that legitimately can't derive
+    location (empty expression called with no tokens in hand) leave
+    `.lineno` as None (not 0). Per drain §Don'ts: use Python's None
+    convention, not a "location unknown" sentinel."""
+    from forge.recipe.parser import _parse_expr
+
+    with pytest.raises(ParseError) as exc_info:
+      _parse_expr([])
+    assert exc_info.value.lineno is None
+    assert exc_info.value.col_offset is None
+
+  def test_parse_error_lineno_on_tokenizer_error(self):
+    """Regression — tokenizer-level errors (unexpected char, unterminated
+    string, malformed slot) also set structured location. Pre-drain these
+    used f"at line {line}, col {col}" in the message."""
+    with pytest.raises(ParseError) as exc_info:
+      parse("Let x = @.\n")
+    assert exc_info.value.lineno == 1
+    assert exc_info.value.col_offset is not None

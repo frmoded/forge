@@ -165,7 +165,41 @@ _KEYWORDS = {"Let", "Return", "Call", "with", "Repeat", "times", "For", "each", 
 
 
 class ParseError(SyntaxError):
-  """Raised on any E-- parse error. Includes line / col when available."""
+  """Raised on any E-- parse error.
+
+  Extends `SyntaxError` (its own `.lineno` / `.offset` / `.msg`) so callers
+  can `except SyntaxError` interchangeably. Location fields are set
+  structurally via the `lineno` + `col_offset` kwargs at every raise site
+  where the parser knows the token's position; message text no longer
+  duplicates "at line X, col Y" (drain 2026-07-14-1235 — downstream
+  consumers like `/compile` and the plugin error UI can now read structured
+  `.lineno` / `.col_offset` directly instead of regex-parsing the message).
+
+  `col_offset` mirrors `SyntaxError.offset` — set both so the SyntaxError
+  surface reports the location too (traceback / `ast` compat).
+
+  `lineno=None` (default) means the raise site legitimately doesn't have
+  a token position in hand — the caller should treat missing position as
+  "unknown", not "line 0" (avoids the pre-drain-1235 confusion where
+  `line: 0` in downstream JSON could mean either "line 0 of source" or
+  "no location info").
+  """
+
+  def __init__(
+    self,
+    msg: str,
+    *,
+    lineno: Optional[int] = None,
+    col_offset: Optional[int] = None,
+  ) -> None:
+    super().__init__(msg)
+    self.msg = msg
+    self.lineno = lineno
+    # SyntaxError.offset is 1-indexed by Python convention; the parser's
+    # token `col` is 1-indexed too, so pass through as-is.
+    self.offset = col_offset
+    # Alias for consumers that prefer the `ast`-style name.
+    self.col_offset = col_offset
 
 
 @dataclass
@@ -201,22 +235,26 @@ def _tokenize(src: str) -> List[Tok]:
           break
         if src[j] == "\n":
           raise ParseError(
-            f"unterminated slot (no closing '}}}}' on line) at line {line}, col {col}"
+            "unterminated slot (no closing '}}' on line)",
+            lineno=line, col_offset=col,
           )
         j += 1
       else:
         # Reached end without finding `}}`.
         raise ParseError(
-          f"unterminated slot (no closing '}}}}') at line {line}, col {col}"
+          "unterminated slot (no closing '}}')",
+          lineno=line, col_offset=col,
         )
       text = src[i+2:j].strip()
       if not text:
         raise ParseError(
-          f"empty slot '{{{{}}}}' at line {line}, col {col}"
+          "empty slot '{{}}'",
+          lineno=line, col_offset=col,
         )
       if "{{" in text:
         raise ParseError(
-          f"nested slot '{{{{...{{{{...}}}}...}}}}' at line {line}, col {col}"
+          "nested slot '{{...{{...}}...}}'",
+          lineno=line, col_offset=col,
         )
       toks.append(Tok("SLOT", text, line, col))
       col += j + 2 - i; i = j + 2; continue
@@ -273,7 +311,7 @@ def _tokenize(src: str) -> List[Tok]:
       while j < len(src) and src[j] != quote:
         j += 1
       if j >= len(src):
-        raise ParseError(f"unterminated string at line {line}, col {col}")
+        raise ParseError("unterminated string", lineno=line, col_offset=col)
       toks.append(Tok("STRING", src[i+1:j], line, col))
       col += j - i + 1; i = j + 1; continue
     # Identifier / keyword
@@ -293,7 +331,7 @@ def _tokenize(src: str) -> List[Tok]:
     if ch in "=,.[]:+-*/<>":
       toks.append(Tok("OP", ch, line, col))
       i += 1; col += 1; continue
-    raise ParseError(f"unexpected char {ch!r} at line {line}, col {col}")
+    raise ParseError(f"unexpected char {ch!r}", lineno=line, col_offset=col)
   toks.append(Tok("EOF", "", line, col))
   return toks
 
@@ -301,11 +339,19 @@ def _tokenize(src: str) -> List[Tok]:
 # --- Line splitter -----------------------------------------------------
 
 def _split_lines(src: str) -> List[tuple]:
-  """Split E-- source into (indent_level, line_text) tuples. Strips
-  blank lines and trailing whitespace. Indent measured in spaces (tabs
-  expanded to 2 spaces, conventional for our snippets)."""
+  """Split E-- source into (indent_level, line_text, source_lineno)
+  tuples. `source_lineno` is 1-indexed and refers to the ORIGINAL source
+  (skipped blank lines still consume line numbers, so a parse error on
+  the third non-blank line reports the right lineno even if the second
+  original line was blank). Strips blank lines and trailing whitespace.
+  Indent measured in spaces (tabs expanded to 2 spaces, conventional for
+  our snippets).
+
+  Drain 2026-07-14-1235 added `source_lineno` so `_parse_stmt` can
+  translate the tokenizer's per-line-relative `line=1` back to the
+  original source line when a ParseError bubbles up."""
   out = []
-  for raw in src.splitlines():
+  for i, raw in enumerate(src.splitlines(), start=1):
     text = raw.rstrip()
     if not text.strip():
       continue
@@ -317,7 +363,7 @@ def _split_lines(src: str) -> List[tuple]:
         indent += 2
       else:
         break
-    out.append((indent, raw.strip()))
+    out.append((indent, raw.strip(), i))
   return out
 
 
@@ -342,7 +388,7 @@ class _Parser:
     when indent drops below base_indent."""
     out: List[Stmt] = []
     while self.pos < len(self.lines):
-      indent, _ = self.lines[self.pos]
+      indent = self.lines[self.pos][0]
       if indent < base_indent:
         break
       stmt = self._parse_stmt()
@@ -350,10 +396,30 @@ class _Parser:
     return out
 
   def _parse_stmt(self) -> Stmt:
-    indent, text = self.lines[self.pos]
+    indent, text, source_lineno = self.lines[self.pos]
     # Block-header statements are detected on their first keyword.
     # Strip trailing EOF so downstream "look at toks[-1]" sees the real
     # last token of the line.
+    # Drain 2026-07-14-1235: `_tokenize` is called per-line and always
+    # emits tokens with `line=1`. Wrap the body in try/except so any
+    # ParseError raised with a per-line-relative `lineno` gets shifted
+    # to the ORIGINAL source line before propagating.
+    #
+    # Guarded by a `_source_line_shifted` sentinel so nested `_parse_stmt`
+    # calls (e.g. Repeat / For-each / If bodies each open their own
+    # `_parse_block` which recursively calls `_parse_stmt`) don't double-
+    # shift a lineno that was already translated by a deeper recursion.
+    # Leaves lineno=None untouched (raise sites like "empty expression"
+    # that have no location).
+    try:
+      return self._parse_stmt_body(indent, text)
+    except ParseError as exc:
+      if exc.lineno is not None and not getattr(exc, "_source_line_shifted", False):
+        exc.lineno = source_lineno + (exc.lineno - 1)
+        exc._source_line_shifted = True
+      raise
+
+  def _parse_stmt_body(self, indent: int, text: str) -> Stmt:
     toks = _tokenize(text)
     if toks and toks[-1].kind == "EOF":
       toks = toks[:-1]
@@ -387,20 +453,32 @@ class _Parser:
       self.pos += 1
       expr_toks, _tail = _split_at_terminator(toks, ".")
       if not expr_toks:
-        raise ParseError("empty Call statement on line {head.line}")
+        raise ParseError(
+          "empty Call statement",
+          lineno=head.line, col_offset=head.col,
+        )
       expr = _parse_expr(expr_toks)
       return ExprStmt(expr=expr)
-    raise ParseError(f"unexpected start of statement: {head.value!r} on line {head.line}")
+    raise ParseError(
+      f"unexpected start of statement: {head.value!r}",
+      lineno=head.line, col_offset=head.col,
+    )
 
   # --- Statement bodies (toks is the tokenized form of a single line) ---
 
   def _parse_let_body(self, toks: List[Tok]) -> LetStmt:
     # Let IDENT = expr .
     if toks[1].kind != "IDENT":
-      raise ParseError(f"expected identifier after Let, got {toks[1].value!r}")
+      raise ParseError(
+        f"expected identifier after Let, got {toks[1].value!r}",
+        lineno=toks[1].line, col_offset=toks[1].col,
+      )
     name = toks[1].value
     if not (toks[2].kind == "OP" and toks[2].value == "="):
-      raise ParseError(f"expected = after Let {name}")
+      raise ParseError(
+        f"expected = after Let {name}",
+        lineno=toks[2].line, col_offset=toks[2].col,
+      )
     expr_toks, _tail = _split_at_terminator(toks[3:], ".")
     expr = _parse_expr(expr_toks)
     return LetStmt(name=name, value=expr)
@@ -428,11 +506,17 @@ class _Parser:
     # Repeat expr times :
     # Body: stmts at indent > header_indent
     if not (toks[-1].kind == "OP" and toks[-1].value == ":"):
-      raise ParseError("expected ':' at end of Repeat header")
+      raise ParseError(
+        "expected ':' at end of Repeat header",
+        lineno=toks[0].line, col_offset=toks[0].col,
+      )
     # toks[0] is "Repeat", last is ":", "times" is somewhere between.
     times_idx = _find_keyword(toks, "times")
     if times_idx is None:
-      raise ParseError("Repeat header missing 'times' keyword")
+      raise ParseError(
+        "Repeat header missing 'times' keyword",
+        lineno=toks[0].line, col_offset=toks[0].col,
+      )
     count_toks = toks[1:times_idx]
     count = _parse_expr(count_toks)
     body = self._parse_block(base_indent=header_indent + 1)
@@ -444,13 +528,16 @@ class _Parser:
     # [Otherwise:
     #   <indented else-block>]
     if not (toks[-1].kind == "OP" and toks[-1].value == ":"):
-      raise ParseError("expected ':' at end of If header")
+      raise ParseError(
+        "expected ':' at end of If header",
+        lineno=toks[0].line, col_offset=toks[0].col,
+      )
     condition = _parse_expr(toks[1:-1])
     then_body = self._parse_block(base_indent=header_indent + 1)
     else_body: List[Stmt] = []
     # Look-ahead: does the next line at header_indent start with `Otherwise:`?
     if self.pos < len(self.lines):
-      next_indent, next_text = self.lines[self.pos]
+      next_indent, next_text, _next_lineno = self.lines[self.pos]
       if next_indent == header_indent:
         next_toks = _tokenize(next_text)
         # strip EOF
@@ -468,14 +555,26 @@ class _Parser:
   def _parse_foreach_body(self, toks: List[Tok], header_indent: int) -> ForEachStmt:
     # For each IDENT in expr :
     if not (toks[-1].kind == "OP" and toks[-1].value == ":"):
-      raise ParseError("expected ':' at end of For-each header")
+      raise ParseError(
+        "expected ':' at end of For-each header",
+        lineno=toks[0].line, col_offset=toks[0].col,
+      )
     if not (toks[1].kind == "KEYWORD" and toks[1].value == "each"):
-      raise ParseError("expected 'each' after 'For'")
+      raise ParseError(
+        "expected 'each' after 'For'",
+        lineno=toks[1].line, col_offset=toks[1].col,
+      )
     if toks[2].kind != "IDENT":
-      raise ParseError(f"expected variable identifier, got {toks[2].value!r}")
+      raise ParseError(
+        f"expected variable identifier, got {toks[2].value!r}",
+        lineno=toks[2].line, col_offset=toks[2].col,
+      )
     var = toks[2].value
     if not (toks[3].kind == "KEYWORD" and toks[3].value == "in"):
-      raise ParseError("expected 'in' after For-each variable")
+      raise ParseError(
+        "expected 'in' after For-each variable",
+        lineno=toks[3].line, col_offset=toks[3].col,
+      )
     iterable_toks = toks[4:-1]
     iterable = _parse_expr(iterable_toks)
     body = self._parse_block(base_indent=header_indent + 1)
@@ -520,6 +619,10 @@ def _parse_expr(toks: List[Tok]) -> Expr:
   `_parse_expr` recursively.
   """
   if not toks:
+    # No tokens → no location. Callers of _parse_expr on empty slices
+    # (e.g., missing kwarg values) will re-raise with their own context;
+    # leaving lineno=None here per drain 2026-07-14-1235 §Don'ts (avoid
+    # a "location unknown" sentinel; use None).
     raise ParseError("empty expression")
   if toks[0].kind == "KEYWORD" and toks[0].value == "Call":
     return _parse_primary(toks)
@@ -572,30 +675,41 @@ def _parse_primary(toks: List[Tok]) -> Expr:
     - NUMBER / STRING / IDENT / True / False / None
   """
   if not toks:
+    # See _parse_expr comment above — no location for the empty case.
     raise ParseError("empty expression")
   head = toks[0]
   # Chip call: Call [[name]] with k=v, ...
   if head.kind == "KEYWORD" and head.value == "Call":
     if not (len(toks) >= 2 and toks[1].kind == "WIKILINK"):
-      raise ParseError("expected wikilink after Call")
+      raise ParseError(
+        "expected wikilink after Call",
+        lineno=head.line, col_offset=head.col,
+      )
     name = toks[1].value
     if len(toks) == 2:
       return ChipCall(name=name, kwargs=[])
     if not (toks[2].kind == "KEYWORD" and toks[2].value == "with"):
-      raise ParseError("expected 'with' after Call <wikilink>")
+      raise ParseError(
+        "expected 'with' after Call <wikilink>",
+        lineno=toks[2].line, col_offset=toks[2].col,
+      )
     return ChipCall(name=name, kwargs=_parse_kwargs(toks[3:]))
   # Bare wikilink → call with no args
   if head.kind == "WIKILINK":
     if len(toks) > 1:
       raise ParseError(
         f"trailing tokens after bare wikilink: {toks[1].value!r} "
-        "(use `Call [[name]] with ...` for parameterized calls)"
+        "(use `Call [[name]] with ...` for parameterized calls)",
+        lineno=toks[1].line, col_offset=toks[1].col,
       )
     return ChipCall(name=head.value, kwargs=[])
   # List literal
   if head.kind == "OP" and head.value == "[":
     if not (toks[-1].kind == "OP" and toks[-1].value == "]"):
-      raise ParseError("unclosed list literal")
+      raise ParseError(
+        "unclosed list literal",
+        lineno=head.line, col_offset=head.col,
+      )
     inner = toks[1:-1]
     if not inner:
       return ListLit(items=[])
@@ -624,7 +738,10 @@ def _parse_primary(toks: List[Tok]) -> Expr:
     if head.value == "None":
       return NoneLit()
     return IdentRef(name=head.value)
-  raise ParseError(f"unrecognized expression starting with {head.value!r}")
+  raise ParseError(
+    f"unrecognized expression starting with {head.value!r}",
+    lineno=head.line, col_offset=head.col,
+  )
 
 
 def _parse_kwargs(toks: List[Tok]) -> List[Kwarg]:
@@ -632,9 +749,15 @@ def _parse_kwargs(toks: List[Tok]) -> List[Kwarg]:
   out: List[Kwarg] = []
   for chunk in _split_top_level(toks, ","):
     if len(chunk) < 3 or chunk[0].kind != "IDENT":
-      raise ParseError(f"malformed kwarg starting at {chunk[0].value!r}")
+      raise ParseError(
+        f"malformed kwarg starting at {chunk[0].value!r}",
+        lineno=chunk[0].line, col_offset=chunk[0].col,
+      )
     if not (chunk[1].kind == "OP" and chunk[1].value == "="):
-      raise ParseError(f"expected = after kwarg name {chunk[0].value!r}")
+      raise ParseError(
+        f"expected = after kwarg name {chunk[0].value!r}",
+        lineno=chunk[1].line, col_offset=chunk[1].col,
+      )
     out.append(Kwarg(name=chunk[0].value, value=_parse_expr(chunk[2:])))
   return out
 
