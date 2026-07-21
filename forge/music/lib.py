@@ -47,6 +47,10 @@ try:
   from music21 import roman
 except ImportError:
   roman = None
+try:
+  from music21 import scale
+except ImportError:
+  scale = None
 
 # Standard-library random — needed by guitar_solo_chorus / vocal_phrase_*
 # library notes (v0.7.0 promotion). Imported under a private alias so
@@ -440,6 +444,50 @@ def major_pentatonic(
   return _pentatonic_pitches(
     key_or_tonic, _PENTATONIC_INTERVALS['major'], octave_range,
   )
+
+
+def major_scale(tonic: Union[key.Key, str]) -> list[str]:
+  """Return the 7 pitch-class names of the diatonic major scale for
+  `tonic`, tonic-first ascending.
+
+  Contract:
+    - Returns `list[str]` of pitch-class names — no octave designations
+      (e.g. `["C", "D", "E", "F", "G", "A", "B"]` for tonic="C").
+    - Accidentals follow music21's `.name` convention verbatim: flats
+      as `-` (e.g. `"B-"` for B-flat), sharps as `#` (e.g. `"F#"` for
+      F-sharp). This matches `music21.scale.MajorScale(tonic).getPitches
+      (...)` byte-for-byte, so composers can round-trip strings through
+      music21 without normalizing.
+    - `tonic` accepts anything `music21.scale.MajorScale(tonic)` accepts:
+      bare pitch names (`"C"`, `"F#"`, `"B-"`) or a `music21.key.Key`
+      object.
+
+  Correctness reference: `music21.scale.MajorScale`. This function is a
+  thin adapter — it does NOT hand-roll interval math. If music21's
+  MajorScale changes convention, this function follows it.
+
+  Companion to `major_pentatonic` / `minor_pentatonic` — those return
+  `list[pitch.Pitch]` (pitches with octaves) because they're consumed
+  by melodic line builders; `major_scale` returns pitch-class names
+  because its common use is naming, mode inspection, and text-level
+  composition helpers.
+  """
+  if scale is None:
+    # Matches the pattern of the other music21-optional lib entries:
+    # a missing submodule shouldn't blow up import.
+    raise RuntimeError(
+      "music21.scale is unavailable in this environment; "
+      "major_scale requires the full music21 install."
+    )
+  if isinstance(tonic, key.Key):
+    tonic_name = tonic.tonic.name
+  else:
+    tonic_name = str(tonic)
+  ms = scale.MajorScale(tonic_name)
+  # getPitches returns 8 pitches (tonic..tonic+octave inclusive); drop
+  # the octave-up tonic at position 8 to get 7 pitch classes.
+  pitches = ms.getPitches(f"{tonic_name}4", f"{tonic_name}5")
+  return [p.name for p in pitches[:-1]]
 
 
 # v0.3.6 — velocity helper for percussion + any rhythmic content. The

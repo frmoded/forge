@@ -3,7 +3,7 @@ from music21 import key, meter, note, pitch, stream, instrument
 
 from forge.music.lib import (
   bar, voices, voices_canonical, sequence, repeat,
-  minor_pentatonic, major_pentatonic,
+  minor_pentatonic, major_pentatonic, major_scale,
   with_velocity,
   closed_hihat, open_hihat, pedal_hihat,
   low_tom, mid_tom, high_tom,
@@ -1198,3 +1198,57 @@ def test_sequence_still_merges_same_articulation_across_inputs():
   assert len(parts) == 1
   notes_list = list(parts[0].flatten().notes)
   assert len(notes_list) == 8
+
+
+# ---------- major_scale (CW-add-major-scale-library-note) ----------
+#
+# Convention locked in:
+# - Returns 7 pitch-class names (no octave designations), tonic-first
+#   ascending.
+# - Uses music21's `.name` string form verbatim: `B-` for B-flat,
+#   `F#` for F-sharp, matching `music21.scale.MajorScale.getPitches`.
+# - `tonic` accepts anything `music21.scale.MajorScale(tonic)` accepts
+#   — bare pitch names, sharps `#`, flats `-`, and Key objects.
+
+
+def test_major_scale_c():
+  """§5.1 — canonical C major, no accidentals."""
+  assert major_scale("C") == ["C", "D", "E", "F", "G", "A", "B"]
+
+
+def test_major_scale_g():
+  """§5.2 — one sharp (F#)."""
+  assert major_scale("G") == ["G", "A", "B", "C", "D", "E", "F#"]
+
+
+def test_major_scale_f():
+  """§5.3 — one flat (B-flat); music21 renders as `B-`, and the drain
+  spec explicitly locks in that convention."""
+  assert major_scale("F") == ["F", "G", "A", "B-", "C", "D", "E"]
+
+
+def test_major_scale_returns_exactly_seven_pitch_classes():
+  """Contract: 7 pitch classes, no octave designations (no digits in
+  the returned strings)."""
+  for tonic in ["C", "G", "D", "A", "E", "B", "F", "B-", "E-"]:
+    result = major_scale(tonic)
+    assert len(result) == 7, f"{tonic}: expected 7 pitch classes, got {len(result)}"
+    for name in result:
+      assert not any(ch.isdigit() for ch in name), (
+        f"{tonic}: pitch-class name {name!r} contains an octave digit"
+      )
+
+
+def test_major_scale_matches_music21_reference():
+  """Cross-check every canonical tonic against music21's own
+  `scale.MajorScale.getPitches` — the reference implementation. Slicing
+  `[:-1]` drops the octave-up tonic music21 includes at position 8."""
+  from music21 import scale as _scale
+  for tonic in [
+    "C", "G", "D", "A", "E", "B", "F#",
+    "F", "B-", "E-", "A-", "D-", "G-",
+  ]:
+    ref = [p.name for p in _scale.MajorScale(tonic).getPitches(
+      f"{tonic}4", f"{tonic}5",
+    )][:-1]
+    assert major_scale(tonic) == ref, f"{tonic}: mismatch with music21 reference"

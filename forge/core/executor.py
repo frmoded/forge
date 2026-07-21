@@ -39,6 +39,9 @@ try:
     "repeat": _music_lib.repeat,
     "minor_pentatonic": _music_lib.minor_pentatonic,
     "major_pentatonic": _music_lib.major_pentatonic,
+    # CW-add-major-scale-library-note (drain 2026-07-20-1705) —
+    # diatonic 7-note scale companion to the pentatonic pair.
+    "major_scale": _music_lib.major_scale,
     "with_velocity": _music_lib.with_velocity,
     "closed_hihat": _music_lib.closed_hihat,
     "open_hihat": _music_lib.open_hihat,
