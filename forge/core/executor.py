@@ -243,7 +243,10 @@ def _domain_globals_for(domains):
         name: getattr(_music_lib_lazy, name)
         for name in (
           "bar", "voices", "voices_canonical", "sequence", "repeat",
-          "minor_pentatonic", "major_pentatonic", "with_velocity",
+          "minor_pentatonic", "major_pentatonic",
+          # CW-add-major-scale-library-note (drain 2026-07-20-1705).
+          "major_scale",
+          "with_velocity",
           "closed_hihat", "open_hihat", "pedal_hihat",
           "low_tom", "mid_tom", "high_tom",
           "crash_cymbal", "ride_cymbal", "kick", "snare",
@@ -251,6 +254,10 @@ def _domain_globals_for(domains):
           "play_at_offsets", "sequence_list", "voices_list", "bar_list",
           "form", "drum_chorus", "drums_shuffle", "guitar_solo_chorus",
           "vocal_phrase_a", "vocal_phrase_b", "phase_cell", "phase_shifter",
+          # Drain 2026-07-10-1400 phase 1 — walking bass.
+          "walking_bass_line",
+          # Drain 2026-07-10-1340 phases 2-4 — piano/violin/vocal.
+          "piano_voicing", "violin_bowing", "vocal_line",
         )
         if hasattr(_music_lib_lazy, name)
       }
