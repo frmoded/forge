@@ -73,29 +73,39 @@ class TestActionNotesExec:
     assert result == "hello, world"
 
   def test_greeting(self, tutorial_resolver):
-    stdout, _ = _run(tutorial_resolver, "greeting")
-    assert "Hello, Ada" in stdout
+    # CW-tutorial-full-return-sweep (drain 2026-07-23-1500):
+    # greeting.md's Recipe shifted from `[[print]] greeting.` to
+    # `Return greeting.` — output surface flipped from stdout to
+    # return value. Assertion follows.
+    _, result = _run(tutorial_resolver, "greeting")
+    assert result == "Hello, Ada"
 
   def test_excited_returns_word_with_exclam(self, tutorial_resolver):
     _, result = _run(tutorial_resolver, "excited", word="yay")
     assert result == "yay!"
 
   def test_cheer(self, tutorial_resolver):
-    stdout, _ = _run(tutorial_resolver, "cheer")
-    assert "hooray!" in stdout
+    # CW-tutorial-full-return-sweep (drain 2026-07-23-1500):
+    # cheer.md now Returns instead of printing — assertion shifted.
+    _, result = _run(tutorial_resolver, "cheer")
+    assert result == "hooray!"
 
   def test_excited_word_returns_word(self, tutorial_resolver):
     _, result = _run(tutorial_resolver, "excited_word")
     assert result == "wonderful"
 
   def test_describe_forge(self, tutorial_resolver):
-    stdout, _ = _run(tutorial_resolver, "describe_forge")
-    assert "Forge is wonderful" in stdout
+    # CW-tutorial-full-return-sweep (drain 2026-07-23-1500):
+    # describe_forge.md now Returns instead of printing.
+    _, result = _run(tutorial_resolver, "describe_forge")
+    assert result == "Forge is wonderful."
 
   def test_weather_pleasant_at_72(self, tutorial_resolver):
-    stdout, _ = _run(tutorial_resolver, "weather")
-    assert "pleasant" in stdout
-    assert "hot" not in stdout
+    # CW-tutorial-full-return-sweep (drain 2026-07-23-1500):
+    # weather.md's If/Otherwise branches both Return now — the
+    # chosen branch hands its string back as the note's result.
+    _, result = _run(tutorial_resolver, "weather")
+    assert result == "It's pleasant."
 
   def test_countdown(self, tutorial_resolver):
     stdout, _ = _run(tutorial_resolver, "countdown")
@@ -127,8 +137,10 @@ class TestActionNotesExec:
     assert result == 1
 
   def test_show_factorial(self, tutorial_resolver):
-    stdout, _ = _run(tutorial_resolver, "show_factorial")
-    assert "120" in stdout
+    # CW-tutorial-full-return-sweep (drain 2026-07-23-1500):
+    # show_factorial.md now Returns instead of printing.
+    _, result = _run(tutorial_resolver, "show_factorial")
+    assert result == 120
 
   def test_octopus_fact(self, tutorial_resolver):
     """octopus_fact uses `{{...}}` slot syntax. Pre-V2.1 (drain at
