@@ -124,6 +124,73 @@ try:
 except ImportError:
   _FORGE_MODA_LIB_NAMES = {}
 
+# CW-executor-chip-list-eager-lazy-assertion (drain 2026-07-22-2020).
+# Lazy-hydration name tuples, extracted from the `_register_domain`
+# body so the drift guard below can `set()`-compare them against the
+# eager dicts. Drain 1500's `major_scale` defect landed because these
+# two lists silently disagreed by 5 chips; the guard fails loud on
+# recurrence at import time.
+_MUSIC_LAZY_CHIP_NAMES = (
+  "bar", "voices", "voices_canonical", "sequence", "repeat",
+  "minor_pentatonic", "major_pentatonic",
+  # CW-add-major-scale-library-note (drain 2026-07-20-1705).
+  "major_scale",
+  "with_velocity",
+  "closed_hihat", "open_hihat", "pedal_hihat",
+  "low_tom", "mid_tom", "high_tom",
+  "crash_cymbal", "ride_cymbal", "kick", "snare",
+  "play_at_beats", "show_score",
+  "play_at_offsets", "sequence_list", "voices_list", "bar_list",
+  "form", "drum_chorus", "drums_shuffle", "guitar_solo_chorus",
+  "vocal_phrase_a", "vocal_phrase_b", "phase_cell", "phase_shifter",
+  # Drain 2026-07-10-1400 phase 1 — walking bass.
+  "walking_bass_line",
+  # Drain 2026-07-10-1340 phases 2-4 — piano/violin/vocal.
+  "piano_voicing", "violin_bowing", "vocal_line",
+)
+
+_MODA_LAZY_CHIP_NAMES = (
+  "temperature_to_speed",
+  "create_chamber", "create_water_particles", "create_ink_particles",
+  "advance_positions", "bounce_off_walls", "bounce_off_pairs",
+  "detect_collisions",
+  "set_speed_for_type", "set_mass_for_type",
+  "group_clicks_by_tick", "apply_clicks_at_tick",
+  "random_name", "show_simulation", "tick_range",
+)
+
+# Drift guard — the eager dict and the lazy-hydration name tuple MUST
+# stay in sync. Drain 1500's major_scale defect landed because they
+# didn't (the lazy list was missing 5 chips added over prior drains).
+# Runs at import time; `raise RuntimeError` not `assert` because `-O`
+# strips assertions and this invariant is load-bearing at runtime, not
+# just in tests. Guarded with `if _*_LIB_NAMES:` so the legitimate
+# ImportError branch (eager dict is `{}` on purpose) doesn't trigger.
+# The unit test at tests/test_executor_chip_list_drift.py is the
+# primary guard; this raise is defense-in-depth for `pytest -O` /
+# runtime imports outside the test harness.
+if _FORGE_MUSIC_LIB_NAMES:
+  _eager_music = set(_FORGE_MUSIC_LIB_NAMES.keys())
+  _lazy_music = set(_MUSIC_LAZY_CHIP_NAMES)
+  if _eager_music != _lazy_music:
+    raise RuntimeError(
+      f"forge.core.executor: music chip list drift — "
+      f"eager - lazy = {sorted(_eager_music - _lazy_music)}, "
+      f"lazy - eager = {sorted(_lazy_music - _eager_music)}. "
+      f"Update BOTH the eager dict (L34-89) and _MUSIC_LAZY_CHIP_NAMES."
+    )
+
+if _FORGE_MODA_LIB_NAMES:
+  _eager_moda = set(_FORGE_MODA_LIB_NAMES.keys())
+  _lazy_moda = set(_MODA_LAZY_CHIP_NAMES)
+  if _eager_moda != _lazy_moda:
+    raise RuntimeError(
+      f"forge.core.executor: moda chip list drift — "
+      f"eager - lazy = {sorted(_eager_moda - _lazy_moda)}, "
+      f"lazy - eager = {sorted(_lazy_moda - _eager_moda)}. "
+      f"Update BOTH the eager dict (L107-123) and _MODA_LAZY_CHIP_NAMES."
+    )
+
 # Domain-scoped global injection (constitution B9 / domain-scoping).
 # Each domain's pre-injected names register under its domain key,
 # mirroring the prompt-fragment registry. The base names (random,
@@ -241,24 +308,7 @@ def _domain_globals_for(domains):
       from forge.music import lib as _music_lib_lazy
       _FORGE_MUSIC_LIB_NAMES = {
         name: getattr(_music_lib_lazy, name)
-        for name in (
-          "bar", "voices", "voices_canonical", "sequence", "repeat",
-          "minor_pentatonic", "major_pentatonic",
-          # CW-add-major-scale-library-note (drain 2026-07-20-1705).
-          "major_scale",
-          "with_velocity",
-          "closed_hihat", "open_hihat", "pedal_hihat",
-          "low_tom", "mid_tom", "high_tom",
-          "crash_cymbal", "ride_cymbal", "kick", "snare",
-          "play_at_beats", "show_score",
-          "play_at_offsets", "sequence_list", "voices_list", "bar_list",
-          "form", "drum_chorus", "drums_shuffle", "guitar_solo_chorus",
-          "vocal_phrase_a", "vocal_phrase_b", "phase_cell", "phase_shifter",
-          # Drain 2026-07-10-1400 phase 1 — walking bass.
-          "walking_bass_line",
-          # Drain 2026-07-10-1340 phases 2-4 — piano/violin/vocal.
-          "piano_voicing", "violin_bowing", "vocal_line",
-        )
+        for name in _MUSIC_LAZY_CHIP_NAMES
         if hasattr(_music_lib_lazy, name)
       }
       _DOMAIN_GLOBALS = dict(_DOMAIN_GLOBALS)
@@ -300,15 +350,7 @@ def _domain_globals_for(domains):
       )
       _FORGE_MODA_LIB_NAMES = {
         name: getattr(_moda_lib_lazy, name)
-        for name in (
-          "temperature_to_speed",
-          "create_chamber", "create_water_particles", "create_ink_particles",
-          "advance_positions", "bounce_off_walls", "bounce_off_pairs",
-          "detect_collisions",
-          "set_speed_for_type", "set_mass_for_type",
-          "group_clicks_by_tick", "apply_clicks_at_tick",
-          "random_name", "show_simulation", "tick_range",
-        )
+        for name in _MODA_LAZY_CHIP_NAMES
         if hasattr(_moda_lib_lazy, name)
       }
       _DOMAIN_GLOBALS = dict(_DOMAIN_GLOBALS)
