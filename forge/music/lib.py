@@ -20,7 +20,20 @@ from typing import Union
 # import. Each line is independent; if `tempo` (added in v0.2.166) isn't
 # available, the others still load and the chips that don't need tempo still
 # work.
-from music21 import clef, instrument, key, meter, note, pitch, stream
+#
+# CW-forge-music-lib-defer-music21-imports (drain 2026-07-23-1000) —
+# guarded to match the surrounding tempo/chord/harmony/duration/roman/
+# scale pattern. In pyodide the music21 wheel mounts LATE (after
+# executor-load AND sometimes after first `_domain_globals_for('music')`
+# lazy retry), so this batch that was previously "considered core /
+# guaranteed" also demonstrably fails at module load. Fallback binds
+# each name to None; annotations are lazy strings under `from __future__
+# import annotations` so signatures still parse; StreamLike guard below
+# handles the one module-level runtime use of these names.
+try:
+  from music21 import clef, instrument, key, meter, note, pitch, stream
+except ImportError:
+  clef = instrument = key = meter = note = pitch = stream = None
 try:
   from music21 import tempo
 except ImportError:
@@ -57,7 +70,18 @@ except ImportError:
 # the public lib namespace doesn't shadow callers' own `random`.
 import random as _random
 
-StreamLike = Union[stream.Score, stream.Part, stream.Measure, stream.Stream]
+# CW-forge-music-lib-defer-music21-imports (drain 2026-07-23-1000) —
+# StreamLike is the ONLY module-level runtime use of the music21 names
+# guarded above (annotation heads at L67, L104, etc are lazy strings
+# under `from __future__ import annotations` so they don't count). With
+# `stream = None` on the ImportError fallback, evaluating
+# `Union[stream.Score, ...]` here fails with `AttributeError: 'NoneType'`.
+# Fallback to `object` for the None case; annotations remain string
+# form + resolve lazily once music21 is available.
+if stream is not None:
+  StreamLike = Union[stream.Score, stream.Part, stream.Measure, stream.Stream]
+else:
+  StreamLike = object
 
 
 def bar(
@@ -504,7 +528,15 @@ def major_scale(tonic: Union[key.Key, str]) -> list[str]:
 # intentionally absent.
 
 import random as _stdlib_random
-from music21 import dynamics
+# CW-forge-music-lib-defer-music21-imports (drain 2026-07-23-1000) —
+# another module-level music21 import buried mid-file. Same guard
+# rationale as L23. `dynamics` is only referenced inside function
+# bodies below, so a None fallback is safe at import time; calls
+# that USE it still require music21 to have mounted by call time.
+try:
+  from music21 import dynamics
+except ImportError:
+  dynamics = None
 
 _VELOCITY_PROFILES = {
   'human':       lambda i, n: 75 + _stdlib_random.randint(-8, 8),
