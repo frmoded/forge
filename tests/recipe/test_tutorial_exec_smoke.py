@@ -63,8 +63,14 @@ def _run(tutorial_resolver, snippet_id, **inputs):
 
 class TestActionNotesExec:
   def test_hello_world(self, tutorial_resolver):
-    stdout, _ = _run(tutorial_resolver, "hello_world")
-    assert "hello, world" in stdout
+    # CW-tutorial-01-hello-recipe-print-shift (drain 2026-07-23-1305):
+    # hello_world's Recipe was rewritten from `[[print]] "hello, world".`
+    # to `Return "hello, world".` to eliminate the phantom `[[print]]`
+    # few-shot bleed vector to the LLM. Post-shift the value renders in
+    # the Forge Output panel via the returned value (same user-visible
+    # outcome), not stdout — the test assertion follows.
+    _, result = _run(tutorial_resolver, "hello_world")
+    assert result == "hello, world"
 
   def test_greeting(self, tutorial_resolver):
     stdout, _ = _run(tutorial_resolver, "greeting")
