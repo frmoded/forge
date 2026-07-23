@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v21)
+# Forge — Core Invariants and Discipline (V2a v22)
 
 ## Mission
 
@@ -788,6 +788,23 @@ builtin names — common Python globals (`print`, `len`, `range`,
 follow wikilink resolution per A4 + A4.1. Authors who want a
 less-common builtin can qualify it (`[[python:name]]`) or ship a
 sibling note that wraps it.
+
+*Transpile vs. wikilink-click (v22, drain 2026-07-23-1705).* Two
+distinct layers handle `[[builtin]]` references:
+
+1. **Transpile-time** (forge-transpile). The recipe transpiler emits
+   the bare identifier for a `[[print]]` call — `print("hello")` in
+   the generated Python. No separate resolver runs at this layer;
+   the wikilink target simply becomes a Python function name.
+2. **Wikilink-click-time** (plugin). When the user clicks a
+   `[[print]]` wikilink in the Obsidian editor, the plugin's builtin
+   gate at `~/projects/forge-client-obsidian/src/python-builtins-core.ts:21`
+   intercepts the click, checks membership via `isPythonBuiltin`,
+   and shows a friendly Notice instead of creating a stray `print.md`.
+
+Reference the plugin file (not any forge-transpile prompt) when
+documenting builtin-wikilink behavior; the transpile layer is
+transparent to this concern.
 
 **B8** (V1 legacy). *(forge-client-obsidian)* This clause governs V1-shape
 notes (English + Python facets). V2-shape notes (Description + Recipe +
