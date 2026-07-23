@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v22)
+# Forge — Core Invariants and Discipline (V2a v23)
 
 ## Mission
 
@@ -339,6 +339,39 @@ Frontmatter schema for lineage tracking:
   D → R → P chain is Description.
 - `python_derived_from_recipe_hash` — stamped at transpile time
   with Recipe's current hash. Python's parent is Recipe.
+
+*Sync-state rollup (v23, drain 2026-07-23-1700 Phase 1).* Alongside
+`source_facet` (which facet is canonical) and the per-facet visibility
+suffixes (how each non-source facet relates to source), the note carries
+a note-level rollup field `sync_state` for external observability.
+Values:
+
+- `synced` — all three facets aligned with their stored hashes.
+- `stale-recipe` — Description edited since Recipe was last derived.
+- `stale-python` — Recipe edited since Python was compiled (or a
+  downstream Python-only edit not yet reconciled with Recipe).
+- `stale-both` — Description edited AND Recipe not re-derived
+  (Python transitively stale).
+- `authoring` — a facet is mid-edit and hashes haven't settled yet.
+  **Computed-only** per Phase 1 Proposal B (drain 1700 §4 A.3):
+  NEVER persisted to frontmatter. External observers reading mid-
+  typing see the LAST settled value; `authoring` exists only for
+  in-plugin diagnostics.
+
+`sync_state` is a Phase 1 external-observability field: forge-mcp
+returns it on `forge_read_note` / `forge_read_notes_in_vault` so wizard
+/ CC / CCQA / cohort scripts can query note state without loading the
+plugin. Downstream consumers migrate to `sync_state` as source-of-truth
+(in place of hash-comparison-per-render) as later phases. Phase 1 is
+introduce + populate + display; consumer migration is out of scope for
+this drain.
+
+`sync_state` and `source_facet` are DIFFERENT fields; both are
+plugin-written; neither replaces the other. `source_facet` records
+authorial intent (which facet drives runtime). `sync_state` records
+a freshness rollup for observers. Per-facet render-time state
+continues to be surfaced via the `FacetState` enum (below) and the
+per-facet visibility suffixes.
 
 Visibility contract. Each non-source facet is annotated by the CM6
 view plugin with a state suffix + body opacity reflecting lineage +
