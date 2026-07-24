@@ -566,6 +566,70 @@ def major_scale(tonic: Union[key.Key, str]) -> list[str]:
   return [p.name for p in pitches[:-1]]
 
 
+def diatonic_scale(
+  tonic: str,
+  mode: str = "major",
+  octave_range: list[int] | None = None,
+) -> list[str]:
+  """Return the diatonic scale for `tonic` in `mode` as ascending pitch
+  names with octave designations.
+
+  CW-forge-music-lib-add-diatonic-scale-chip (drain 2026-07-24-1345).
+
+  Contract:
+    - Returns `list[str]` of `nameWithOctave` strings — e.g.
+      `["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"]` for
+      `diatonic_scale("C", "major")`.
+    - `octave_range=[low, high]` inclusive: e.g. `[4, 5]` spans one
+      octave (tonic4 ascending through tonic5); `[3, 5]` spans two
+      octaves. Defaults to `[4, 5]`.
+    - `mode` accepts `"major"` (default) or `"minor"` (natural minor).
+    - `tonic` is a pitch-class string: `"C"`, `"F#"`, `"B-"` (music21
+      flat convention). Bare `"Bb"` is also accepted by music21.
+    - Accidentals in the return value follow music21's convention
+      verbatim: flats as `-` (e.g. `"B-4"`), sharps as `#`.
+
+  Companion to `major_scale` (which returns 7 pitch-class names, no
+  octaves) and `major_pentatonic` / `minor_pentatonic` (which return
+  5-note `pitch.Pitch` lists). Use `diatonic_scale` when you want
+  7-note diatonic coverage with octave-anchored pitch names — the
+  common building block for scale runs, arpeggio starting points,
+  and melodic-line sketches.
+
+  Musical correctness reference: `music21.scale.MajorScale` /
+  `music21.scale.MinorScale`. Thin adapter — no hand-rolled interval
+  math; follows whatever music21 says the scale is.
+  """
+  _require_music21()
+  if scale is None:
+    raise RuntimeError(
+      "music21.scale is unavailable in this environment; "
+      "diatonic_scale requires the full music21 install."
+    )
+  if octave_range is None:
+    octave_range = [4, 5]
+  if len(octave_range) != 2:
+    raise ValueError(
+      f"octave_range must be a 2-element [low, high] list; "
+      f"got {octave_range!r}"
+    )
+  start_oct, end_oct = octave_range[0], octave_range[1]
+  if start_oct > end_oct:
+    raise ValueError(
+      f"octave_range start ({start_oct}) must be <= end ({end_oct})"
+    )
+  if mode == "major":
+    s = scale.MajorScale(tonic)
+  elif mode == "minor":
+    s = scale.MinorScale(tonic)
+  else:
+    raise ValueError(
+      f"mode must be 'major' or 'minor'; got {mode!r}"
+    )
+  pitches = s.getPitches(f"{tonic}{start_oct}", f"{tonic}{end_oct}")
+  return [p.nameWithOctave for p in pitches]
+
+
 # v0.3.6 — velocity helper for percussion + any rhythmic content. The
 # 5 named profiles cover the common dynamic shapes; int and list[int]
 # patterns cover the deterministic cases. Default music21 velocity is

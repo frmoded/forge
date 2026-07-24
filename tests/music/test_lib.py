@@ -3,7 +3,7 @@ from music21 import key, meter, note, pitch, stream, instrument
 
 from forge.music.lib import (
   bar, voices, voices_canonical, sequence, repeat,
-  minor_pentatonic, major_pentatonic, major_scale,
+  minor_pentatonic, major_pentatonic, major_scale, diatonic_scale,
   with_velocity,
   closed_hihat, open_hihat, pedal_hihat,
   low_tom, mid_tom, high_tom,
@@ -1252,3 +1252,76 @@ def test_major_scale_matches_music21_reference():
       f"{tonic}4", f"{tonic}5",
     )][:-1]
     assert major_scale(tonic) == ref, f"{tonic}: mismatch with music21 reference"
+
+
+# ---------- diatonic_scale (CW drain 2026-07-24-1345) ----------
+
+def test_diatonic_scale_c_major():
+  """§Musical correctness — canonical C major, one octave, no accidentals."""
+  assert diatonic_scale("C", "major") == [
+    "C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5",
+  ]
+
+
+def test_diatonic_scale_g_major():
+  """§Musical correctness — one sharp (F#)."""
+  assert diatonic_scale("G", "major") == [
+    "G4", "A4", "B4", "C5", "D5", "E5", "F#5", "G5",
+  ]
+
+
+def test_diatonic_scale_f_major():
+  """§Musical correctness — one flat (B-flat); music21 renders as `B-`."""
+  assert diatonic_scale("F", "major") == [
+    "F4", "G4", "A4", "B-4", "C5", "D5", "E5", "F5",
+  ]
+
+
+def test_diatonic_scale_a_minor():
+  """§Musical correctness — natural minor, no accidentals."""
+  assert diatonic_scale("A", "minor") == [
+    "A4", "B4", "C5", "D5", "E5", "F5", "G5", "A5",
+  ]
+
+
+def test_diatonic_scale_e_minor():
+  """§Musical correctness — natural minor with one sharp (F#)."""
+  assert diatonic_scale("E", "minor") == [
+    "E4", "F#4", "G4", "A4", "B4", "C5", "D5", "E5",
+  ]
+
+
+def test_diatonic_scale_default_mode_is_major():
+  """`mode` defaults to `major` so `diatonic_scale("C")` is the ergonomic
+  common case."""
+  assert diatonic_scale("C") == diatonic_scale("C", "major")
+
+
+def test_diatonic_scale_rejects_unknown_mode():
+  """Unknown `mode` raises ValueError naming the accepted values."""
+  with pytest.raises(ValueError, match="mode must be"):
+    diatonic_scale("C", "lydian")
+
+
+def test_diatonic_scale_multi_octave():
+  """Spanning multiple octaves widens the returned pitch list."""
+  result = diatonic_scale("C", "major", [3, 5])
+  # 2 octaves + tonic-up = 15 pitches (C3..C5 inclusive spanning 3 tonics).
+  assert result[0] == "C3"
+  assert result[-1] == "C5"
+  # 7 pitches per octave × 2 octaves + trailing tonic = 15.
+  assert len(result) == 15
+
+
+def test_diatonic_scale_rejects_inverted_octave_range():
+  """`octave_range=[5, 4]` (start > end) raises ValueError."""
+  with pytest.raises(ValueError, match="start .* must be <="):
+    diatonic_scale("C", "major", [5, 4])
+
+
+def test_diatonic_scale_rejects_malformed_octave_range():
+  """`octave_range` must be a 2-element list."""
+  with pytest.raises(ValueError, match="2-element"):
+    diatonic_scale("C", "major", [4])
+  with pytest.raises(ValueError, match="2-element"):
+    diatonic_scale("C", "major", [3, 4, 5])

@@ -42,6 +42,10 @@ try:
     # CW-add-major-scale-library-note (drain 2026-07-20-1705) —
     # diatonic 7-note scale companion to the pentatonic pair.
     "major_scale": _music_lib.major_scale,
+    # CW-forge-music-lib-add-diatonic-scale-chip (drain 2026-07-24-1345) —
+    # major/minor scale via music21 scale.MajorScale/MinorScale, so
+    # authoring doesn't fall back to a `{{ music21.scale.… }}` slot.
+    "diatonic_scale": _music_lib.diatonic_scale,
     "with_velocity": _music_lib.with_velocity,
     "closed_hihat": _music_lib.closed_hihat,
     "open_hihat": _music_lib.open_hihat,
@@ -135,6 +139,10 @@ _MUSIC_LAZY_CHIP_NAMES = (
   "minor_pentatonic", "major_pentatonic",
   # CW-add-major-scale-library-note (drain 2026-07-20-1705).
   "major_scale",
+  # CW-forge-music-lib-add-diatonic-scale-chip (drain 2026-07-24-1345):
+  # 7-note diatonic scale with octave-anchored pitch names, mirroring
+  # music21's MajorScale / MinorScale contract.
+  "diatonic_scale",
   "with_velocity",
   "closed_hihat", "open_hihat", "pedal_hihat",
   "low_tom", "mid_tom", "high_tom",
