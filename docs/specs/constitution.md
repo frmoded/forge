@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v23)
+# Forge — Core Invariants and Discipline (V2a v24)
 
 ## Mission
 
@@ -352,11 +352,11 @@ Values:
   downstream Python-only edit not yet reconciled with Recipe).
 - `stale-both` — Description edited AND Recipe not re-derived
   (Python transitively stale).
-- `authoring` — a facet is mid-edit and hashes haven't settled yet.
-  **Computed-only** per Phase 1 Proposal B (drain 1700 §4 A.3):
-  NEVER persisted to frontmatter. External observers reading mid-
-  typing see the LAST settled value; `authoring` exists only for
-  in-plugin diagnostics.
+
+(Drain 2026-07-23-1900 removed the vestigial `authoring` value from
+the enum per YAGNI: no code path ever wrote it. If a future in-transit
+consumer arises, re-introduce as a Phase 3 drain with the writer +
+reader landing together in one commit.)
 
 `sync_state` is a Phase 1 external-observability field: forge-mcp
 returns it on `forge_read_note` / `forge_read_notes_in_vault` so wizard
