@@ -128,6 +128,22 @@ try:
 except ImportError:
   _FORGE_MODA_LIB_NAMES = {}
 
+# Domain-agnostic core primitives (drain 2026-07-26-1000). Merged into
+# every domain's globals dict below — mirrors the tutorial pseudo-domain
+# precedent in forge-transpile's engine_chip_introspector.py, where
+# Python builtins like `print` surface regardless of `active_domains`.
+# These are utility list operations that any Recipe (music, moda, or
+# future) may want to reach for; forcing callers to pick a domain to
+# access them would smell wrong.
+try:
+  from forge.core import lib as _core_lib
+  _FORGE_CORE_LIB_NAMES = {
+    "nth": _core_lib.nth,
+    "pick_indices": _core_lib.pick_indices,
+  }
+except ImportError:
+  _FORGE_CORE_LIB_NAMES = {}
+
 # CW-executor-chip-list-eager-lazy-assertion (drain 2026-07-22-2020).
 # Lazy-hydration name tuples, extracted from the `_register_domain`
 # body so the drift guard below can `set()`-compare them against the
@@ -205,8 +221,13 @@ if _FORGE_MODA_LIB_NAMES:
 # math, numpy) are always injected regardless of declared domains;
 # only these domain bundles are gated.
 _DOMAIN_GLOBALS = {
-  "music": {**_MUSIC21_NAMES, **_FORGE_MUSIC_LIB_NAMES},
-  "moda": {**_FORGE_MODA_NAMES, **_FORGE_MODA_LIB_NAMES},
+  # Drain 2026-07-26-1000 — `_FORGE_CORE_LIB_NAMES` merges into EVERY
+  # domain so `[[nth]]` / `[[pick_indices]]` resolve regardless of the
+  # active domain filter. Kept last in the merge so a domain chip
+  # accidentally sharing a name with a core primitive would win
+  # (defensive — none exist today).
+  "music": {**_MUSIC21_NAMES, **_FORGE_MUSIC_LIB_NAMES, **_FORGE_CORE_LIB_NAMES},
+  "moda": {**_FORGE_MODA_NAMES, **_FORGE_MODA_LIB_NAMES, **_FORGE_CORE_LIB_NAMES},
 }
 
 
