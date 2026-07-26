@@ -224,6 +224,19 @@ def _tokenize(src: str) -> List[Tok]:
       i += 1; col += 1; continue
     if ch == "\n":
       i += 1; line += 1; col = 1; continue
+    # Line comment — `#` outside a string literal consumes to end-of-line
+    # (drain 2026-07-24-1735). Strings are handled atomically below at
+    # the quote-open branch, so a `#` reached HERE is guaranteed to be
+    # outside any string, and we can safely treat it as a comment start.
+    # `\n` is not consumed — the newline branch above handles line/col
+    # bookkeeping on the next iteration.
+    if ch == "#":
+      j = i + 1
+      while j < len(src) and src[j] != "\n":
+        j += 1
+      col += j - i
+      i = j
+      continue
     # Slot — `{{ free english here }}`. Greedy-match content between the
     # opening `{{` and the next `}}`. Empty slot (`{{}}`) is a parse
     # error (no expression to resolve). Single-line only; newlines
@@ -338,6 +351,35 @@ def _tokenize(src: str) -> List[Tok]:
 
 # --- Line splitter -----------------------------------------------------
 
+def _strip_line_comment(line: str) -> str:
+  """Return `line` with any trailing `#`-line-comment removed. Aware of
+  string literals — a `#` inside a "..." or '...' string is preserved,
+  only an out-of-string `#` starts a comment. Drain 2026-07-24-1735.
+
+  Not full-fidelity (no escape sequence handling — the tokenizer proper
+  also doesn't handle escapes, per its "no escaping for spike" comment
+  at parser.py:307). If the string spike gets escape handling later, this
+  helper needs to match.
+  """
+  i = 0
+  in_string: Optional[str] = None
+  while i < len(line):
+    ch = line[i]
+    if in_string is not None:
+      if ch == in_string:
+        in_string = None
+      i += 1
+      continue
+    if ch in ('"', "'"):
+      in_string = ch
+      i += 1
+      continue
+    if ch == "#":
+      return line[:i]
+    i += 1
+  return line
+
+
 def _split_lines(src: str) -> List[tuple]:
   """Split E-- source into (indent_level, line_text, source_lineno)
   tuples. `source_lineno` is 1-indexed and refers to the ORIGINAL source
@@ -349,21 +391,29 @@ def _split_lines(src: str) -> List[tuple]:
 
   Drain 2026-07-14-1235 added `source_lineno` so `_parse_stmt` can
   translate the tokenizer's per-line-relative `line=1` back to the
-  original source line when a ParseError bubbles up."""
+  original source line when a ParseError bubbles up.
+
+  Drain 2026-07-24-1735 added line-comment stripping via
+  `_strip_line_comment`. A line whose only content is a `#`-comment
+  becomes empty after the strip and is skipped as a blank line, so
+  full-line comments never reach the parser.
+  """
   out = []
   for i, raw in enumerate(src.splitlines(), start=1):
-    text = raw.rstrip()
+    # Strip trailing `#`-line-comment (string-literal-aware). A comment-
+    # only line becomes empty here and is treated as blank.
+    text = _strip_line_comment(raw).rstrip()
     if not text.strip():
       continue
     indent = 0
-    for ch in raw:
+    for ch in text:
       if ch == " ":
         indent += 1
       elif ch == "\t":
         indent += 2
       else:
         break
-    out.append((indent, raw.strip(), i))
+    out.append((indent, text.strip(), i))
   return out
 
 

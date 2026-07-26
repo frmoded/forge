@@ -229,3 +229,72 @@ class TestParseErrorLocation:
       parse("Let x = @.\n")
     assert exc_info.value.lineno == 1
     assert exc_info.value.col_offset is not None
+
+
+# -- CW-e-minus-lexer-hash-in-string-literal-parse-bug (drain 2026-07-24-1735) --
+
+
+class TestCommentsAndHashInStrings:
+  """The drain motivated by wizard's `"F#"` report. Investigation found
+  cases 1+2 (# INSIDE strings) already worked; cases 4+5 (# as line
+  comment) never worked — the tokenizer had no `#` handler at all.
+  This drain adds comment support to close cases 4+5 while preserving
+  the existing string-literal-with-# behavior."""
+
+  def test_string_with_hash_at_end(self):
+    """Case 1 — `"F#"` literal must lex as the 2-char sharp-pitch string."""
+    m = parse('Return "F#".')
+    assert len(m.statements) == 1
+    s = m.statements[0]
+    assert isinstance(s, ReturnStmt)
+    assert isinstance(s.value, StringLit)
+    assert s.value.value == "F#"
+
+  def test_string_with_hash_in_middle(self):
+    """Case 3 — `#` embedded mid-string must be preserved verbatim."""
+    m = parse('Return "before # after".')
+    s = m.statements[0]
+    assert isinstance(s.value, StringLit)
+    assert s.value.value == "before # after"
+
+  def test_string_with_hash_as_chip_kwarg(self):
+    """Case 2 — sharp pitch names as chip kwarg values (the real wizard
+    reproduction: `Call [[diatonic_scale]] with tonic="F#"`)."""
+    m = parse('Return Call [[diatonic_scale]] with tonic="F#".')
+    s = m.statements[0]
+    assert isinstance(s, ReturnStmt)
+    call = s.value
+    assert isinstance(call, ChipCall)
+    assert call.name == "diatonic_scale"
+    assert call.kwargs[0].name == "tonic"
+    assert isinstance(call.kwargs[0].value, StringLit)
+    assert call.kwargs[0].value.value == "F#"
+
+  def test_hash_line_comment_alone(self):
+    """Case 4 — bare `#` line comment on its own must be stripped, and
+    surrounding statements parse cleanly."""
+    m = parse('Let x = 1. # this is a comment\nReturn x.')
+    assert len(m.statements) == 2
+    assert isinstance(m.statements[0], LetStmt)
+    assert m.statements[0].name == "x"
+    assert isinstance(m.statements[1], ReturnStmt)
+
+  def test_hash_line_comment_after_string_literal(self):
+    """Case 5 — a `#` line comment AFTER a string literal must not confuse
+    the string handler (this is the exact case where a naive string-in-
+    comment-state fix could regress)."""
+    m = parse('Let x = "quoted". # tail comment\nReturn x.')
+    assert len(m.statements) == 2
+    assert isinstance(m.statements[0], LetStmt)
+    assert isinstance(m.statements[0].value, StringLit)
+    assert m.statements[0].value.value == "quoted"
+
+  def test_full_line_comment(self):
+    """A `#`-prefixed full line (with only leading whitespace) is a
+    comment and doesn't emit any tokens on that line."""
+    m = parse('# top-of-file comment\nReturn 1.')
+    assert len(m.statements) == 1
+    s = m.statements[0]
+    assert isinstance(s, ReturnStmt)
+    assert isinstance(s.value, NumberLit)
+    assert s.value.value == 1
