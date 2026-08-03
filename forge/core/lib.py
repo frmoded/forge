@@ -51,3 +51,60 @@ def pick_indices(lst: Sequence[_T], indices: Sequence[int]) -> list[_T]:
   → `["a", "c", "e"]`.
   """
   return [lst[i] for i in indices]
+
+
+def mcq(
+  question: str,
+  choices: Sequence[str],
+  correct_index: int,
+  guess: int,
+  explanation: str = "",
+) -> str:
+  """Score a multiple-choice question and return cohort-facing feedback.
+
+  Drain 2026-08-03-1125, from MCQ brainstorm B1 approach 3. Pairs with
+  the `input_enums:` dropdown shipped in drain 2026-07-31-1120: the
+  cohort picks a choice from the dropdown, the Recipe converts it to an
+  index, and this returns the verdict.
+
+  Domain-agnostic on purpose — this lives in `forge.core.lib`, not
+  `forge.music.lib`, because a multiple-choice question is about the
+  interaction shape, not the subject. Music, maths and prose questions
+  all use the same primitive.
+
+  `question` is accepted so the note's Recipe names the question in one
+  place, and so a future scored-quiz primitive can aggregate calls
+  without re-reading the Description. It is deliberately NOT echoed back
+  in the feedback: the cohort is looking at the question on screen, and
+  repeating it just pushes the verdict down.
+
+  Example: `mcq("...", ["major", "minor"], 0, 1, "See [[scale]].")`
+  → `"✗ Not quite. You picked 'minor'; the correct answer is 'major'.
+  See [[scale]]."`
+  """
+  opts = list(choices)
+  if len(opts) < 2:
+    raise ValueError(
+      f"mcq needs at least 2 choices to be a choice; got {len(opts)}"
+    )
+  for label, value in (("correct_index", correct_index), ("guess", guess)):
+    if isinstance(value, bool) or not isinstance(value, int):
+      raise ValueError(
+        f"mcq {label} must be an int index into choices, got {value!r}"
+      )
+    # Negative indices are rejected rather than honored (unlike `nth`):
+    # a negative answer index is a Recipe bug, and Python's wrap-around
+    # would silently mark a wrong answer correct.
+    if not 0 <= value < len(opts):
+      raise ValueError(
+        f"mcq {label}={value} is out of range for {len(opts)} choices "
+        f"(valid: 0..{len(opts) - 1})"
+      )
+
+  if guess == correct_index:
+    return f"✓ Correct — {opts[correct_index]}."
+  base = (
+    f"✗ Not quite. You picked {opts[guess]!r}; the correct answer is "
+    f"{opts[correct_index]!r}."
+  )
+  return f"{base} {explanation}" if explanation else base

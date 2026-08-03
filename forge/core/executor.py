@@ -140,6 +140,9 @@ try:
   _FORGE_CORE_LIB_NAMES = {
     "nth": _core_lib.nth,
     "pick_indices": _core_lib.pick_indices,
+    # Drain 2026-08-03-1125 — multiple-choice scoring. Core, not music:
+    # the primitive is about the interaction shape, not the subject.
+    "mcq": _core_lib.mcq,
   }
 except ImportError:
   _FORGE_CORE_LIB_NAMES = {}
