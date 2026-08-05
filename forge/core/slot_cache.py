@@ -88,7 +88,33 @@ def compute_english_hash(english_text):
       f"english_text must be str or None, got "
       f"{type(english_text).__name__}")
   # Trim trailing whitespace per line.
-  lines = [line.rstrip() for line in english_text.split("\n")]
+  #
+  # Drain 2026-08-05-1030 — `.rstrip()` alone is not what the TypeScript
+  # twin does. Both `english-hash-core.ts` and `description-hash-core.ts`
+  # strip with `/[\s\ufeff\xA0]+$/`, which names U+FEFF explicitly;
+  # Python does not treat U+FEFF as whitespace, so it survived here and
+  # the two languages produced different hashes for the same body.
+  #
+  # Measured pre-fix, 6 cases, 4 diverged:
+  #   "hello\ufeff"      TS 2cf24dba…  PY 459e1247…
+  #   "hello \ufeff "    TS 2cf24dba…  PY a7f8a6db…
+  #   "hello\ufeff\ufeff" TS 2cf24dba…  PY 4eca14ba…
+  #   "\ufeff"           TS e3b0c442…  PY f1945cd6…
+  #
+  # That is a shipped cache-key divergence: a body ending in a stray
+  # BOM — pasted from Word, a BOM-prefixed file, a web copy — misses the
+  # slot cache in one runtime and hits in the other. The existing parity
+  # test passed only because it never fed one.
+  #
+  # LEADING U+FEFF is deliberately NOT stripped; both sides already
+  # agreed there, and leading whitespace is content (indentation).
+  #
+  # rstrip → BOM → rstrip, because whitespace can sit on either side of
+  # the BOM ("hello \ufeff " needs all three passes).
+  lines = [
+    line.rstrip().rstrip("\ufeff").rstrip()
+    for line in english_text.split("\n")
+  ]
   # Strip leading + trailing fully-blank lines.
   while lines and lines[0] == "":
     lines.pop(0)
