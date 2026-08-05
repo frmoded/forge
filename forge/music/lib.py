@@ -2948,6 +2948,174 @@ def phase_shifter(*, cell, num_voices=4, bars_per_section=4,
   return score
 
 
+def melodic_line(pattern, pitches, tempo=120):
+  """A sequence of notes with per-element durations AND pitches.
+
+  CW-forge-music-lib-add-melodic-line-tier-1 (drain 2026-08-05-1100).
+  `rhythmic_line` with one more dimension: the same duration language,
+  plus a pitch for each element.
+
+  Parameters
+  ----------
+  pattern : sequence of float or str
+    Identical to `rhythmic_line` — quarter-note floats (negative for a
+    rest) or shorthand ("q", "e", "s", "h", "w", "dq", "de", plus the
+    "r"-suffixed rest forms). Shared parse, not a second copy, so the
+    two functions cannot drift apart.
+  pitches : sequence of str or int
+    One pitch per pattern element: a music21 name ("C4", "D#5", "Bb3")
+    or a MIDI number. Must be the SAME LENGTH as `pattern`.
+
+    For a rest element the pitch is ignored, but a placeholder is still
+    required. Positional correspondence is what makes the two lists
+    readable side by side, and letting rests be omitted would mean the
+    author counting elements to work out which pitch lands where.
+  tempo : int
+    Beats per minute (default 120).
+
+  Returns
+  -------
+  music21.stream.Stream
+
+  Examples
+  --------
+    `melodic_line([1.0, 1.0, 1.0, 1.0], ["C4", "D4", "E4", "F4"])`
+    `melodic_line(["q", "e", "e", "h"], ["C4", "D4", "E4", "F4"])`
+    `melodic_line(["q", "qr", "q"], ["C4", "C4", "G4"])`  rest in the middle
+    `melodic_line(["q", "q"], [60, 64])`                  MIDI numbers
+  """
+  _require_music21()
+
+  items = list(pattern)
+  pitch_list = list(pitches)
+
+  if not items:
+    raise ValueError(
+      "melodic_line: pattern is empty — pass at least one duration, "
+      'e.g. ["q", "q", "h"] or [1.0, 1.0, 2.0].'
+    )
+  if not pitch_list:
+    raise ValueError(
+      "melodic_line: pitches is empty — pass one pitch per pattern "
+      'element, e.g. ["C4", "D4", "E4"].'
+    )
+  if len(items) != len(pitch_list):
+    raise ValueError(
+      f"melodic_line: pattern has {len(items)} elements but pitches "
+      f"has {len(pitch_list)}. They correspond one-to-one, so they "
+      "must be the same length. Rests need a placeholder pitch — it is "
+      "ignored, but it keeps the two lists readable side by side."
+    )
+  if not isinstance(tempo, int) or isinstance(tempo, bool) or tempo <= 0:
+    raise ValueError(
+      f"melodic_line: tempo must be a positive integer (got {tempo!r})."
+    )
+
+  from music21 import tempo as _tempo
+
+  out = stream.Stream()
+  out.insert(0, _tempo.MetronomeMark(number=tempo))
+
+  for position, item in enumerate(items):
+    length, is_rest = _parse_duration_element(item, position, "melodic_line")
+    if is_rest:
+      out.append(note.Rest(quarterLength=length))
+      continue
+    out.append(
+      note.Note(
+        _coerce_pitch(pitch_list[position], position), quarterLength=length
+      )
+    )
+
+  return out
+
+
+def _coerce_pitch(value, position):
+  """One `pitches` element -> something `note.Note` accepts.
+
+  music21 raises its own exceptions for a bad name, and they name the
+  parser rather than the argument — `PitchException: Cannot make a step
+  out of 'H'` gives an author no clue which of their eight pitches was
+  wrong. This catches and re-raises with the position and the value.
+
+  Validated eagerly, one element at a time, so the error arrives before
+  a half-built stream does.
+  """
+  if isinstance(value, bool):
+    # bool is an int subclass, so `True` would otherwise be MIDI 1.
+    raise ValueError(
+      f"melodic_line: pitches[{position}] is {value!r} — expected a "
+      'note name like "C4" or a MIDI number.'
+    )
+  if isinstance(value, int):
+    if not 0 <= value <= 127:
+      raise ValueError(
+        f"melodic_line: pitches[{position}] is MIDI {value}, outside "
+        "0-127. Did you mean a note name, e.g. \"C4\"?"
+      )
+    return value
+  if not isinstance(value, str) or not value.strip():
+    raise ValueError(
+      f"melodic_line: pitches[{position}] is {value!r} — expected a "
+      'note name like "C4" or a MIDI number.'
+    )
+
+  name = value.strip()
+  try:
+    note.Note(name)
+  except Exception as exc:
+    raise ValueError(
+      f"melodic_line: pitches[{position}] is {value!r}, which music21 "
+      f"could not read as a pitch ({exc}). Use a letter A-G, an "
+      'optional accidental (# or b, or "-" for flat), and an octave '
+      'number — e.g. "C4", "D#5", "Bb3".'
+    ) from exc
+  return name
+
+
+def _parse_duration_element(item, position, caller):
+  """One `pattern` element -> `(quarter_length, is_rest)`.
+
+  CW-forge-music-lib-add-melodic-line-tier-1 (drain 2026-08-05-1100).
+  Extracted from `rhythmic_line` so `melodic_line` shares it rather than
+  copying it. The drain said not to duplicate `_RHYTHM_SHORTHAND`; the
+  dict was never the duplication risk — this parse is. Two copies would
+  drift the moment a duration is added to one and not the other, and the
+  divergence would be silent because both would still "work".
+
+  `caller` only shapes the error text, so a message names the function
+  the author actually called.
+  """
+  if isinstance(item, str):
+    key = item.strip().lower()
+    is_rest = key.endswith("r") and key[:-1] in _RHYTHM_SHORTHAND
+    lookup = key[:-1] if is_rest else key
+    if lookup not in _RHYTHM_SHORTHAND:
+      known = " ".join(sorted(_RHYTHM_SHORTHAND))
+      raise ValueError(
+        f"{caller}: unknown duration {item!r} at position "
+        f"{position}. Known: {known} (add 'r' for the rest form, "
+        "e.g. 'qr'), or pass a number of quarter-notes."
+      )
+    length = _RHYTHM_SHORTHAND[lookup]
+  elif isinstance(item, bool) or not isinstance(item, (int, float)):
+    raise ValueError(
+      f"{caller}: pattern[{position}] is {item!r} — expected a "
+      "number of quarter-notes or a shorthand string."
+    )
+  else:
+    is_rest = item < 0
+    length = abs(float(item))
+
+  if length == 0:
+    raise ValueError(
+      f"{caller}: pattern[{position}] has zero duration. A "
+      "zero-length note is silently dropped by notation software, "
+      "so it is rejected here instead."
+    )
+  return length, is_rest
+
+
 def rhythmic_line(
   pattern: Sequence[float | str],
   pitch: str | int = "C4",
@@ -3002,34 +3170,7 @@ def rhythmic_line(
   out.insert(0, _tempo.MetronomeMark(number=tempo))
 
   for position, item in enumerate(items):
-    if isinstance(item, str):
-      key = item.strip().lower()
-      is_rest = key.endswith("r") and key[:-1] in _RHYTHM_SHORTHAND
-      lookup = key[:-1] if is_rest else key
-      if lookup not in _RHYTHM_SHORTHAND:
-        known = " ".join(sorted(_RHYTHM_SHORTHAND))
-        raise ValueError(
-          f"rhythmic_line: unknown duration {item!r} at position "
-          f"{position}. Known: {known} (add 'r' for the rest form, "
-          "e.g. 'qr'), or pass a number of quarter-notes."
-        )
-      length = _RHYTHM_SHORTHAND[lookup]
-    elif isinstance(item, bool) or not isinstance(item, (int, float)):
-      raise ValueError(
-        f"rhythmic_line: pattern[{position}] is {item!r} — expected a "
-        "number of quarter-notes or a shorthand string."
-      )
-    else:
-      is_rest = item < 0
-      length = abs(float(item))
-
-    if length == 0:
-      raise ValueError(
-        f"rhythmic_line: pattern[{position}] has zero duration. A "
-        "zero-length note is silently dropped by notation software, "
-        "so it is rejected here instead."
-      )
-
+    length, is_rest = _parse_duration_element(item, position, "rhythmic_line")
     out.append(
       note.Rest(quarterLength=length) if is_rest
       else note.Note(pitch, quarterLength=length)

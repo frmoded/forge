@@ -48,6 +48,7 @@ try:
     "diatonic_scale": _music_lib.diatonic_scale,
     # CW-forge-music-lib-add-rhythmic-line-tier-1 (drain
     # 2026-08-05-0730) — first Tier-1 composition primitive.
+    "melodic_line": _music_lib.melodic_line,
     "rhythmic_line": _music_lib.rhythmic_line,
     "with_velocity": _music_lib.with_velocity,
     "closed_hihat": _music_lib.closed_hihat,
@@ -165,6 +166,7 @@ _MUSIC_LAZY_CHIP_NAMES = (
   # 7-note diatonic scale with octave-anchored pitch names, mirroring
   # music21's MajorScale / MinorScale contract.
   "diatonic_scale",
+  "melodic_line",
   "rhythmic_line",
   "with_velocity",
   "closed_hihat", "open_hihat", "pedal_hihat",
