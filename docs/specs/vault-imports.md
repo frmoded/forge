@@ -40,6 +40,31 @@ music-core = { git = "https://github.com/frmoded/music-core.git", sha = "abc1234
 | `tag` | no | Human-readable hint, e.g. `v0.3.0`. **Not authoritative** — on any disagreement the SHA wins. |
 | `local` | no | Path to a local checkout. Developer override; wins over `git`+`sha` when present. |
 
+### `local` alone is valid (amended by Phase 2, drain 2026-08-05-0710)
+
+As first written, `git` and `sha` were required and `local` was a
+developer override layered on top. Implementing Phase 2 showed that does
+not work for the phase it was written for: there is no remote for
+music-core yet, so a local-only import would have to name a git URL that
+does not exist and a SHA that means nothing, purely to satisfy a
+validator.
+
+So: **`local` alone is a complete declaration.** `git` and `sha` remain
+required when `local` is absent. The reproducibility argument for
+pinning is untouched — it simply does not apply to an import you are
+pointing at a directory on your own disk.
+
+```toml
+[imports]
+music-core = { local = "../music-core" }              # valid
+music-core = { git = "...", sha = "abc12345" }        # valid
+music-core = { git = "...", sha = "...", local = "../music-core" }  # valid; local wins
+```
+
+Relative `local` paths resolve against the **importing vault's**
+directory, not the process working directory, so a manifest means the
+same thing wherever the server runs from.
+
 ### Placement matters
 
 `forge.toml` is currently a flat file — `name`, `version`,
