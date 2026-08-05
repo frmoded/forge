@@ -46,6 +46,9 @@ try:
     # major/minor scale via music21 scale.MajorScale/MinorScale, so
     # authoring doesn't fall back to a `{{ music21.scale.… }}` slot.
     "diatonic_scale": _music_lib.diatonic_scale,
+    # CW-forge-music-lib-add-rhythmic-line-tier-1 (drain
+    # 2026-08-05-0730) — first Tier-1 composition primitive.
+    "rhythmic_line": _music_lib.rhythmic_line,
     "with_velocity": _music_lib.with_velocity,
     "closed_hihat": _music_lib.closed_hihat,
     "open_hihat": _music_lib.open_hihat,
@@ -162,6 +165,7 @@ _MUSIC_LAZY_CHIP_NAMES = (
   # 7-note diatonic scale with octave-anchored pitch names, mirroring
   # music21's MajorScale / MinorScale contract.
   "diatonic_scale",
+  "rhythmic_line",
   "with_velocity",
   "closed_hihat", "open_hihat", "pedal_hihat",
   "low_tom", "mid_tom", "high_tom",

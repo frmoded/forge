@@ -13,6 +13,7 @@ building block, not a finished artifact.
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 from typing import Union
 
 # v0.2.171 — split the multi-name music21 import so a single missing
@@ -99,6 +100,23 @@ import random as _random
 # the executor's standard error propagation per Diagnostics-in-primary-
 # surface HARD RULE (no console.warn, no Notice toast — the message
 # IS the load-bearing signal).
+# CW-forge-music-lib-add-rhythmic-line-tier-1 (drain 2026-08-05-0730).
+# Shorthand duration names, in quarter-note units. A dict rather than a
+# parser so adding a name is a one-line edit and every accepted spelling
+# is visible in one place. Rest spellings are the note spelling plus
+# "r" — the suffix is generated below rather than listed, so a new
+# duration cannot ship with its rest form accidentally missing.
+_RHYTHM_SHORTHAND: dict[str, float] = {
+  "w": 4.0,    # whole
+  "h": 2.0,    # half
+  "q": 1.0,    # quarter
+  "e": 0.5,    # eighth
+  "s": 0.25,   # sixteenth
+  "dq": 1.5,   # dotted quarter
+  "de": 0.75,  # dotted eighth
+}
+
+
 def _require_music21():
   """Raise a friendly RuntimeError if music21 sentinels are None.
 
@@ -2928,3 +2946,93 @@ def phase_shifter(*, cell, num_voices=4, bars_per_section=4,
       with_velocity(all_notes_in_part, velocity_profile)
     score.insert(0, part)
   return score
+
+
+def rhythmic_line(
+  pattern: Sequence[float | str],
+  pitch: str | int = "C4",
+  tempo: int = 120,
+):
+  """Build a rhythmic line — one pitch, a sequence of durations.
+
+  CW-forge-music-lib-add-rhythmic-line-tier-1 (drain 2026-08-05-0730).
+  First Tier-1 composition primitive: rhythm without melody, so a
+  cohort author can shape a groove before choosing any notes.
+
+  Contract:
+    - `pattern` elements are durations in quarter-notes. `1.0` is a
+      quarter, `0.5` an eighth, `2.0` a half, `4.0` a whole.
+    - A NEGATIVE float is a rest of that length: `-1.0` is a quarter
+      rest. Sign carries rest-ness so a computed pattern can flip a
+      note to a rest arithmetically, without switching to strings.
+    - Shorthand strings: `w h q e s dq de` (see `_RHYTHM_SHORTHAND`),
+      plus an `r` suffix for the rest form — `"qr"` is a quarter rest.
+    - `pitch` is one pitch used for every note; music21 accepts both
+      names (`"C4"`) and MIDI numbers (`60`).
+    - `tempo` is BPM, inserted as a MetronomeMark at offset 0.
+
+  Raises ValueError on an empty pattern, an unknown shorthand, a
+  zero-length duration, a non-numeric non-string element, or a
+  non-positive tempo. Silence is the wrong failure here: a typo'd
+  duration that quietly became a default would change the music
+  without saying so.
+
+  Examples:
+    `rhythmic_line([1.0, 1.0, 2.0])`      quarter, quarter, half
+    `rhythmic_line(["q", "e", "e", "h"])` the same idea, shorthand
+    `rhythmic_line(["q", "qr", "q"])`     with a quarter rest
+    `rhythmic_line(["q"] * 4, pitch="D4")`
+  """
+  _require_music21()
+
+  items = list(pattern)
+  if not items:
+    raise ValueError(
+      "rhythmic_line: pattern is empty — pass at least one duration, "
+      'e.g. ["q", "q", "h"] or [1.0, 1.0, 2.0].'
+    )
+  if not isinstance(tempo, int) or isinstance(tempo, bool) or tempo <= 0:
+    raise ValueError(
+      f"rhythmic_line: tempo must be a positive integer (got {tempo!r})."
+    )
+
+  from music21 import tempo as _tempo
+
+  out = stream.Stream()
+  out.insert(0, _tempo.MetronomeMark(number=tempo))
+
+  for position, item in enumerate(items):
+    if isinstance(item, str):
+      key = item.strip().lower()
+      is_rest = key.endswith("r") and key[:-1] in _RHYTHM_SHORTHAND
+      lookup = key[:-1] if is_rest else key
+      if lookup not in _RHYTHM_SHORTHAND:
+        known = " ".join(sorted(_RHYTHM_SHORTHAND))
+        raise ValueError(
+          f"rhythmic_line: unknown duration {item!r} at position "
+          f"{position}. Known: {known} (add 'r' for the rest form, "
+          "e.g. 'qr'), or pass a number of quarter-notes."
+        )
+      length = _RHYTHM_SHORTHAND[lookup]
+    elif isinstance(item, bool) or not isinstance(item, (int, float)):
+      raise ValueError(
+        f"rhythmic_line: pattern[{position}] is {item!r} — expected a "
+        "number of quarter-notes or a shorthand string."
+      )
+    else:
+      is_rest = item < 0
+      length = abs(float(item))
+
+    if length == 0:
+      raise ValueError(
+        f"rhythmic_line: pattern[{position}] has zero duration. A "
+        "zero-length note is silently dropped by notation software, "
+        "so it is rejected here instead."
+      )
+
+    out.append(
+      note.Rest(quarterLength=length) if is_rest
+      else note.Note(pitch, quarterLength=length)
+    )
+
+  return out
