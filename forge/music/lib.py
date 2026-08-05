@@ -13,6 +13,8 @@ building block, not a finished artifact.
 from __future__ import annotations
 
 import copy
+import json
+import re
 from collections.abc import Sequence
 from typing import Union
 
@@ -646,6 +648,203 @@ def diatonic_scale(
     )
   pitches = s.getPitches(f"{tonic}{start_oct}", f"{tonic}{end_oct}")
   return [p.nameWithOctave for p in pitches]
+
+
+# CW-forge-music-lib-add-scale-construction-exercise-plus-first-fixtures
+# (drain 2026-08-05-1730) — first cohort exercise-grading primitive.
+#
+# The sharps-only pitch-class vocabulary the piano input widget emits
+# (input-widget-piano.ts PC_NAMES). Spellings in this set are always
+# accepted when the key is right: the widget physically cannot emit
+# flats, so a correct F major attempt arrives as A#3 where the
+# canonical spelling is Bb3. Spellings OUTSIDE this vocabulary (Gb4,
+# E#4 — only possible via typed input) are flagged as
+# right-key-wrong-spelling.
+_WIDGET_PC_NAMES = frozenset(
+  ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+)
+
+_TONIC_RE = re.compile(r"^([A-Ga-g](?:#|b|-)?)(\d+)?$")
+
+
+def _display_pitch(name: str) -> str:
+  """music21 `B-3` → cohort-facing `Bb3`."""
+  return name.replace("-", "b")
+
+
+def _coerce_student_pitches(student_pitches) -> list[str]:
+  """Widget output arrives as a JSON list string; direct Recipe calls
+  may pass a real list or a comma-separated string. Accept all three."""
+  if isinstance(student_pitches, (list, tuple)):
+    return [str(p).strip() for p in student_pitches if str(p).strip()]
+  if isinstance(student_pitches, str):
+    raw = student_pitches.strip()
+    if not raw:
+      return []
+    try:
+      parsed = json.loads(raw)
+    except ValueError:
+      parsed = raw.split(",")
+    if not isinstance(parsed, list):
+      parsed = [parsed]
+    return [str(p).strip() for p in parsed if str(p).strip()]
+  raise ValueError(
+    "student_pitches must be a list of pitch names or a JSON/"
+    f"comma-separated string; got {type(student_pitches).__name__}"
+  )
+
+
+def _mcq_wrong(played: str, expected: str, diagnosis: str) -> str:
+  """The exact ✗ frame mcq-widget-core.ts's WRONG_RE requires. Any
+  drift from `✗ Not quite. You picked '<X>'; the correct answer is
+  '<Y>'.` and the Forge Output panel renders plain text, not a card."""
+  return (
+    f"✗ Not quite. You picked '{played}'; the correct answer is "
+    f"'{expected}'. {diagnosis} See [[diatonic_scale]]."
+  )
+
+
+def scale_construction_exercise(
+  tonic: str,
+  mode: str,
+  student_pitches: Union[list[str], str],
+  widget_type: str = "piano",
+) -> str:
+  """Grade a scale-construction attempt and return MCQ-shaped feedback.
+
+  Contract:
+    - `tonic` is a pitch class with optional octave — `"C"`, `"G3"`,
+      `"Bb3"`, `"F#4"`. A bare pitch class defaults to octave 4. The
+      octave matters: grading is octave-sensitive, so exercise notes
+      should name it in their Description ("C4 to B4").
+    - `mode` accepts `"major"` or `"minor"` (natural), per
+      `diatonic_scale`, which computes the canonical answer.
+    - `student_pitches` is the attempt: a list of pitch names with
+      octaves, or the piano widget's serialized form (a JSON list
+      string). NOTE: the piano widget serializes its selection in
+      ascending pitch order regardless of click order, so from the
+      widget the wrong-order branch cannot fire; it exists for typed
+      or programmatic input.
+    - `widget_type` is reserved for widget-specific feedback wording;
+      Tier-1 wording is widget-agnostic.
+
+  Output is one of two shapes the plugin's MCQ display widget parses
+  into a card (mcq-widget-core.ts):
+    - `✓ Correct — <tonic> <mode> scale.` (single line, nothing after)
+    - `✗ Not quite. You picked '<played>'; the correct answer is
+      '<expected>'. <diagnosis> See [[diatonic_scale]].`
+  where <diagnosis> distinguishes wrong pitches (missing/extra), right
+  pitches in the wrong order, an incomplete attempt (`N of 7 notes`),
+  and right-key-wrong-spelling.
+
+  Enharmonic policy (see _WIDGET_PC_NAMES): a spelling the piano
+  widget can emit is accepted whenever the key is right (A#3 for Bb3
+  in F major grades ✓); spellings outside the widget vocabulary that
+  differ from the canonical answer (Gb4 for F#4 in G major) are
+  right-key-wrong-spelling.
+
+  Raises ValueError on an unrecognizable tonic, mode, or student
+  pitch name. Audio feedback is deliberately absent in Tier 1: the
+  engine exports no music21→MP3 path (the render pipeline lives on
+  forge-transpile, unreachable from pyodide) — a follow-up drain owns
+  auditory feedback.
+  """
+  _require_music21()
+
+  m = _TONIC_RE.match(str(tonic).strip())
+  if not m:
+    raise ValueError(
+      "tonic must be a pitch class with optional octave "
+      f"(e.g. 'C', 'G3', 'Bb3'); got {tonic!r}"
+    )
+  pc = m.group(1)
+  pc = pc[0].upper() + pc[1:]
+  octave = int(m.group(2)) if m.group(2) else 4
+
+  # diatonic_scale validates mode and returns tonic→tonic inclusive
+  # (8 names); the exercise asks tonic→seventh, so drop the upper
+  # octave tonic.
+  canonical = diatonic_scale(pc, mode, octave_range=[octave, octave + 1])[:-1]
+  canon_pitches = [pitch.Pitch(n) for n in canonical]
+  canon_midis = [p.midi for p in canon_pitches]
+  total = len(canonical)
+
+  student_names = _coerce_student_pitches(student_pitches)
+  student = []
+  for i, name in enumerate(student_names, 1):
+    try:
+      p = pitch.Pitch(name)
+    except Exception:
+      raise ValueError(
+        f"student_pitches[{i}] is not a pitch name "
+        f"(like 'C4' or 'A#3'): {name!r}"
+      )
+    if p.octave is None:
+      raise ValueError(
+        f"student_pitches[{i}] needs an octave (like 'C4'); got {name!r}"
+      )
+    student.append(p)
+  student_midis = [p.midi for p in student]
+  n = len(student)
+
+  played = ", ".join(_display_pitch(p.nameWithOctave) for p in student)
+  expected = ", ".join(_display_pitch(name) for name in canonical)
+  headline = f"{_display_pitch(pitch.Pitch(pc).name)} {mode}"
+
+  def _unmatched(pool_midis, candidates, names):
+    """Names from `candidates` whose midi finds no partner left in
+    `pool_midis` (multiset-aware)."""
+    remaining = list(pool_midis)
+    out = []
+    for p, name in zip(candidates, names):
+      if p.midi in remaining:
+        remaining.remove(p.midi)
+      else:
+        out.append(_display_pitch(name))
+    return out
+
+  if n < total:
+    missing = _unmatched(student_midis, canon_pitches, canonical)
+    return _mcq_wrong(
+      played, expected,
+      f"Incomplete — {n} of {total} notes. Missing: {', '.join(missing)}.",
+    )
+
+  student_disp_names = [p.nameWithOctave for p in student]
+  if n > total:
+    extra = _unmatched(canon_midis, student, student_disp_names)
+    return _mcq_wrong(
+      played, expected,
+      f"A {mode} scale has {total} notes; you selected {n}. "
+      f"Extra: {', '.join(extra)}.",
+    )
+
+  if student_midis == canon_midis:
+    for sp, cname in zip(student, canonical):
+      if sp.nameWithOctave == cname or sp.name in _WIDGET_PC_NAMES:
+        continue
+      return _mcq_wrong(
+        played, expected,
+        f"Right key, wrong spelling — in {headline}, that note is "
+        f"written {_display_pitch(cname)}, "
+        f"not {_display_pitch(sp.nameWithOctave)}.",
+      )
+    return f"✓ Correct — {headline} scale."
+
+  if sorted(student_midis) == sorted(canon_midis):
+    return _mcq_wrong(
+      played, expected,
+      "Right pitches, wrong order — play them ascending from the tonic.",
+    )
+
+  missing = _unmatched(student_midis, canon_pitches, canonical)
+  extra = _unmatched(canon_midis, student, student_disp_names)
+  parts = []
+  if missing:
+    parts.append(f"Missing: {', '.join(missing)}.")
+  if extra:
+    parts.append(f"Extra: {', '.join(extra)}.")
+  return _mcq_wrong(played, expected, " ".join(parts))
 
 
 # v0.3.6 — velocity helper for percussion + any rhythmic content. The
