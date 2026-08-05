@@ -37,7 +37,14 @@ from forge.recipe import parser
 
 VAULT = pathlib.Path(__file__).resolve().parents[3] / "forge-music"
 
-DEMOS = ["exercises/rhythmic_line_demo.md", "exercises/melodic_line_demo.md"]
+DEMOS = [
+  "exercises/rhythmic_line_demo.md",
+  "exercises/melodic_line_demo.md",
+  # Drain 2026-08-05-1800 — chord_stream. Its prompt sketched the same
+  # bare multi-line dict that broke drain 0730; the shipped fixture
+  # uses the slot-wrapped idiom this file exists to enforce.
+  "exercises/chord_stream_demo.md",
+]
 
 
 def recipe_of(path):

@@ -847,6 +847,118 @@ def scale_construction_exercise(
   return _mcq_wrong(played, expected, " ".join(parts))
 
 
+def chord_stream(chords, tempo=120, durations=None):
+  """A sequence of chords rendered as a stream, one after another.
+
+  CW-forge-music-lib-add-chord-stream-tier-1 (drain 2026-08-05-1800).
+  Third Tier-1 composition primitive after `rhythmic_line` and
+  `melodic_line` — the harmonic sibling: where melodic_line places one
+  pitch per duration, chord_stream places one CHORD per duration.
+
+  Parameters
+  ----------
+  chords : sequence
+    Each element is one chord, in any of three shapes:
+    - a list of pitch names or MIDI numbers, e.g. ["C4", "E4", "G4"]
+      or [60, 64, 67] — the common fixture/widget form;
+    - a chord-symbol string, e.g. "Cmaj7" or "G7" (parsed via
+      music21.harmony.ChordSymbol);
+    - a pre-constructed music21.chord.Chord (copied, not mutated).
+    Shapes can be mixed within one call.
+  tempo : int
+    Beats per minute (default 120). MetronomeMark inserted at offset 0,
+    same contract as rhythmic_line / melodic_line.
+  durations : sequence of float, optional
+    Per-chord length in quarter notes; must match `chords` in length.
+    None (default) gives every chord 4.0 quarter notes — one whole
+    note each. Timing is sequential: each chord starts where the
+    prior one ended.
+
+  Returns
+  -------
+  music21.stream.Stream
+
+  Examples
+  --------
+    `chord_stream([["C4","E4","G4"], ["F4","A4","C5"], ["G4","B4","D5"], ["C4","E4","G4"]])`
+    `chord_stream(["Cmaj7", "Dm7", "G7", "Cmaj7"], durations=[2.0, 2.0, 2.0, 4.0])`
+
+  Voice-leading, inversions beyond what the input spells, and
+  non-uniform rhythm styling are Tier 2 — this renders exactly the
+  chords it is given.
+  """
+  _require_music21()
+  if chord is None or harmony is None:
+    raise RuntimeError(
+      "music21.chord/harmony are unavailable in this environment; "
+      "chord_stream requires the full music21 install."
+    )
+
+  items = list(chords)
+  if not items:
+    raise ValueError(
+      "chord_stream: chords is empty — pass at least one chord, "
+      'e.g. [["C4", "E4", "G4"]] or ["Cmaj7"].'
+    )
+  if not isinstance(tempo, int) or isinstance(tempo, bool) or tempo <= 0:
+    raise ValueError(
+      f"chord_stream: tempo must be a positive integer (got {tempo!r})."
+    )
+  if durations is None:
+    durs = [4.0] * len(items)
+  else:
+    durs = [float(d) for d in durations]
+    if len(durs) != len(items):
+      raise ValueError(
+        f"chord_stream: durations has {len(durs)} elements but chords "
+        f"has {len(items)}. They correspond one-to-one, so they must "
+        "be the same length."
+      )
+    bad = [d for d in durs if d <= 0]
+    if bad:
+      raise ValueError(
+        f"chord_stream: durations must all be positive quarter-note "
+        f"lengths (got {bad[0]!r})."
+      )
+
+  from music21 import tempo as _tempo
+
+  out = stream.Stream()
+  out.insert(0, _tempo.MetronomeMark(number=tempo))
+
+  for position, (spec, dur) in enumerate(zip(items, durs)):
+    if isinstance(spec, chord.Chord):
+      c = copy.deepcopy(spec)
+    elif isinstance(spec, str):
+      try:
+        c = harmony.ChordSymbol(spec)
+      except Exception as exc:
+        raise ValueError(
+          f"chords[{position}] is not a recognized chord symbol: "
+          f"{spec!r} ({exc})"
+        )
+    elif isinstance(spec, (list, tuple)):
+      try:
+        c = chord.Chord(list(spec))
+      except Exception as exc:
+        raise ValueError(
+          f"chords[{position}] contains an unrecognized pitch: "
+          f"{spec!r} ({exc})"
+        )
+    else:
+      raise ValueError(
+        f"chords[{position}] must be a pitch list, a chord-symbol "
+        f"string, or a music21 Chord; got {type(spec).__name__}."
+      )
+    if not c.pitches:
+      raise ValueError(
+        f"chords[{position}] produced no pitches: {spec!r}."
+      )
+    c.quarterLength = dur
+    out.append(c)
+  return out
+
+
 # v0.3.6 — velocity helper for percussion + any rhythmic content. The
 # 5 named profiles cover the common dynamic shapes; int and list[int]
 # patterns cover the deterministic cases. Default music21 velocity is

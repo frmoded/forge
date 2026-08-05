@@ -57,6 +57,10 @@ try:
     # fixtures (drain 2026-08-05-1730) — first exercise-grading
     # primitive; MCQ-shaped feedback over diatonic_scale's answer key.
     "scale_construction_exercise": _music_lib.scale_construction_exercise,
+    # CW-forge-music-lib-add-chord-stream-tier-1 (drain
+    # 2026-08-05-1800) — third Tier-1 composition primitive; the
+    # harmonic sibling of melodic_line.
+    "chord_stream": _music_lib.chord_stream,
     "with_velocity": _music_lib.with_velocity,
     "closed_hihat": _music_lib.closed_hihat,
     "open_hihat": _music_lib.open_hihat,
@@ -177,6 +181,8 @@ _MUSIC_LAZY_CHIP_NAMES = (
   "rhythmic_line",
   # Drain 2026-08-05-1730 — scale-construction exercise grading.
   "scale_construction_exercise",
+  # Drain 2026-08-05-1800 — chord sequence renderer.
+  "chord_stream",
   "with_velocity",
   "closed_hihat", "open_hihat", "pedal_hihat",
   "low_tom", "mid_tom", "high_tom",
