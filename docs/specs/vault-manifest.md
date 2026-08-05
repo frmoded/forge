@@ -61,6 +61,23 @@ references (per ADR 0002).
     version = "0.1.0"
     description = "Forge bootstrap demo vault."
 
+## Optional section: `[imports]`
+
+A vault may declare other vaults whose notes its Recipes can reference.
+The schema, resolution order, and collision policy are specified
+separately in [vault-imports.md](vault-imports.md) — it is large enough
+to warrant its own document, and forge-mcp, forge-transpile and
+forge-client-obsidian all target it.
+
+Spec only as of drain `2026-08-03-1500`; nothing reads `[imports]` yet.
+
+One constraint belongs here rather than there, because it is a property
+of this file's shape: every other field in `forge.toml` is a top-level
+key, and in TOML every key following a `[table]` header belongs to that
+table. **`[imports]` must be the last section in the file.** Above the
+flat keys it silently reparents them, producing a manifest with no
+`name` instead of an error.
+
 ## Validation
 Forge validates manifests at:
 - Vault load — any failure aborts loading that vault and surfaces a

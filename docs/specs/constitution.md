@@ -127,6 +127,23 @@ naming as `forge-runtime` code identifiers.
     bundled, in-process inside its host client. Executes compiled
     Python. Offline-safe. See Components.
 
+**Vault import** — a declaration in one vault's `forge.toml` that its
+Recipes may reference notes belonging to another vault. Imports are how
+a shared primitive lives in one place instead of being copied into every
+vault that needs it. Spec: `docs/specs/vault-imports.md`. Declared but
+not yet implemented as of drain `2026-08-03-1500`.
+
+**Import pin** — the exact git SHA an import is fixed to. A vault that
+imports another is reproducible only if it names a commit rather than a
+branch; the pin is what makes "this vault built correctly" a durable
+statement rather than a claim about the day it was built. A `tag` may
+accompany a pin as a readability hint, but the SHA is authoritative.
+
+**Import namespace** — the `[[import-name:note-id]]` form, naming which
+vault a wikilink refers to. `[[local:note-id]]` names the containing
+vault. The bare `[[note-id]]` form resolves by search order and errors
+rather than guessing when two vaults both answer.
+
 ## Purpose
 
 Forge is a research environment for AI-augmented creative work. Humans
