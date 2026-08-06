@@ -44,6 +44,9 @@ DEMOS = [
   # bare multi-line dict that broke drain 0730; the shipped fixture
   # uses the slot-wrapped idiom this file exists to enforce.
   "exercises/chord_stream_demo.md",
+  # Drain 2026-08-05-2330 — play_pitches widget hear-back fixtures.
+  "exercises/piano_play_smoke.md",
+  "exercises/guitar_play_smoke.md",
 ]
 
 

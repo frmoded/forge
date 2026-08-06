@@ -61,6 +61,10 @@ try:
     # 2026-08-05-1800) — third Tier-1 composition primitive; the
     # harmonic sibling of melodic_line.
     "chord_stream": _music_lib.chord_stream,
+    # CW-forge-music-lib-add-play-pitches-primitive (drain
+    # 2026-08-05-2330) — widget hear-back: uniform quarter notes over
+    # a pitch list, delegating to melodic_line.
+    "play_pitches": _music_lib.play_pitches,
     "with_velocity": _music_lib.with_velocity,
     "closed_hihat": _music_lib.closed_hihat,
     "open_hihat": _music_lib.open_hihat,
@@ -183,6 +187,8 @@ _MUSIC_LAZY_CHIP_NAMES = (
   "scale_construction_exercise",
   # Drain 2026-08-05-1800 — chord sequence renderer.
   "chord_stream",
+  # Drain 2026-08-05-2330 — widget hear-back primitive.
+  "play_pitches",
   "with_velocity",
   "closed_hihat", "open_hihat", "pedal_hihat",
   "low_tom", "mid_tom", "high_tom",

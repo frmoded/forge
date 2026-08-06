@@ -3488,3 +3488,44 @@ def rhythmic_line(
     )
 
   return out
+
+
+def play_pitches(pitches, tempo=100):
+  """Hear a list of pitches back as uniform quarter notes.
+
+  CW-forge-music-lib-add-play-pitches-primitive (drain
+  2026-08-05-2330). The widget arc's hear-it primitive: the piano /
+  guitar_fretboard widgets produce a pitch-name list; the Recipe line
+  'Return Call [[play_pitches]] with pitches=notes.' turns that list
+  into a playable stream instead of an echoed list.
+
+  Parameters
+  ----------
+  pitches : sequence of str, or str
+    Pitch names ("C4", "E4", "G4"). Widgets serialize the selection
+    as a JSON list string; direct Recipe calls may pass a real list
+    or a comma-separated string. All three accepted (same coercion
+    as scale_construction_exercise).
+  tempo : int
+    Beats per minute (default 100 — a moderate hear-your-selection
+    pace, deliberately calmer than the composition primitives' 120).
+
+  Returns
+  -------
+  music21.stream.Stream, or str
+    The playable stream (uniform quarter notes, MetronomeMark at
+    offset 0 — same contract as melodic_line, which this delegates
+    to). An empty selection returns the string "(No notes to play)"
+    instead of an empty stream.
+
+  Examples
+  --------
+    `play_pitches(["C4", "E4", "G4"])`
+    `play_pitches('["C4", "E4", "G4"]')`   widget-serialized form
+    `play_pitches(["C4", "D4"], tempo=140)`
+  """
+  _require_music21()
+  pitch_list = _coerce_student_pitches(pitches)
+  if not pitch_list:
+    return "(No notes to play)"
+  return melodic_line(["q"] * len(pitch_list), pitch_list, tempo=tempo)
