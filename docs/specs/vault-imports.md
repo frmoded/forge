@@ -155,6 +155,27 @@ An import named `local` is rejected at validation time; it would make
 `[[local:x]]` ambiguous, which is the one thing this syntax exists to
 prevent.
 
+## Read surface: `source_vault` on note listings (Phase 3 3d)
+
+`forge_read_notes_in_vault` exposes the import graph to callers
+(wizard, plugin Phase 4): every note entry carries
+`source_vault` — the calling vault's name for local notes, the
+`[imports]` declaration NAME for imported notes. Always the declared
+name, never the on-disk path: names are the stable identity a caller
+can echo back into `[[import-name:note-id]]`; paths are one machine's
+layout.
+
+Ordering is local notes first, then each import's notes in
+`[imports]` declaration order — the same order the bare-name search
+consults.
+
+Each entry also carries `collides_with`: the other sources in the
+listing that define a note with the same bare name (the unit bare
+wikilinks resolve by). This is informational, not an error — the
+listing shows every shadow relationship so a caller can disambiguate
+BEFORE writing the reference, complementing the resolver's
+collision-time error above.
+
 ## Open questions for phase 2
 
 - **Where does the fetched import live on disk?** A shared cache
