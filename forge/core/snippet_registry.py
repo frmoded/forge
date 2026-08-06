@@ -2,6 +2,8 @@ import os
 from typing import Optional
 import yaml
 
+from forge.core.exceptions import AmbiguousSnippetResolutionError
+
 AUTHORING_VAULT = "authoring"
 BUILTIN_VAULT = "forge"
 _MANIFEST_FILENAME = "forge.toml"
@@ -49,6 +51,12 @@ class SnippetRegistry:
     self._vaults: dict = {}
     self._order: list = [AUTHORING_VAULT, BUILTIN_VAULT]
     self.errors: list = []
+    # [CW-2200] vault_name -> bare_id -> {abs_path: vault_rel_path}.
+    # Records same-vault basename collisions detected at index time so
+    # get_bare can refuse to guess between twins. Only basename-keyed
+    # (authoring) indexing ever writes here; library vaults use
+    # sub-path keys and cannot collide this way.
+    self._collisions: dict = {}
 
   def scan(self, vault_path, vault_name: str = AUTHORING_VAULT, source: str = "authoring"):
     """Scan a filesystem vault.
@@ -59,6 +67,10 @@ class SnippetRegistry:
     """
     self.errors = []
     self._vaults[vault_name] = {}
+    # [CW-2200] collision state is derived from disk; a fresh scan of
+    # the vault re-derives it (rename/delete of a twin clears the
+    # ambiguity on the next scan).
+    self._collisions[vault_name] = {}
     vault_path = os.fspath(vault_path)
 
     library_dirs = self._detect_library_vaults(vault_path)
@@ -231,8 +243,35 @@ class SnippetRegistry:
     For qualifier paths that need to find a snippet by basename
     regardless of resolution-order membership (e.g. freeze on a
     library wikilink whose parent library isn't a declared
-    dependency of the authoring vault), see `find_qualified_by_bare`."""
+    dependency of the authoring vault), see `find_qualified_by_bare`.
+
+    [CW-2200] Raises AmbiguousSnippetResolutionError when `bare_id`
+    collided inside a single vault at index time (two same-basename
+    files fighting over one key). Pre-fix the scan-order winner ran
+    silently while the twin — possibly the note the user actually
+    clicked — was shadowed. Cross-VAULT shadowing (authoring over
+    library, A4 walking order) is intentional and never raises.
+    Liveness check: twins whose file no longer exists are dropped, so
+    deleting one resolves the ambiguity without a rescan."""
     for vault_name in self._order:
+      collided = self._collisions.get(vault_name, {}).get(bare_id)
+      if collided:
+        live = {ap: rp for ap, rp in collided.items() if os.path.isfile(ap)}
+        if len(live) != len(collided):
+          if len(live) >= 2:
+            self._collisions[vault_name][bare_id] = live
+          else:
+            del self._collisions[vault_name][bare_id]
+            collided = None
+        if collided and len(live) >= 2:
+          paths = sorted(live.values())
+          raise AmbiguousSnippetResolutionError(
+            bare_id, paths,
+            message=(
+              f"Two or more notes in vault '{vault_name}' share the "
+              f"basename '{bare_id}': {', '.join(paths)}. Forge cannot "
+              f"tell which one you mean. Rename one to disambiguate."
+            ))
       hit = self._vaults.get(vault_name, {}).get(bare_id)
       if hit is not None:
         return hit
@@ -491,6 +530,15 @@ class SnippetRegistry:
         if existing is not None and (
           os.path.abspath(existing.get("path", "")) != os.path.abspath(filepath)
         ):
+          # [CW-2200] record the collision so get_bare refuses to
+          # guess between the twins instead of silently running the
+          # scan-order winner. Keyed abs -> vault-relative for the
+          # error message; liveness-checked at lookup time.
+          record = self._collisions.setdefault(vault_name, {}).setdefault(
+            bare_id, {})
+          for p in (existing.get("path", ""), filepath):
+            record[os.path.abspath(p)] = os.path.relpath(
+              p, vault_path).replace(os.sep, "/")
           dedup_key = (vault_name, bare_id)
           if dedup_key not in _collision_warning_set:
             _collision_warning_set.add(dedup_key)

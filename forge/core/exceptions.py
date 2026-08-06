@@ -27,11 +27,11 @@ class AmbiguousSnippetResolutionError(Exception):
   can show every match explicitly.
   """
 
-  def __init__(self, reference: str, candidates: list):
+  def __init__(self, reference: str, candidates: list, message: str = None):
     self.reference = reference
     # Stored sorted for deterministic error messages and test stability.
     self.candidates = sorted(candidates)
-    super().__init__(self._format_message())
+    super().__init__(message or self._format_message())
 
   def _format_message(self) -> str:
     pretty = ", ".join(self.candidates)
