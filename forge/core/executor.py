@@ -1155,13 +1155,21 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
   # name (input precedence per the canonical-form composition design).
   local_ns = {
     **_build_snippet_shims(context, registry),
-    **inputs,
     "inputs": inputs,
-    "__builtins__": builtins.__dict__,
     "random": random,
     "math": math,
     "numpy": numpy,
     **_domain_globals_for(domains),
+    # Inputs spread LAST: the canonical-form contract is input
+    # precedence — a declared input named `chord` (or `note`, `key`,
+    # `tempo`, any of the ~75 injected bundle names) must shadow the
+    # injected global, never the reverse. Drain 2026-08-06-1230 (d):
+    # chord_builder_smoke's `chord` input arrived at compute as the
+    # music21.chord MODULE and the output panel rendered nothing.
+    **inputs,
+    # __builtins__ stays unconditional — exec() needs it even if a
+    # pathological input tries to claim the name.
+    "__builtins__": builtins.__dict__,
   }
   old_stdout = sys.stdout
   sys.stdout = buf
