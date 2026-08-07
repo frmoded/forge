@@ -222,6 +222,14 @@ def test_scale_fixture_recipe_parses(rel):
   path = VAULT / rel
   if not VAULT.exists():
     pytest.skip("forge-music not checked out beside forge")
+  if rel.endswith("scale_construction_c_major_piano.md") and not path.exists():
+    # Drain 2026-08-06-1600 finding: the wizard removed this fixture
+    # from the live vault during the construct_c_major_piano
+    # re-baseline (their Stream-with-TextExpression note supersedes
+    # it). Loud skip, not a red: recreating it here would override a
+    # wizard-lane authoring decision (L54). forge-core adjudicates
+    # whether to drop it from FIXTURES for good.
+    pytest.skip("c_major fixture removed by wizard re-baseline (drain 1600 FEEDBACK)")
   assert path.exists(), f"{rel} missing — drain 1730 ships four fixtures"
   body = path.read_text(encoding="utf-8")
   assert "# Recipe" in body, f"{rel} has no # Recipe facet"
@@ -240,3 +248,58 @@ def test_scale_fixture_declares_piano_widget(rel):
   body = path.read_text(encoding="utf-8")
   assert "input_widgets:" in body
   assert "student_pitches: piano" in body
+
+
+# ---- [2026-08-06-1600] audio_path opt-in (drain-1730 [R1] amendment) ----
+
+
+class TestAudioPathOptIn:
+  C_MAJOR = ["C4", "D4", "E4", "F4", "G4", "A4", "B4"]
+
+  def test_correct_attempt_appends_audio_wikilink(self):
+    out = lib.scale_construction_exercise(
+      "C", "major", self.C_MAJOR,
+      audio_path="ccqa-scratch/scale_attempts/c_major.mp3",
+    )
+    assert out.startswith("✓ Correct — C major scale.")
+    assert out.endswith("\n\n[[ccqa-scratch/scale_attempts/c_major.mp3]]")
+
+  def test_wrong_attempt_appends_audio_wikilink(self):
+    out = lib.scale_construction_exercise(
+      "C", "major", ["C4", "D4", "E4"], audio_path="a/b.mp3",
+    )
+    assert out.startswith("✗ Not quite.")
+    assert "[[diatonic_scale]]" in out
+    assert out.endswith("\n\n[[a/b.mp3]]")
+
+  def test_audio_path_none_is_byte_identical_no_op(self):
+    # No-op stays no-op: default call must not grow a trailing link.
+    assert (
+      lib.scale_construction_exercise("C", "major", self.C_MAJOR)
+      == "✓ Correct — C major scale."
+    )
+
+  def test_blank_audio_path_treated_as_absent(self):
+    assert (
+      lib.scale_construction_exercise(
+        "C", "major", self.C_MAJOR, audio_path="   ",
+      )
+      == "✓ Correct — C major scale."
+    )
+
+  def test_empty_attempt_gets_no_audio_link(self):
+    # Nothing was played; nothing to hear.
+    out = lib.scale_construction_exercise(
+      "C", "major", [], audio_path="a/b.mp3",
+    )
+    assert "[[a/b.mp3]]" not in out
+
+  def test_tempo_accepts_intable_and_rejects_junk(self):
+    out = lib.scale_construction_exercise(
+      "C", "major", self.C_MAJOR, audio_path="a/b.mp3", tempo="90",
+    )
+    assert out.endswith("[[a/b.mp3]]")
+    with pytest.raises(ValueError, match="tempo"):
+      lib.scale_construction_exercise(
+        "C", "major", self.C_MAJOR, tempo="fast",
+      )

@@ -16,7 +16,7 @@ import copy
 import json
 import re
 from collections.abc import Sequence
-from typing import Union
+from typing import Optional, Union
 
 # v0.2.171 — split the multi-name music21 import so a single missing
 # submodule (e.g. partial pyodide wheel) doesn't kill the whole forge.music.lib
@@ -709,6 +709,47 @@ def scale_construction_exercise(
   mode: str,
   student_pitches: Union[list[str], str],
   widget_type: str = "piano",
+  audio_path: Optional[str] = None,
+  tempo: int = 100,
+) -> str:
+  """Grade a scale-construction attempt and return MCQ-shaped feedback.
+
+  Audio opt-in (drain 2026-08-06-1600, landing the drain-1730 [R1]
+  amendment): when 'audio_path' is set and the attempt is non-empty,
+  the wikilink '[[<audio_path>]]' is appended to the feedback so the
+  student can hear their attempt. The engine does NOT render the
+  audio — it still exports no music21-to-MP3 path (the render pipeline
+  lives on forge-transpile; see forge_render_music) — so the CALLER
+  owns materializing a file at 'audio_path' before or after this call
+  (the wizard's forge_render_music flow is the working path today).
+  'tempo' (bpm) travels with the same contract: it names the pace the
+  caller should render the attempt at; the grading itself ignores it.
+  A non-int-able 'tempo' raises ValueError, same posture as the other
+  params. KNOWN CAVEAT: the plugin's MCQ card regex for the correct
+  branch is end-anchored, so a correct-plus-audio feedback renders as
+  plain text (link still clickable) until the plugin relaxes
+  CORRECT_RE — flagged as a follow-up in the 1600 drain FEEDBACK.
+  """
+  feedback = _scale_construction_feedback(
+    tonic, mode, student_pitches, widget_type,
+  )
+  try:
+    tempo = int(tempo)
+  except (TypeError, ValueError):
+    raise ValueError(f"tempo must be an integer bpm; got {tempo!r}")
+  if audio_path is not None and str(audio_path).strip():
+    # Inputs are known-valid here (grading already coerced them); an
+    # empty attempt has nothing to hear, so it gets no link.
+    if _coerce_student_pitches(student_pitches):
+      feedback = f"{feedback}\n\n[[{str(audio_path).strip()}]]"
+  return feedback
+
+
+def _scale_construction_feedback(
+  tonic: str,
+  mode: str,
+  student_pitches: Union[list[str], str],
+  widget_type: str = "piano",
 ) -> str:
   """Grade a scale-construction attempt and return MCQ-shaped feedback.
 
@@ -744,10 +785,9 @@ def scale_construction_exercise(
   right-key-wrong-spelling.
 
   Raises ValueError on an unrecognizable tonic, mode, or student
-  pitch name. Audio feedback is deliberately absent in Tier 1: the
-  engine exports no music21→MP3 path (the render pipeline lives on
-  forge-transpile, unreachable from pyodide) — a follow-up drain owns
-  auditory feedback.
+  pitch name. Audio embedding lives in the public wrapper
+  (scale_construction_exercise's audio_path param); this helper is the
+  pure grading step.
   """
   _require_music21()
 
