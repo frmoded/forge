@@ -108,6 +108,8 @@ class SnippetRegistry:
     for lib_path in library_dirs:
       self._scan_library_vault(lib_path)
 
+    self._scan_declared_imports(vault_path)
+
     self._auto_set_resolution_order(vault_path)
 
   def register_builtin_vault(self, snippets: list) -> None:
@@ -491,6 +493,68 @@ class SnippetRegistry:
           self.errors.append(f"{filepath}: {e}")
     return name
 
+  def _scan_declared_imports(self, vault_path: str) -> None:
+    """Drain 2026-08-09-2100 — cross-vault `[imports]` (Phase 4, engine
+    half). Index each vault the authoring manifest imports (local-path
+    form only) via the existing `_scan_library_vault` code path, so its
+    snippets land under the import's name exactly like a subdirectory
+    library. One-level: the imported vault's OWN imports are NOT
+    walked; a cycle back to the authoring vault is logged, not fatal.
+
+    Failure posture is log-and-skip (`self.errors`), never
+    hard-fail: the driver may be working on a vault in isolation, and
+    in the plugin's Pyodide runtime the import target is outside the
+    MEMFS mount — the scan must degrade to plain single-vault behavior
+    there (plugin-side mounting is a separate drain)."""
+    manifest_path = os.path.join(vault_path, _MANIFEST_FILENAME)
+    self._imported_vault_names = []
+    if not os.path.isfile(manifest_path):
+      return
+    try:
+      from pathlib import Path
+      from forge.core.vault_imports import parse_imports, VaultImportError
+    except Exception as e:  # tomli missing in some exotic env — degrade
+      self.errors.append(f"{manifest_path}: [imports] support unavailable: {e}")
+      return
+    try:
+      decls = parse_imports(Path(manifest_path))
+    except VaultImportError as e:
+      # parse_imports validates all declarations and raises on the
+      # first unhonourable one (missing dir, no forge.toml, name
+      # mismatch, bad TOML). Log + skip imports entirely — the
+      # authoring vault itself still scans.
+      self.errors.append(f"{manifest_path}: [imports] skipped: {e}")
+      return
+    try:
+      authoring_name = None
+      from forge.core.manifest import read_manifest
+      authoring_name = read_manifest(vault_path).name
+    except Exception:
+      pass  # cycle detection degrades; imports still index below
+    for name, decl in decls.items():
+      indexed = self._scan_library_vault(str(decl.root))
+      if indexed is not None:
+        self._imported_vault_names.append(indexed)
+      # One-level note + cycle check: if the imported vault declares
+      # its own imports, they are not processed. A cycle back to the
+      # authoring vault is worth naming explicitly.
+      try:
+        transitive = parse_imports(Path(str(decl.root)) / _MANIFEST_FILENAME)
+      except VaultImportError:
+        transitive = {}
+      if authoring_name and authoring_name in transitive:
+        self.errors.append(
+          f"{manifest_path}: import cycle detected: {authoring_name} -> "
+          f"{name} -> {authoring_name}; transitive imports are not "
+          "processed (one-level scan), continuing"
+        )
+      elif transitive:
+        self.errors.append(
+          f"{manifest_path}: import '{name}' declares its own [imports] "
+          f"({', '.join(sorted(transitive))}); transitive imports are "
+          "not processed (one-level scan)"
+        )
+
   def _auto_set_resolution_order(self, vault_path: str) -> None:
     manifest_path = os.path.join(vault_path, _MANIFEST_FILENAME)
     if not os.path.isfile(manifest_path):
@@ -502,7 +566,14 @@ class SnippetRegistry:
       self.errors.append(f"{manifest_path}: {e}")
       return
     lib_order = [d.name for d in m.dependencies]
-    self.set_resolution_order([AUTHORING_VAULT, *lib_order])
+    # Drain 2026-08-09-2100 — imported vaults resolve after the
+    # authoring vault's own dependency libraries (dedup'd: an import
+    # that is also a declared dependency keeps its dependency slot).
+    imported = [
+      n for n in getattr(self, "_imported_vault_names", [])
+      if n not in lib_order
+    ]
+    self.set_resolution_order([AUTHORING_VAULT, *lib_order, *imported])
 
   def _index_authoring_file(self, filepath: str, vault_name: str, source: str, vault_path: str) -> Optional[str]:
     try:
