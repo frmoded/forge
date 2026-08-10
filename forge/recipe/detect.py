@@ -36,6 +36,12 @@ class InputDecl:
   default: object   # parsed Python literal, or None if no default
   has_default: bool
   doc: str
+  # Drain 2026-08-10-1610 (Approach C) — opaque type annotation text
+  # when the declaration came from a typed Recipe Let
+  # (`derive_inputs_from_recipe`); None for legacy `## Inputs`
+  # dash-line declarations. Additive default keeps every existing
+  # constructor call working.
+  type_hint: Optional[str] = None
 
 
 def detect_recipe_shape(snippet_body: str) -> bool:

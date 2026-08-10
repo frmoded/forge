@@ -15,7 +15,7 @@ from .detect import (
     extract_recipe_body,
     extract_inputs_declarations,
 )
-from .parser import Module, parse
+from .parser import Module, parse, derive_inputs_from_recipe
 from .transpiler import transpile
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "detect_recipe_shape",
     "extract_recipe_body",
     "extract_inputs_declarations",
+    "derive_inputs_from_recipe",
     "Module",
     "parse",
     "transpile",

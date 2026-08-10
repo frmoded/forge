@@ -79,15 +79,42 @@ def transpile(module: Module, inputs=None, resolve_slot=None,
 
 
 def _transpile_inner(module: Module, inputs) -> str:
-  if inputs:
-    kwargs = ", ".join(
-      f"{d.name}={_render_default(d.default)}" if d.has_default else d.name
-      for d in inputs
-    )
-    sig = f"def compute(context, {kwargs}):"
+  # Drain 2026-08-10-1610 (Approach C) — leading typed Lets that
+  # qualify as input declarations are lifted into the compute()
+  # signature (annotation + literal default, or no default for the
+  # `required` sentinel) and OMITTED from the body. They merge with
+  # the legacy `## Inputs` decls, typed Lets winning on name
+  # collision. Required params are emitted before defaulted ones
+  # (Python signature ordering).
+  from forge.recipe.parser import collect_typed_input_lets, _literal_value_of
+  typed_lets = collect_typed_input_lets(module)
+  typed_names = {let.name for let in typed_lets}
+  legacy = [d for d in (inputs or []) if d.name not in typed_names]
+
+  required_parts = [
+    f"{let.name}: {let.type_hint}"
+    for let in typed_lets if let.is_required_input
+  ]
+  defaulted_parts = [
+    f"{let.name}: {let.type_hint} = {_render_default(_literal_value_of(let.value)[1])}"
+    for let in typed_lets if not let.is_required_input
+  ]
+  legacy_parts = [
+    f"{d.name}={_render_default(d.default)}" if d.has_default else d.name
+    for d in legacy
+  ]
+  # Legacy no-default decls sort with required (no-default) params.
+  legacy_required = [p for p, d in zip(legacy_parts, legacy) if not d.has_default]
+  legacy_defaulted = [p for p, d in zip(legacy_parts, legacy) if d.has_default]
+
+  all_parts = required_parts + legacy_required + defaulted_parts + legacy_defaulted
+  if all_parts:
+    sig = f"def compute(context, {', '.join(all_parts)}):"
   else:
     sig = "def compute(context):"
-  body_lines = _render_block(module.statements, depth=1)
+
+  body_module = Module(statements=module.statements[len(typed_lets):])
+  body_lines = _render_block(body_module.statements, depth=1)
   if not body_lines:
     body_lines = [INDENT + "pass"]
   return sig + "\n" + "\n".join(body_lines) + "\n"

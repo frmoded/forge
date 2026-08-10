@@ -38,7 +38,17 @@ class Module:
 @dataclass
 class LetStmt:
   name: str
-  value: "Expr"
+  value: Optional["Expr"]
+  # Drain 2026-08-10-1610 (Approach C) — optional `: Type` annotation
+  # between the Let-name and `=`. Opaque text: the parser records it
+  # verbatim (re-serialized from tokens); downstream consumers
+  # (transpile signature, derive_inputs_from_recipe, agent surfaces)
+  # interpret it. `is_required_input` marks the `= required` sentinel
+  # (only recognized when a type annotation is present — untyped
+  # `Let X = required.` keeps its historical IdentRef("required")
+  # meaning); a required Let has value=None.
+  type_hint: Optional[str] = None
+  is_required_input: bool = False
 
 
 @dataclass
@@ -340,8 +350,10 @@ def _tokenize(src: str) -> List[Tok]:
     if src[i:i+2] in ("<=", ">=", "==", "!="):
       toks.append(Tok("OP", src[i:i+2], line, col))
       i += 2; col += 2; continue
-    # Single-char ops: = , . [ ] : + - * / < >
-    if ch in "=,.[]:+-*/<>":
+    # Single-char ops: = , . [ ] : + - * / < > |
+    # (`|` added by drain 2026-08-10-1610 for union/enum-literal type
+    # annotations on typed Lets, e.g. `Let m: 'major' | 'minor' = ...`.)
+    if ch in "=,.[]:+-*/<>|":
       toks.append(Tok("OP", ch, line, col))
       i += 1; col += 1; continue
     raise ParseError(f"unexpected char {ch!r}", lineno=line, col_offset=col)
@@ -517,21 +529,56 @@ class _Parser:
   # --- Statement bodies (toks is the tokenized form of a single line) ---
 
   def _parse_let_body(self, toks: List[Tok]) -> LetStmt:
-    # Let IDENT = expr .
+    # Let IDENT (":" type_toks)? "=" expr "."
     if toks[1].kind != "IDENT":
       raise ParseError(
         f"expected identifier after Let, got {toks[1].value!r}",
         lineno=toks[1].line, col_offset=toks[1].col,
       )
     name = toks[1].value
-    if not (toks[2].kind == "OP" and toks[2].value == "="):
+    # Drain 2026-08-10-1610 — optional type annotation. Collect every
+    # token between `:` and the first top-level `=` verbatim; `.` and
+    # `[`/`]` inside the annotation (dotted names, generics) are FINE
+    # here because we cut at `=` positionally, before any
+    # terminator-splitting sees them.
+    type_hint: Optional[str] = None
+    rest = toks[2:]
+    if rest and rest[0].kind == "OP" and rest[0].value == ":":
+      type_toks: List[Tok] = []
+      i = 1
+      while i < len(rest) and not (rest[i].kind == "OP" and rest[i].value == "="):
+        type_toks.append(rest[i])
+        i += 1
+      if i >= len(rest):
+        raise ParseError(
+          f"expected = after type annotation on Let {name}",
+          lineno=toks[1].line, col_offset=toks[1].col,
+        )
+      if not type_toks:
+        raise ParseError(
+          f"empty type annotation on Let {name}",
+          lineno=toks[1].line, col_offset=toks[1].col,
+        )
+      type_hint = _render_type_tokens(type_toks)
+      rest = rest[i:]
+    if not (rest and rest[0].kind == "OP" and rest[0].value == "="):
       raise ParseError(
         f"expected = after Let {name}",
         lineno=toks[2].line, col_offset=toks[2].col,
       )
-    expr_toks, _tail = _split_at_terminator(toks[3:], ".")
+    expr_toks, _tail = _split_at_terminator(rest[1:], ".")
+    # `= required.` sentinel — only with a type annotation present.
+    if (
+      type_hint is not None
+      and len(expr_toks) == 1
+      and expr_toks[0].kind == "IDENT"
+      and expr_toks[0].value == "required"
+    ):
+      return LetStmt(
+        name=name, value=None, type_hint=type_hint, is_required_input=True,
+      )
     expr = _parse_expr(expr_toks)
-    return LetStmt(name=name, value=expr)
+    return LetStmt(name=name, value=expr, type_hint=type_hint)
 
   def _parse_return_body(self, toks: List[Tok]) -> ReturnStmt:
     # Return expr? .
@@ -846,3 +893,97 @@ def parse(src: str) -> Module:
   """Parse E-- source into a Module AST."""
   lines = _split_lines(src)
   return _Parser(lines).parse_module()
+
+
+# --- Typed-Let support (drain 2026-08-10-1610) -------------------------
+
+def _render_type_tokens(toks: List[Tok]) -> str:
+  """Re-serialize a type annotation's tokens to canonical text.
+
+  Joining rules: no space around `[`, `]`, `.` (generics + dotted
+  names read as written: `list[str]`, `music21.Stream`); spaces
+  around `|` (union / enum-literal form: `'major' | 'minor'`);
+  STRING tokens re-quoted single. Everything else concatenates with
+  a space between word-like neighbors."""
+  parts: List[str] = []
+  for tok in toks:
+    text = f"'{tok.value}'" if tok.kind == "STRING" else tok.value
+    if not parts:
+      parts.append(text)
+      continue
+    prev = parts[-1]
+    if text in ("[", "]", ".", ","):
+      parts[-1] = prev + text
+    elif prev.endswith(("[", ".")):
+      parts[-1] = prev + text
+    elif text == "|" or prev.endswith("|"):
+      parts.append(text)
+    else:
+      parts.append(text)
+  out: List[str] = []
+  for p in parts:
+    out.append(p)
+  return " ".join(out).replace(" [", "[").replace("[ ", "[").replace(" ]", "]")
+
+
+def _literal_value_of(expr) -> tuple:
+  """(is_literal, python_value) for input-default eligibility."""
+  if isinstance(expr, (NumberLit, StringLit, BoolLit)):
+    return True, expr.value
+  if isinstance(expr, NoneLit):
+    return True, None
+  if isinstance(expr, ListLit):
+    values = []
+    for item in expr.items:
+      ok, v = _literal_value_of(item)
+      if not ok:
+        return False, None
+    values = [_literal_value_of(i)[1] for i in expr.items]
+    return True, values
+  return False, None
+
+
+def collect_typed_input_lets(module: Module) -> List[LetStmt]:
+  """The LEADING run of typed Lets that qualify as INPUT declarations:
+  type annotation present AND (required sentinel OR literal value).
+  Stops at the first statement that doesn't qualify — typed Lets later
+  in the body are ordinary (annotated) locals, mirroring how Python
+  reads a signature vs. its body."""
+  out: List[LetStmt] = []
+  for stmt in module.statements:
+    if not isinstance(stmt, LetStmt) or stmt.type_hint is None:
+      break
+    if stmt.is_required_input:
+      out.append(stmt)
+      continue
+    ok, _ = _literal_value_of(stmt.value)
+    if not ok:
+      break
+    out.append(stmt)
+  return out
+
+
+def derive_inputs_from_recipe(recipe_src: str):
+  """Derive the note's input declarations from its Recipe body's
+  leading typed Lets (Approach C). Returns a list of
+  `forge.recipe.detect.InputDecl` (with `type_hint` populated) so the
+  frontmatter `inputs:` field, MCP metadata, and palette surfaces can
+  all be machine-maintained from the Recipe. Coexists with the legacy
+  `## Inputs` Description-section parser — callers merge, typed Lets
+  winning on name collision (see transpiler)."""
+  from forge.recipe.detect import InputDecl
+  module = parse(recipe_src)
+  out = []
+  for let in collect_typed_input_lets(module):
+    if let.is_required_input:
+      out.append(InputDecl(
+        name=let.name, default=None, has_default=False, doc="",
+        type_hint=let.type_hint,
+      ))
+    else:
+      _, value = _literal_value_of(let.value)
+      out.append(InputDecl(
+        name=let.name, default=value, has_default=True, doc="",
+        type_hint=let.type_hint,
+      ))
+  return out
