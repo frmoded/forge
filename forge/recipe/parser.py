@@ -971,7 +971,7 @@ def derive_inputs_from_recipe(recipe_src: str):
   all be machine-maintained from the Recipe. Coexists with the legacy
   `## Inputs` Description-section parser — callers merge, typed Lets
   winning on name collision (see transpiler)."""
-  from forge.recipe.detect import InputDecl
+  from .detect import InputDecl
   module = parse(recipe_src)
   out = []
   for let in collect_typed_input_lets(module):

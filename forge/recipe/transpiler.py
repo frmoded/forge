@@ -86,7 +86,7 @@ def _transpile_inner(module: Module, inputs) -> str:
   # the legacy `## Inputs` decls, typed Lets winning on name
   # collision. Required params are emitted before defaulted ones
   # (Python signature ordering).
-  from forge.recipe.parser import collect_typed_input_lets, _literal_value_of
+  from .parser import collect_typed_input_lets, _literal_value_of
   typed_lets = collect_typed_input_lets(module)
   typed_names = {let.name for let in typed_lets}
   legacy = [d for d in (inputs or []) if d.name not in typed_names]
