@@ -31,6 +31,38 @@ class TestExtractInputs:
     decls = extract_inputs_declarations(body)
     assert decls[0].default == "world"
 
+  # Drain 2026-08-10-1130 — markdown inline-code backticks around the
+  # default leaked into the parsed literal: ast.literal_eval failed on
+  # `"medium"` (backticks included), the unparsable-fallback kept the
+  # raw string, and the transpiler emitted temperature='`"medium"`'.
+  # Observed live on forge-moda/setup.md's Inputs line
+  # (drain 2130 FEEDBACK §ADDENDUM). Strip the backticks BEFORE
+  # literal_eval so the Python-literal semantics inside are honored.
+  def test_backticked_string_default_strips_markdown(self):
+    body = '# Description\n\n## Inputs\n- temperature (default `"medium"`) — runtime-injected\n'
+    decls = extract_inputs_declarations(body)
+    assert decls[0].default == "medium"
+
+  def test_backticked_single_quoted_default(self):
+    body = "# Description\n\n## Inputs\n- mode (default `'fast'`) — speed\n"
+    decls = extract_inputs_declarations(body)
+    assert decls[0].default == "fast"
+
+  def test_backticked_int_default(self):
+    body = "# Description\n\n## Inputs\n- bars (default `4`) — section length\n"
+    decls = extract_inputs_declarations(body)
+    assert decls[0].default == 4
+
+  def test_backticked_bare_word_default_falls_back_to_string(self):
+    body = "# Description\n\n## Inputs\n- mode (default `fast`) — speed\n"
+    decls = extract_inputs_declarations(body)
+    assert decls[0].default == "fast"
+
+  def test_unbackticked_defaults_unchanged(self):
+    body = "# Description\n\n## Inputs\n- bars (default 4) — length\n"
+    decls = extract_inputs_declarations(body)
+    assert decls[0].default == 4
+
   def test_multiple_inputs(self):
     body = (
       "# Description\n\n## Inputs\n"

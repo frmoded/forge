@@ -100,11 +100,22 @@ def extract_inputs_declarations(snippet_body: str) -> List[InputDecl]:
     name, default_str, doc = m.groups()
     has_default = default_str is not None
     if has_default:
+      raw = default_str.strip()
+      # Drain 2026-08-10-1130 — authors write the default with markdown
+      # inline-code formatting (`- temperature (default `"medium"`) — …`).
+      # The backticks are prose formatting, not literal content: strip a
+      # single surrounding pair BEFORE literal_eval so the Python-literal
+      # semantics inside are honored. Pre-fix, literal_eval failed on the
+      # backticked form and the unparsable-fallback kept the raw string —
+      # the transpiler then emitted temperature='`"medium"`' (observed
+      # live on forge-moda/setup.md; drain 2130 FEEDBACK §ADDENDUM).
+      if len(raw) >= 2 and raw.startswith("`") and raw.endswith("`"):
+        raw = raw[1:-1].strip()
       try:
-        default = _py_ast.literal_eval(default_str.strip())
+        default = _py_ast.literal_eval(raw)
       except (ValueError, SyntaxError):
         # Treat unparsable as string literal.
-        default = default_str.strip()
+        default = raw
     else:
       default = None
     out.append(InputDecl(
