@@ -1154,12 +1154,24 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
   # named `setup` (or whatever) cleanly shadows the shim of the same
   # name (input precedence per the canonical-form composition design).
   local_ns = {
-    **_build_snippet_shims(context, registry),
     "inputs": inputs,
     "random": random,
     "math": math,
     "numpy": numpy,
     **_domain_globals_for(domains),
+    # Drain 2026-08-10-1700 — snippet shims spread AFTER the domain
+    # globals so a vault note shadows a same-named engine chip,
+    # matching the documented precedence everywhere else in the
+    # system: A4 shadowing, the registry's resolution order
+    # (authoring → imports → builtin LAST), and the /generate
+    # dep-dedup ("a hand-authored vault kick.md shadows the lib.py
+    # engine chip", drain 1710). Pre-fix the order was inverted and
+    # CCQA's Phase-4 cross-vault smoke bound music-theory's
+    # `rhythmic_line` call to the engine chip (`pattern`/`pitch`)
+    # instead of the mounted music-core note
+    # (`pitches`/`rhythm_pattern`) — the TypeError in report
+    # 2026-08-10-1557. Inputs still spread last (drain 1230 contract).
+    **_build_snippet_shims(context, registry),
     # Inputs spread LAST: the canonical-form contract is input
     # precedence — a declared input named `chord` (or `note`, `key`,
     # `tempo`, any of the ~75 injected bundle names) must shadow the
