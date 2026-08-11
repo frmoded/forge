@@ -11,6 +11,8 @@ the V1 snippets used.
 Indentation: 2 spaces per level (matches Forge codebase style).
 """
 
+import warnings
+
 from .parser import (
     BinaryOp,
     BoolLit,
@@ -20,6 +22,7 @@ from .parser import (
     ForEachStmt,
     IdentRef,
     IfStmt,
+    InputStmt,
     Kwarg,
     LetStmt,
     ListLit,
@@ -79,50 +82,116 @@ def transpile(module: Module, inputs=None, resolve_slot=None,
 
 
 def _transpile_inner(module: Module, inputs) -> str:
-  # Drain 2026-08-10-1610 (Approach C) — leading typed Lets that
-  # qualify as input declarations are lifted into the compute()
-  # signature (annotation + literal default, or no default for the
-  # `required` sentinel) and OMITTED from the body. They merge with
-  # the legacy `## Inputs` decls, typed Lets winning on name
-  # collision. Required params are emitted before defaulted ones
-  # (Python signature ordering).
+  # Drain 2026-08-10-2000 — dedicated `Input` keyword. Retires the
+  # drain-1610 positional-typed-Let-as-parameter inference AS THE
+  # PRIMARY MECHANISM: when the Recipe has ANY `Input` statement
+  # (anywhere — position is no longer load-bearing, unlike the old
+  # leading-run rule), Input decls are the ONLY signature source and
+  # EVERY typed Let (anywhere) renders as an annotated local instead
+  # of being silently promoted or having its annotation dropped.
+  #
+  # Backward compat: a Recipe with ZERO Input statements falls back
+  # to the drain-1610 leading-typed-Let promotion UNCHANGED (old
+  # notes keep working with no edits), emitting a DeprecationWarning
+  # when that fallback actually fires.
   from .parser import collect_typed_input_lets, _literal_value_of
-  typed_lets = collect_typed_input_lets(module)
-  typed_names = {let.name for let in typed_lets}
-  legacy = [d for d in (inputs or []) if d.name not in typed_names]
 
-  required_parts = [
-    f"{let.name}: {let.type_hint}"
-    for let in typed_lets if let.is_required_input
-  ]
-  defaulted_parts = [
-    f"{let.name}: {let.type_hint} = {_render_default(_literal_value_of(let.value)[1])}"
-    for let in typed_lets if not let.is_required_input
-  ]
-  legacy_parts = [
-    f"{d.name}={_render_default(d.default)}" if d.has_default else d.name
-    for d in legacy
-  ]
-  # Legacy no-default decls sort with required (no-default) params.
-  legacy_required = [p for p, d in zip(legacy_parts, legacy) if not d.has_default]
-  legacy_defaulted = [p for p, d in zip(legacy_parts, legacy) if d.has_default]
+  input_stmts = [s for s in module.statements if isinstance(s, InputStmt)]
 
-  all_parts = required_parts + legacy_required + defaulted_parts + legacy_defaulted
+  if input_stmts:
+    required_parts = [
+      f"{s.name}: {_render_type_hint(s.type_hint)}"
+      for s in input_stmts if s.is_required
+    ]
+    defaulted_parts = [
+      f"{s.name}: {_render_type_hint(s.type_hint)} = {_render_default(s.default)}"
+      for s in input_stmts if not s.is_required
+    ]
+    input_names = {s.name for s in input_stmts}
+    legacy = [d for d in (inputs or []) if d.name not in input_names]
+    legacy_parts = [
+      f"{d.name}={_render_default(d.default)}" if d.has_default else d.name
+      for d in legacy
+    ]
+    legacy_required = [p for p, d in zip(legacy_parts, legacy) if not d.has_default]
+    legacy_defaulted = [p for p, d in zip(legacy_parts, legacy) if d.has_default]
+    all_parts = required_parts + legacy_required + defaulted_parts + legacy_defaulted
+    # Input statements are pure signature declarations — omitted from
+    # the body regardless of where they appeared in the source.
+    body_stmts = [s for s in module.statements if not isinstance(s, InputStmt)]
+  else:
+    # Legacy fallback — drain 1610's exact behavior, unchanged.
+    typed_lets = collect_typed_input_lets(module)
+    if typed_lets:
+      warnings.warn(
+        "typed Let as a parameter declaration is deprecated; use the "
+        "Input keyword instead (Input name: Type = default.)",
+        DeprecationWarning,
+        stacklevel=2,
+      )
+    typed_names = {let.name for let in typed_lets}
+    legacy = [d for d in (inputs or []) if d.name not in typed_names]
+
+    required_parts = [
+      f"{let.name}: {_render_type_hint(let.type_hint)}"
+      for let in typed_lets if let.is_required_input
+    ]
+    defaulted_parts = [
+      f"{let.name}: {_render_type_hint(let.type_hint)} = {_render_default(_literal_value_of(let.value)[1])}"
+      for let in typed_lets if not let.is_required_input
+    ]
+    legacy_parts = [
+      f"{d.name}={_render_default(d.default)}" if d.has_default else d.name
+      for d in legacy
+    ]
+    legacy_required = [p for p, d in zip(legacy_parts, legacy) if not d.has_default]
+    legacy_defaulted = [p for p, d in zip(legacy_parts, legacy) if d.has_default]
+    all_parts = required_parts + legacy_required + defaulted_parts + legacy_defaulted
+    body_stmts = module.statements[len(typed_lets):]
+
   if all_parts:
     sig = f"def compute(context, {', '.join(all_parts)}):"
   else:
     sig = "def compute(context):"
 
-  body_module = Module(statements=module.statements[len(typed_lets):])
+  body_module = Module(statements=body_stmts)
   body_lines = _render_block(body_module.statements, depth=1)
   if not body_lines:
     body_lines = [INDENT + "pass"]
-  return sig + "\n" + "\n".join(body_lines) + "\n"
+  out = sig + "\n" + "\n".join(body_lines) + "\n"
+  # Drain 2000 Part 3 — inject the typing import iff an enum-literal
+  # type hint anywhere (signature or a body-local annotation) actually
+  # rendered to a Literal[...] expression. Checking the FINAL text is
+  # simpler and equally correct vs. threading a flag through every
+  # render call site.
+  if "Literal[" in out:
+    out = "from typing import Literal\n\n" + out
+  return out
 
 
 def _render_default(v):
   """repr() works for ints, floats, strings, bools, None, lists of literals."""
   return repr(v)
+
+
+def _render_type_hint(type_hint: str) -> str:
+  """Drain 2026-08-10-2000 Part 3 — render an E-- type-hint string as
+  Python. Detects the enum-literal pattern (two or more `|`-separated
+  quoted-string tokens, e.g. `'major' | 'minor'`) and renders it as
+  `Literal["major", "minor"]`; every other type hint passes through
+  verbatim (drain 1610's opaque passthrough, unchanged). The caller
+  is responsible for injecting `from typing import Literal` when the
+  rendered output actually contains a `Literal[` (checked post-hoc on
+  the full transpiled text, not threaded through here)."""
+  parts = [p.strip() for p in type_hint.split('|')]
+  is_enum_literal = len(parts) >= 2 and all(
+    len(p) >= 2 and p[0] == p[-1] and p[0] in ("'", '"')
+    for p in parts
+  )
+  if not is_enum_literal:
+    return type_hint
+  values = [p[1:-1] for p in parts]
+  return "Literal[" + ", ".join(repr(v) for v in values) + "]"
 
 
 def _render_block(stmts, depth):
@@ -135,6 +204,16 @@ def _render_block(stmts, depth):
 def _render_stmt(stmt, depth):
   pad = INDENT * depth
   if isinstance(stmt, LetStmt):
+    # Drain 2026-08-10-2000 Part 4 — a typed Let that reaches body
+    # emission (i.e. wasn't promoted to a signature parameter, in
+    # EITHER mode) keeps its annotation. Drain 1610 silently dropped
+    # it here; that WAT is fixed unconditionally since a non-promoted
+    # typed Let can only ever arrive at this line with a real value
+    # (the only value-less LetStmt shape, `is_required_input`, is
+    # only ever produced for LEADING Lets, which legacy-mode's
+    # promotion always slices out of the body — see _transpile_inner).
+    if stmt.type_hint is not None:
+      return [f"{pad}{stmt.name}: {_render_type_hint(stmt.type_hint)} = {_render_expr(stmt.value)}"]
     return [f"{pad}{stmt.name} = {_render_expr(stmt.value)}"]
   if isinstance(stmt, ReturnStmt):
     if stmt.value is None:

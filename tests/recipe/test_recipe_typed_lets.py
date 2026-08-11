@@ -88,8 +88,11 @@ def test_transpile_typed_let_with_nonliteral_value_stays_local():
   py = transpile(parse(
     "Let items: list[str] = [].\nLet n: int = 1 + 1.\nReturn n."))
   assert "def compute(context, items: list[str] = []):" in py
-  # The chip-call Let is NOT an input — stays in the body.
-  assert "n = " in py
+  # The chip-call Let is NOT an input — stays in the body. Drain
+  # 2026-08-10-2000 Part 4 fixed the WAT this test used to pin: the
+  # annotation is now PRESERVED (`n: int = ...`), not dropped
+  # (`n = ...`) — updating the assertion to the corrected behavior.
+  assert "n: int = (1 + 1)" in py
 
 
 def test_transpile_regression_untyped_lets_unchanged():

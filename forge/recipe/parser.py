@@ -52,6 +52,28 @@ class LetStmt:
 
 
 @dataclass
+class InputStmt:
+  """Drain 2026-08-10-2000 — dedicated parameter declaration,
+  replacing the drain-1610 positional-typed-Let-as-parameter
+  inference. `Input NAME: TYPE.` (no default) is required;
+  `Input NAME: TYPE = DEFAULT.` has a default. May appear ANYWHERE
+  in the Recipe body (position is no longer load-bearing — that
+  ambiguity was exactly what motivated this dedicated keyword);
+  transpile collects every InputStmt regardless of position and
+  omits each from body emission.
+
+  Named InputStmt, not InputDecl, to avoid colliding with the
+  pre-existing `forge.recipe.detect.InputDecl` (the `## Inputs`
+  Description-section declaration record) — same drain, two
+  independent parallel input sources by design (Part on
+  coexistence)."""
+  name: str
+  type_hint: str
+  is_required: bool
+  default: object = None   # parsed Python literal; None when is_required
+
+
+@dataclass
 class ReturnStmt:
   value: Optional["Expr"]
 
@@ -162,7 +184,7 @@ class SlotExpr:
   text: str   # the free text between {{ and }}, stripped
 
 
-Stmt = Union[LetStmt, ReturnStmt, CallStmt, ExprStmt, RepeatStmt, ForEachStmt, IfStmt]
+Stmt = Union[LetStmt, InputStmt, ReturnStmt, CallStmt, ExprStmt, RepeatStmt, ForEachStmt, IfStmt]
 Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit, BinaryOp, SlotExpr]
 
 
@@ -170,7 +192,7 @@ Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit
 
 # Token kinds: KEYWORD, IDENT, NUMBER, STRING, WIKILINK, OP, NEWLINE, INDENT, DEDENT, EOF.
 # Keywords are lexed as IDENT then matched against this set:
-_KEYWORDS = {"Let", "Return", "Call", "with", "Repeat", "times", "For", "each", "in",
+_KEYWORDS = {"Let", "Input", "Return", "Call", "with", "Repeat", "times", "For", "each", "in",
              "If", "Otherwise"}
 
 
@@ -489,6 +511,9 @@ class _Parser:
     if head.kind == "KEYWORD" and head.value == "Let":
       self.pos += 1
       return self._parse_let_body(toks)
+    if head.kind == "KEYWORD" and head.value == "Input":
+      self.pos += 1
+      return self._parse_input_body(toks)
     if head.kind == "KEYWORD" and head.value == "Return":
       self.pos += 1
       return self._parse_return_body(toks)
@@ -579,6 +604,73 @@ class _Parser:
       )
     expr = _parse_expr(expr_toks)
     return LetStmt(name=name, value=expr, type_hint=type_hint)
+
+  def _parse_input_body(self, toks: List[Tok]) -> InputStmt:
+    # Input IDENT ":" type_toks ("=" expr)? "."
+    # Drain 2026-08-10-2000 — unlike Let, the type annotation is
+    # MANDATORY (Input exists specifically to declare a typed
+    # parameter) and the default, when present, must be a literal
+    # (validated below via _literal_value_of, not merely parsed as
+    # any expression) — a parameter default has to be def-time-safe.
+    if toks[1].kind != "IDENT":
+      raise ParseError(
+        f"expected identifier after Input, got {toks[1].value!r}",
+        lineno=toks[1].line, col_offset=toks[1].col,
+      )
+    name = toks[1].value
+    rest = toks[2:]
+    if not (rest and rest[0].kind == "OP" and rest[0].value == ":"):
+      raise ParseError(
+        f"expected ':' after Input {name} (Input requires a type annotation)",
+        lineno=toks[1].line, col_offset=toks[1].col,
+      )
+    # Find a top-level '=' FIRST (unambiguous boundary — '=' cannot
+    # appear inside a type annotation) rather than stopping at '.',
+    # which — unlike Let's annotation collection — is genuinely
+    # ambiguous here: a dotted type name (`music21.Stream`) contains
+    # internal '.' OP tokens, so "stop at the first '.'" would wrongly
+    # truncate the type before ever reaching the statement terminator
+    # on a no-default (required) Input.
+    rest = rest[1:]  # drop the ':'
+    eq_idx = None
+    for j, t in enumerate(rest):
+      if t.kind == "OP" and t.value == "=":
+        eq_idx = j
+        break
+    if eq_idx is None:
+      # No default — required. Entire `rest` minus the trailing '.'
+      # terminator is the type annotation.
+      body = rest[:-1] if (rest and rest[-1].kind == "OP" and rest[-1].value == ".") else rest
+      if not body:
+        raise ParseError(
+          f"empty type annotation on Input {name}",
+          lineno=toks[1].line, col_offset=toks[1].col,
+        )
+      type_hint = _render_type_tokens(body)
+      return InputStmt(name=name, type_hint=type_hint, is_required=True)
+    type_toks = rest[:eq_idx]
+    if not type_toks:
+      raise ParseError(
+        f"empty type annotation on Input {name}",
+        lineno=toks[1].line, col_offset=toks[1].col,
+      )
+    type_hint = _render_type_tokens(type_toks)
+    expr_toks, _tail = _split_at_terminator(rest[eq_idx + 1:], ".")
+    if not expr_toks:
+      raise ParseError(
+        f"expected a default value after Input {name}: {type_hint} =",
+        lineno=toks[1].line, col_offset=toks[1].col,
+      )
+    expr = _parse_expr(expr_toks)
+    is_literal, value = _literal_value_of(expr)
+    if not is_literal:
+      raise ParseError(
+        f"Input {name}: {type_hint} default must be a literal "
+        "(number, string, bool, None, or a list of literals) — "
+        "parameter defaults must be safe to evaluate at def-time",
+        lineno=toks[1].line, col_offset=toks[1].col,
+      )
+    return InputStmt(name=name, type_hint=type_hint, is_required=False, default=value)
 
   def _parse_return_body(self, toks: List[Tok]) -> ReturnStmt:
     # Return expr? .
