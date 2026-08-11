@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v24)
+# Forge — Core Invariants and Discipline (V2a v25)
 
 ## Mission
 
@@ -84,8 +84,13 @@ naming as `forge-runtime` code identifiers.
    note.
 5. **Recipe** — structured-grammar facet that compiles to Python.
    Required on every action note. Syntax: `Let X = Y.`,
-   `Call [[note]] with k=v.`, `Return X.`, `If/Otherwise`,
-   `For each/Repeat`, `{{...}}` slots.
+   `Input NAME: TYPE = DEFAULT.` (parameter declaration; omit
+   `= DEFAULT` for a required parameter), `Call [[note]] with k=v.`,
+   `Return X.`, `If/Otherwise`, `For each/Repeat`, `{{...}}` slots.
+   Frontmatter `inputs:` is DERIVED from `Input` declarations (or,
+   for pre-drain-2000 notes with no `Input` statement, from a
+   backward-compatible typed-`Let`-at-top inference) — cohort never
+   hand-edits it.
 6. **Python** — the compiled-from-Recipe Python facet. Always present
    at compute time; this is what `forge-runtime` executes at runtime. What
    Python content contains depends on S9's state machine: if
@@ -939,9 +944,12 @@ grammar productions). The constitutional invariants of the grammar:
   `[[note_id]]`, qualified per A4 if needed.
 - **Value slots**: `{{ free-text }}` — resolved to a Python
   expression at transpile time via `/resolve-slot` (see B7.3).
-- **Statement categories**: assignments (`Let X = ...`), calls
-  (`Call [[y]] with k=v.`), returns (`Return expr.`), control flow
-  (`If cond`, `Otherwise`, `For each ... In ...`, `Repeat N times`).
+- **Statement categories**: assignments (`Let X = ...`), parameter
+  declarations (`Input NAME: TYPE = DEFAULT.` or `Input NAME: TYPE.`
+  for required — may appear anywhere in the Recipe; not lifted from
+  position), calls (`Call [[y]] with k=v.`), returns (`Return expr.`),
+  control flow (`If cond`, `Otherwise`, `For each ... In ...`,
+  `Repeat N times`).
 
 **Consumers of this contract**:
 
