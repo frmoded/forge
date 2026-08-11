@@ -160,3 +160,38 @@ def test_pitched_line_migrated_transpile():
   exec(py, scope)
   out = scope["compute"](context=None, pitches=["C4"], rhythm_pattern=["Q"])
   assert out == [{"pitch": "C4", "duration": "Q"}]
+
+
+# ---- derive_inputs_from_recipe cross-drain interaction (drain 1900) -----
+
+def test_derive_inputs_from_input_statements():
+  from forge.recipe.parser import derive_inputs_from_recipe
+  decls = derive_inputs_from_recipe(
+    'Input pitches: list[str] = ["C4"].\n'
+    "Input tempo: int.\n"
+    "Return pitches.")
+  assert [d.name for d in decls] == ["pitches", "tempo"]
+  assert decls[0].type_hint == "list[str]"
+  assert decls[0].has_default is True
+  assert decls[1].has_default is False
+
+
+def test_derive_inputs_ignores_typed_lets_when_input_present():
+  # Once Input decls exist, typed Lets are ordinary locals — NOT
+  # derived as inputs (mirrors _transpile_inner's mode split exactly).
+  from forge.recipe.parser import derive_inputs_from_recipe
+  decls = derive_inputs_from_recipe(
+    "Input a: int = 1.\nLet b: int = 2.\nReturn a + b.")
+  assert [d.name for d in decls] == ["a"]
+
+
+def test_derive_inputs_from_pitched_line_post_migration():
+  # The exact live-note regression this fix closes: pre-fix this
+  # returned [] once the note used Input instead of typed Let.
+  from forge.recipe.parser import derive_inputs_from_recipe
+  body = open(
+    "/Users/odedfuhrmann/projects/music-core/pitched_line.md"
+  ).read()
+  from forge.recipe.detect import extract_recipe_body
+  decls = derive_inputs_from_recipe(extract_recipe_body(body))
+  assert [d.name for d in decls] == ["pitches", "rhythm_pattern"]

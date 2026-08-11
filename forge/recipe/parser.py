@@ -1056,16 +1056,39 @@ def collect_typed_input_lets(module: Module) -> List[LetStmt]:
 
 
 def derive_inputs_from_recipe(recipe_src: str):
-  """Derive the note's input declarations from its Recipe body's
-  leading typed Lets (Approach C). Returns a list of
-  `forge.recipe.detect.InputDecl` (with `type_hint` populated) so the
-  frontmatter `inputs:` field, MCP metadata, and palette surfaces can
-  all be machine-maintained from the Recipe. Coexists with the legacy
-  `## Inputs` Description-section parser — callers merge, typed Lets
-  winning on name collision (see transpiler)."""
+  """Derive the note's input declarations from its Recipe body.
+  Returns a list of `forge.recipe.detect.InputDecl` (with
+  `type_hint` populated) so the frontmatter `inputs:` field, MCP
+  metadata, and palette surfaces can all be machine-maintained from
+  the Recipe. Coexists with the legacy `## Inputs` Description-section
+  parser — callers merge, this source winning on name collision (see
+  transpiler).
+
+  Drain 2026-08-10-2000 — mirrors `_transpile_inner`'s exact dual-mode
+  split so this function and the transpiler NEVER disagree about
+  what counts as an input: if the Recipe has any `Input` statement
+  (anywhere), those are the ONLY source (drain-1610 typed Lets, if
+  also present, are ordinary annotated locals and NOT derived as
+  inputs here). Only when zero `Input` statements exist does this
+  fall back to the legacy leading-typed-Let inference (drain 1610),
+  unchanged. Missing this mirroring was an actual gap: drain 1900's
+  reactive stamper calls this function, and pre-fix it silently
+  stopped recognizing inputs on any note migrated to the `Input`
+  keyword (e.g. music-core/pitched_line, this same drain)."""
   from .detect import InputDecl
   module = parse(recipe_src)
+  input_stmts = [s for s in module.statements if isinstance(s, InputStmt)]
   out = []
+  if input_stmts:
+    for stmt in input_stmts:
+      out.append(InputDecl(
+        name=stmt.name,
+        default=None if stmt.is_required else stmt.default,
+        has_default=not stmt.is_required,
+        doc="",
+        type_hint=stmt.type_hint,
+      ))
+    return out
   for let in collect_typed_input_lets(module):
     if let.is_required_input:
       out.append(InputDecl(
