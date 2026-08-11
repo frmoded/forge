@@ -481,7 +481,7 @@ class ForgeContext:
   allows snippets to call other snippets."""
 
   def __init__(self, resolver, inputs, vault_path=None, registry=None,
-               caller_id=None, domains=None):
+               caller_id=None, domains=None, slot_resolutions=None):
     self._resolver = resolver
     self._inputs = inputs
     self.vault_path = vault_path
@@ -496,6 +496,32 @@ class ForgeContext:
     # per-callee-vault re-scoping is a documented follow-up). None = all
     # domains (back-compat), [] = core-only, [...] = those domains.
     self._domains = domains
+    # Drain 2026-08-10-1830 — the plugin's two-pass /resolve-slot
+    # protocol threads slot_resolutions into the TOP-LEVEL snippet's
+    # resolve_action_code call (via _forge_run_snippet), but
+    # context.compute() — the mechanism behind EVERY `Call [[x]]` /
+    # bare-shim dispatch — never received it, so any TRANSITIVELY
+    # called snippet with unresolved `{{ }}` slots missed on every
+    # single pass, forever (cache keys are per-callee-snippet_id, so
+    # the SAME dict the plugin already builds is correct here — it
+    # was just never threaded through). Cache the value once per
+    # execution scope + thread it into every resolve_action_code /
+    # nested exec_python call context.compute makes, so resolution
+    # propagates to arbitrary call-graph depth.
+    #
+    # DELIBERATELY NOT coalesced to `{}` here: resolve_action_code's
+    # V1 (English-mode) fast path branches on `slot_resolutions is
+    # None` specifically — None means "first pass, use the cached
+    # # Python / english_hash short-circuit"; an explicit dict (even
+    # empty) means "second pass, force re-transpile through the slot
+    # resolver." Coalescing None -> {} here would force EVERY
+    # transitively-called V1 snippet through the slower re-transpile
+    # path on every call, and — for callees with no # English section
+    # at all (Python-only / builtin-shaped) — break them outright
+    # ("no Python heading" per the ValueError below extract_python's
+    # cache-hit skip). Confirmed via the full suite catching this
+    # exact regression before it shipped.
+    self._slot_resolutions = slot_resolutions
 
   def get(self, key, default=None):
     return self._inputs.get(key, default)
@@ -522,7 +548,10 @@ class ForgeContext:
     snippet_type = snippet["meta"].get("type")
 
     if snippet_type == "action":
-      code = resolve_action_code(snippet)
+      # Drain 2026-08-10-1830 — thread this scope's slot_resolutions
+      # into the callee's own resolve; keys are (slot_text,
+      # CALLEE's snippet_id), so the same dict is valid at any depth.
+      code = resolve_action_code(snippet, slot_resolutions=self._slot_resolutions)
       if code is None:
         raise ValueError(f"no Python heading in snippet '{snippet_id}'")
       nested_trusted = snippet.get("source") == "builtin"
@@ -539,6 +568,9 @@ class ForgeContext:
         snippet_id=snippet["snippet_id"],
         domains=self._domains,
         declared_inputs=declared_inputs,
+        # Propagate to this callee's OWN nested context.compute calls
+        # (arbitrary depth — see ForgeContext.__init__ comment).
+        slot_resolutions=self._slot_resolutions,
       )
       if nested_stdout:
         sys.stdout.write(nested_stdout)
@@ -1107,7 +1139,7 @@ def _build_snippet_shims(context, registry):
   return shims
 
 
-def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None, domains=None, declared_inputs=None):
+def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=None, trusted=False, snippet_id=None, domains=None, declared_inputs=None, slot_resolutions=None):
   # v0.2.132 — guard against empty/None/non-string code reaching
   # compile(). Driver smoke on v0.2.131 mangled hello_world.md's
   # English with `}}}}}` and hit the engine through the english-
@@ -1135,7 +1167,7 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
   buf = io.StringIO()
   context = ForgeContext(resolver, inputs, vault_path=vault_path,
                          registry=registry, caller_id=snippet_id,
-                         domains=domains)
+                         domains=domains, slot_resolutions=slot_resolutions)
   # Per constitution B2, snippets get full Python power. The `trusted`
   # parameter is preserved for future use (e.g., distinguishing builtin from
   # vault snippets in some other capacity) but no longer controls builtins
