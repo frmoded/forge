@@ -33,7 +33,11 @@ import string
 
 import numpy
 
-from forge.moda.types import ParticleState
+# Relative import per I22 (drain 2026-08-10-1820): this module is
+# VENDORED byte-identical into forge-transpile's engine_libs/, whose
+# runtime has no `forge` package — absolute imports pass the
+# byte-drift check but explode at import time in the vendored home.
+from .types import ParticleState
 
 
 # ---------------------------------------------------------------------------
