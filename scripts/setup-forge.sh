@@ -89,163 +89,35 @@ cd "${CLIENT_APP}"
 echo "Installing client npm deps (this can take a minute)..."
 npm install --silent
 
-# --- Write the daily startup script ---
-cat > "${HOME}/start-forge-backend.sh" <<'EOF'
-#!/usr/bin/env bash
-# start-forge-backend.sh — start the Forge Python backend.
-# Reads ANTHROPIC_API_KEY and FORGE_MODA_VAULT_PATH from environment.
-#
-# Usage:
-#   export ANTHROPIC_API_KEY='your-key'
-#   export FORGE_MODA_VAULT_PATH=/path/to/vault/forge-moda
-#   bash ~/start-forge-backend.sh
-
-set -euo pipefail
-
-# Make sure brew-installed binaries are on PATH (non-interactive bash
-# doesn't inherit the user's shell PATH).
-if [ -x /opt/homebrew/bin/brew ]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [ -x /usr/local/bin/brew ]; then
-  eval "$(/usr/local/bin/brew shellenv)"
-fi
-
-if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-  echo "ERROR: ANTHROPIC_API_KEY not set."
-  echo "Run: export ANTHROPIC_API_KEY='your-shared-key'"
-  exit 1
-fi
-
-if [ -z "${FORGE_MODA_VAULT_PATH:-}" ]; then
-  echo "WARNING: FORGE_MODA_VAULT_PATH not set."
-  echo "  /moda/init will fail with 'snippet setup not found' until you set it."
-  echo "  After installing forge-moda via the plugin, find where it landed:"
-  echo "    find ~ -name setup.md -path '*forge-moda*'"
-  echo "  Then: export FORGE_MODA_VAULT_PATH=/absolute/path/to/forge-moda"
-fi
-
-cd ~/projects/forge
-# shellcheck disable=SC1091
-source .venv/bin/activate
-
-echo "Starting backend on http://localhost:8000..."
-echo "(In another terminal: cd ~/projects/forge-moda-client/forge-moda-web && npm run dev)"
-exec uvicorn forge.api.server:app --reload --port 8000
-EOF
-chmod +x "${HOME}/start-forge-backend.sh"
-
-cat > "${HOME}/start-forge-client.sh" <<'EOF'
-#!/usr/bin/env bash
-# start-forge-client.sh — start the Vite dev server for forge-moda-client.
-# Usage: bash ~/start-forge-client.sh
-
-set -euo pipefail
-
-# Make sure brew-installed binaries (npm) are on PATH.
-if [ -x /opt/homebrew/bin/brew ]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [ -x /usr/local/bin/brew ]; then
-  eval "$(/usr/local/bin/brew shellenv)"
-fi
-
-cd ~/projects/forge-moda-client/forge-moda-web
-exec npm run dev
-EOF
-chmod +x "${HOME}/start-forge-client.sh"
-
-cat > "${HOME}/update-forge.sh" <<'EOF'
-#!/usr/bin/env bash
-# update-forge.sh — pull latest backend + client from GitHub and reinstall deps.
-# Run this when you want to move to head. Safe to re-run; no-ops if already up to date.
-# Stop any running uvicorn / vite servers before running.
-#
-# Usage: bash ~/update-forge.sh
-
-set -euo pipefail
-
-# Make sure brew-installed binaries (npm) are on PATH.
-if [ -x /opt/homebrew/bin/brew ]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [ -x /usr/local/bin/brew ]; then
-  eval "$(/usr/local/bin/brew shellenv)"
-fi
-
-echo "=== Updating Forge backend ==="
-cd ~/projects/forge
-git pull --ff-only
-# shellcheck disable=SC1091
-source .venv/bin/activate
-pip install --quiet --upgrade pip
-pip install --quiet -e .
-deactivate
-echo "Backend up to date."
-
-echo
-echo "=== Updating Forge client ==="
-cd ~/projects/forge-moda-client
-git pull --ff-only
-cd forge-moda-web
-npm install --silent
-echo "Client up to date."
-
-echo
-echo "=== Done ==="
-echo "Restart the start-forge scripts to pick up the new versions."
-EOF
-chmod +x "${HOME}/update-forge.sh"
-
 # --- Done ---
 cat <<'EOF'
 
 === Setup complete ===
 
-Three helper scripts written to your home directory:
-  ~/start-forge-backend.sh   — starts uvicorn (needs API key + vault path)
-  ~/start-forge-client.sh    — starts the Vite dev server
-  ~/update-forge.sh          — pulls latest backend + client from GitHub
-                                and reinstalls deps. Run before starting
-                                if you want to move to head.
+Prerequisites, both repos, the Python venv and all deps are installed.
+
+Forge no longer uses a local backend. Recipe generation runs through the
+hosted forge-transpile service, and the Obsidian plugin is the primary UI --
+there is nothing to start on this machine and no ANTHROPIC_API_KEY to export.
+(The old ~/start-forge-backend.sh, ~/start-forge-client.sh and
+~/update-forge.sh generators were removed 2026-08-12; if those files are still
+sitting in your home directory from an earlier run of this script, they are
+stale and can be deleted.)
 
 Next steps (manual, one-time):
 
 1. Install Obsidian if you haven't yet:
      https://obsidian.md
 
-2. Get your Anthropic API key from the project owner.
+2. Install the Forge Client plugin into your vault:
+     VAULT=~/path/to/your/vault bash ~/projects/forge-client-obsidian/scripts/install-latest.sh
 
-3. Start the backend in one terminal:
-     export ANTHROPIC_API_KEY='<paste-key>'
-     bash ~/start-forge-backend.sh
+3. Enable the "Forge Client" plugin in Settings -> Community Plugins.
 
-4. Start the client in a second terminal:
-     bash ~/start-forge-client.sh
+4. Open an action note and click the run button. The plugin bundles its own
+   engine and reaches forge-transpile for generation; no local server needed.
 
-5. In Obsidian: install BRAT from Community Plugins, then in BRAT settings
-   add this URL as a beta plugin:
-     https://github.com/frmoded/forge-client-obsidian
-
-6. Enable the "Forge Client" plugin in Settings → Community Plugins.
-
-7. In a snippet, write the install call (English facet):
-     Install version 0.1.9 of the forge-moda vault from the registry.
-   Then Forge (Cmd+P → "Forge"). Wait for it to download the tarball.
-
-8. Find where forge-moda landed (it goes inside your vault):
-     find ~ -name setup.md -path '*forge-moda*'
-   Stop the backend (Ctrl+C in its terminal). Re-export with the path:
-     export FORGE_MODA_VAULT_PATH=/absolute/path/from/find/above
-     bash ~/start-forge-backend.sh
-
-9. In Obsidian: Cmd+P → "Forge: Open MoDa simulation". Particles should
-   appear in the iframe.
-
-Daily startup after the one-time setup above:
-  Terminal 1:  export ANTHROPIC_API_KEY='...' && export FORGE_MODA_VAULT_PATH='...' && bash ~/start-forge-backend.sh
-  Terminal 2:  bash ~/start-forge-client.sh
-  Obsidian:    open the vault and use the plugin
-
-To pull the latest backend + client from GitHub (do this when you want
-to move to head; stop the start-forge servers first):
-  bash ~/update-forge.sh
+To move to head later:
+  cd ~/projects/forge && git pull --ff-only && source .venv/bin/activate && pip install -e .
 
 EOF
