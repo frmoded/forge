@@ -48,10 +48,10 @@ mutation operator.
 
 The shorthand-call statement form is the ONLY way to invoke chips whose
 underlying signature takes a positional argument — the Python builtin
-`print` is the canonical example: it takes positional `*objects`, NOT a
-`text=` kwarg, so writing `Call [[print]] with text="x".` would emit
-`print(text="x")` and crash at runtime with `TypeError: print() got an
-unexpected keyword argument 'text'`. Use `[[print]] "x".` instead.
+`len` is the canonical example: it takes a single positional `obj`, NOT
+an `obj=` kwarg, so writing `Call [[len]] with obj=items.` would emit
+`len(obj=items)` and crash at runtime with `TypeError: len() takes no
+keyword arguments`. Use `[[len]] items.` instead.
 
 Every top-level statement MUST end with a period. Statements inside an
 indented block (If, Otherwise, For-each body) also end with periods.
@@ -89,9 +89,41 @@ Then read the return value via the let-binding.
 
 ## Inputs
 
-When the note declares inputs (via a `## Inputs` heading the engine
-parses), use those names directly as identifiers. Do not redeclare them
-in your output.
+There are two cases. Read both — getting this wrong produces a Recipe
+that parses but crashes at runtime with `NameError`.
+
+**Case 1 — the note already declares inputs.** If an `Inputs:` line
+appears in the authoring context above (the engine parsed a `## Inputs`
+heading from the note), use those names directly as identifiers. Do NOT
+redeclare them in your output.
+
+**Case 2 — no `Inputs:` line, but the Description implies parameters.**
+Declare each one with an `Input` statement:
+
+  Input NAME: TYPE.              (required — no default)
+  Input NAME: TYPE = DEFAULT.    (optional — default must be a literal)
+
+The type annotation is MANDATORY. The default, when present, must be a
+plain literal (string, number, bool, None, or a list of literals) — not
+a call or an expression. `Input` statements may appear anywhere in the
+Recipe body; position is not load-bearing, though putting them first
+reads best.
+
+For a parameter restricted to a fixed set of string values, use an
+enum-literal type — two or more `|`-separated quoted strings:
+
+  Input mode: 'major' | 'minor' = "major".
+
+which compiles to `Literal["major", "minor"]`.
+
+**The rule that matters: never reference a name you did not either
+declare (`Input` / `Let`) or receive from Case 1.** If the Description
+says "play a triad in the given mode with the given tonic", `mode` and
+`tonic` are parameters — declare them with `Input`. Emitting them as
+bare undeclared identifiers is always wrong: the syntax check passes
+(undefined names are not a parse error) and the note then fails at
+runtime, which is the exact failure the `Input` keyword exists to
+prevent.
 
 ## Output rules
 
@@ -102,15 +134,41 @@ in your output.
    note has no meaningful return value).
 4. Indent block bodies with EXACTLY 2 spaces.
 
+## When the Description is not computable
+
+If the Description does not describe any computable action, function,
+or value — if it is prose commentary, meta-remarks, empty text, or
+genuinely nonsensical — respond with the single literal token:
+CANNOT_INTERPRET
+
+Do NOT emit a Recipe that would compute nothing (like `Return None.`)
+or echo the Description back as a string (like
+`Return "the description text".`). Those outputs make the tool look
+broken to the user. Emitting CANNOT_INTERPRET is the honest response
+for a Description that does not specify a computation.
+
+Examples of CANNOT_INTERPRET-worthy Descriptions:
+- "asdf jkl qwerty" (nonsensical)
+- "This is a test of the emergency system." (meta-commentary, no
+  computation)
+- Empty or whitespace-only body
+- Prose that describes what you (the model) should do, not what the
+  Recipe should compute
+
+A SHORT but computable Description (e.g. "Return the string hello")
+is NOT a refusal case — emit the Recipe for it.
+
 ## Examples
 
-### Example 1: hello_world (forge-tutorial)
+### Example 1: length_of (domain-neutral shorthand demo)
 
-Description: Print "Hello, world!".
+Description: Return the number of items in the input list.
+
+Inputs: items
 
 Recipe:
-[[print]] "Hello, world!".
-Return.
+Let n = [[len]] items.
+Return n.
 
 ### Example 2: set_water_speed (forge-moda)
 
@@ -183,9 +241,31 @@ For each tick in Call [[tick_range]] with n=300:
 
 Return state.
 
+### Example 7: parameterized Description with NO declared inputs
+
+Description: Play a triad in the given mode with the given tonic. Mode
+is major or minor.
+
+Inputs: (none declared — the Description implies them)
+
+Recipe:
+Input tonic: str.
+Input mode: 'major' | 'minor' = "major".
+Let the_key = Call [[diatonic_scale]] with tonic=tonic, mode=mode, octave_range=[4, 5].
+Let triad = Call [[pick_indices]] with items=the_key, indices=[0, 2, 4].
+Return triad.
+
+Note what makes this correct: `tonic` and `mode` are named by the
+Description but declared by nothing else, so the Recipe declares them
+itself. Writing the same body WITHOUT the two `Input` lines would parse
+cleanly and then crash with `NameError: name 'tonic' is not defined`.
+
 ## What NOT to do
 
 - Do NOT wrap the output in ```e-- ... ``` fences. Plain text only.
+- Do NOT reference a name you have not declared. Every identifier must
+  come from an `Input` statement, a `Let` binding, a `For each` loop
+  variable, or the note's declared `Inputs:` list.
 - Do NOT include `# Recipe` heading. Just the body.
 - Do NOT use `def compute(context):` or any Python `def` form. V2 is
   declarative; the transpiler builds the compute() wrapper.
@@ -195,6 +275,28 @@ Return state.
 - Do NOT use parentheses inside expressions. Use Let bindings instead.
 - Do NOT use list/dict comprehensions. Use For-each + a Let binding
   accumulator (or a chip that already returns a list).
+- Do NOT emit `[[chipname]]` for any name that isn't listed in the
+  "Available chips and notes to Call" section of this request. In
+  particular: if the Description contains casual prose like `print
+  hello`, `log something`, or `debug this`, DO NOT invent chips from
+  those words. Treat such prose as intent-level commentary and skip
+  it if there's no matching chip in the catalog. When the intent
+  genuinely needs a chip you don't see listed, emit a one-line
+  `# missing chip: <name> — <what it would do>` comment INSTEAD of a
+  fabricated `[[wikilink]]`.
+- **Description output verbs are intent, NOT chip calls.** When the
+  Description says `print X`, `log X`, `output X`, `debug X`, `say X`,
+  `show X`, `make ... say X`, or any similar natural output-verb
+  phrase, that verb describes what the note WOULD conceptually do —
+  it is NOT an invitation to emit `[[print]]`, `[[log]]`, `[[output]]`,
+  `[[debug]]`, `[[say]]`, `[[show]]`, or `[[hello]]` as wikilink chip
+  calls. There is no `print` chip, no `log` chip, no `say` chip, no
+  `output` chip, no `debug` chip, no `show` chip, no `hello` chip —
+  those are prose verbs that map to Forge's single output verb
+  `Return`. The returned value renders in the Forge Output panel;
+  that IS the "print" / "log" / "say" affordance. Emit `Return X.`
+  and stop. Do not add a wikilink-shaped call as extra decoration
+  after the Return.
 
 When the natural Python idiom is unreachable in this dialect — e.g. an
 inline numpy expression, a try/except, a class definition — the answer

@@ -56,34 +56,46 @@ def test_build_system_prompt_v2_warns_about_print_kwarg_form():
   assert "[[print]]" in out
 
 
-def test_build_system_prompt_v2_example_1_uses_print_shorthand():
-  """Example 1 (hello_world) must show the shorthand statement form,
-  not `Call [[print]] with text=...`. Pre-v0.2.200 Example 1 taught
-  the kwarg form and the LLM reproduced it verbatim — print(text=)
-  crashes. (The Statements section is allowed to MENTION the bad form
-  as a counterexample so the LLM knows what NOT to do — we only assert
-  on the Example 1 recipe body here.)"""
+def test_build_system_prompt_v2_example_1_uses_shorthand_not_kwarg_form():
+  """Example 1 must show the shorthand statement form, not the
+  `Call [[fn]] with kwarg=...` form, for a callable that takes
+  POSITIONAL args. Pre-v0.2.200 Example 1 taught the kwarg form and the
+  LLM reproduced it verbatim — `print(text=)` crashes. (The Statements
+  section is allowed to MENTION the bad form as a counterexample so the
+  LLM knows what NOT to do — we only assert on the Example 1 recipe
+  body here.)
+
+  Updated 2026-08-12 (drain 1830, vendoring reconcile): Example 1 is now
+  `length_of` using `[[len]] items.` rather than `hello_world` using
+  `[[print]] "Hello, world!".`. The canonical copy of this prompt moved
+  to forge-transpile (see forge-transpile/prompts/__init__.py), and its
+  version had already swapped the positional-args exemplar from `print`
+  to `len`. The INVARIANT under test is unchanged — Example 1 teaches
+  shorthand, never the kwarg form — only the exemplar differs."""
   out = p.build_system_prompt_v2()
   # Extract Example 1's Recipe block.
-  ex1_marker = "### Example 1: hello_world"
+  ex1_marker = "### Example 1: length_of"
   ex2_marker = "### Example 2:"
   assert ex1_marker in out
   assert ex2_marker in out
   block = out[out.index(ex1_marker):out.index(ex2_marker)]
-  assert '[[print]] "Hello, world!".' in block
-  assert 'Call [[print]] with text=' not in block
+  assert '[[len]] items.' in block
+  assert 'Call [[len]] with obj=' not in block
 
 
 def test_build_system_prompt_v2_contains_few_shot_examples():
   out = p.build_system_prompt_v2()
   # Each example's signature line, so we catch regressions if an
   # example is dropped.
-  assert "Example 1: hello_world" in out
+  assert "Example 1: length_of" in out
   assert "Example 2: set_water_speed" in out
   assert "Example 3: setup" in out
   assert "Example 4: if_temp_high_set_speed" in out
   assert "Example 5: solitary" in out
   assert "Example 6: tick-loop composition" in out
+  # Example 7 added by drain 2026-08-12-1650 (Input-keyword grammar);
+  # reached the engine copy via the drain-1830 reconcile.
+  assert "Example 7: parameterized Description with NO declared inputs" in out
 
 
 def test_build_system_prompt_v2_warns_against_python_idioms():
