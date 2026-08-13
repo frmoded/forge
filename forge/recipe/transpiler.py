@@ -260,12 +260,24 @@ def _render_chip_invocation(name: str, kwargs_pyexpr: str) -> str:
 
   Two shapes:
 
-  - **Bare name** (`solitary`, `kick`): emit `name(kwargs)`. The
-    executor's `_build_snippet_shims` registers shims keyed by basename
-    that internally dispatch to `context.compute("name", ...)` with
-    caller-aware sibling-subdir probing — needed for in-domain
-    composition (e.g. murmuration → solitary across forge-music/
-    subdirs).
+  - **Bare name** (`solitary`, `kick`): emit `name(kwargs)` — a direct
+    call with NO runtime fallback. Whoever builds the execution scope
+    must therefore have already put a `name` in it, or this dies at
+    runtime with `NameError`.
+
+    Two different components do that, and they are NOT the same code:
+    `forge.core.executor`'s `_build_snippet_shims` registers shims keyed
+    by basename with caller-aware sibling-subdir probing, while the
+    forge-transpile sandbox emits module-scope defs only for notes the
+    forge-mcp closure walker packaged. This docstring previously
+    described only the former and implied it covered both, which sent
+    drain 2026-08-12-2130's investigation down the wrong path: the real
+    bug was that the closure walker's bare-name lookup checked the vault
+    ROOT only, so `[[solitary]]` at `percussion_lab/solitary.md` was
+    never packaged and no def was emitted. Fixed in forge-mcp's
+    `vault_note_closure._find_note_id`; the asymmetry between the two
+    scope-builders remains, so do not assume a bare name that resolves
+    under one will resolve under the other.
   - **Path-shaped** (`forge-music/percussion_lab/solitary`): emit
     `context.compute("forge-music/percussion_lab/solitary", kwargs)`.
     The resolver handles the qualified path directly without needing
