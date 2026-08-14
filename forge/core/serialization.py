@@ -287,11 +287,18 @@ def _try_serialize_particle_state(value, snippet):
   so environments without the moda module (or future installations
   that strip it) still load core serialization fine.
 
-  The row-oriented transposition is intentionally duplicated from
-  forge.api.moda._serialize_particles — pulling it into core would
-  improve layering (the row-shape conversion is a serializer concern,
-  not a router concern) but widen this prompt's blast radius. Flagged
-  as a follow-up in the feedback.
+  The row-oriented transposition here historically duplicated
+  forge.api.moda._serialize_particles, which was retired 2026-08-13
+  in drain 0445 (forge api/server + api/moda cleanup) — that module
+  no longer exists. This function is now the only Python
+  implementation of this transposition; the other surviving citation
+  of the same logic (with the /moda/init temperature-seeding
+  convention noted) lives at
+  forge-client-obsidian/src/pyodide-host.ts:1101, transplanted in the
+  same drain. Pulling this transposition deeper into core would still
+  be a legitimate layering improvement (it's a serializer concern, not
+  a router concern) but is no longer urgent now that the duplicate
+  it was flagged against is gone.
   """
   try:
     from forge.moda.types import ParticleState
