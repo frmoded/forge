@@ -45,6 +45,37 @@ _FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 _RECIPE_RE = re.compile(r"^# Recipe\s*$", re.M)
 _INPUTS_BLOCK_RE = re.compile(r"^inputs:\n(?:  - .*\n)*", re.M)
 _INPUTS_INLINE_RE = re.compile(r"^inputs:.*\n", re.M)
+_INPUTS_INLINE_LIST_RE = re.compile(r"^inputs:[ \t]*\[(.*?)\][ \t]*$", re.M)
+
+
+def _existing_input_names(fm: str) -> list[str] | None:
+  """The `inputs:` value already in the frontmatter, as a list of names.
+
+  `None` means the note carries no `inputs:` field at all — distinct from an
+  empty list, which is a note that declares it has none.
+
+  Drain 2026-08-16-1800 (retry). YAML writes a sequence two ways, and
+  `inputs: [bars, velocity]` is the SAME VALUE as the block form this script
+  emits. The comparison used to be against the block SERIALIZATION only, so
+  every inline-form note read as permanent drift no matter how right it was:
+  `--check` failed on it every run, and the remedy the failure printed would
+  have rewritten another vault's notes to change nothing but their
+  punctuation. Nine `music-core/percussion_lab` notes blocked the v0.2.360
+  release twice on exactly this. Compare values.
+  """
+  inline = _INPUTS_INLINE_LIST_RE.search(fm)
+  if inline is not None:
+    body = inline.group(1).strip()
+    return [n.strip() for n in body.split(",") if n.strip()] if body else []
+
+  block = _INPUTS_BLOCK_RE.search(fm + "\n")
+  if block is not None:
+    return [
+      line.strip()[2:].strip()
+      for line in block.group(0).splitlines()[1:]
+      if line.strip().startswith("- ")
+    ]
+  return None
 
 
 def _recipe_body(text: str) -> str | None:
@@ -98,11 +129,10 @@ def stamp_note(path: Path, *, write: bool = True) -> bool:
   names = [d.name for d in decls]
   fm = fm_match.group(1)
 
-  existing = _INPUTS_BLOCK_RE.search(fm + "\n")
   desired = _render_inputs(names).rstrip("\n")
 
-  if existing and existing.group(0).strip() == desired.strip():
-    return False  # already correct — no write, no churn
+  if _existing_input_names(fm) == names:
+    return False  # already correct — no write, no churn, whichever YAML form
 
   if not write:
     return True  # --check: it needs stamping, and we say so without doing it

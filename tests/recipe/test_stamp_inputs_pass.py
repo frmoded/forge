@@ -34,6 +34,21 @@ Input word: str = "hooray".
 Return word + "!".
 """
 
+_MULTI_INPUT_NOTE = """---
+type: action
+---
+
+# Description
+
+Takes several, and their order is the compute() signature's order.
+
+# Recipe
+
+Input bars: int = 4.
+Input velocity: int = 70.
+Return bars * velocity.
+"""
+
 _LET_ONLY_NOTE = """---
 type: action
 ---
@@ -242,3 +257,80 @@ def test_main_check_on_a_clean_vault_exits_0(tmp_path: Path):
   main([str(tmp_path)])
 
   assert main(["--check", str(tmp_path)]) == 0
+
+
+# ---------------------------------------------------------------------
+# Inline (flow-sequence) `inputs:` — drain 2026-08-16-1800 retry
+# ---------------------------------------------------------------------
+#
+# `inputs: [bars, velocity]` and the block form are the SAME YAML value.
+# The pass compared serializations, not values, so every inline-form note
+# read as permanent drift: `--check` reported it on every run, and the
+# suggested remedy would have rewritten another vault's notes to change
+# nothing but their punctuation.
+#
+# Found by the v0.2.360 release preflight firing on nine music-core
+# percussion_lab notes whose `inputs:` were already exactly right.
+
+
+def _inline(note: str, names: list[str]) -> str:
+  return note.replace(
+    "type: action\n", "type: action\ninputs: [" + ", ".join(names) + "]\n"
+  )
+
+
+def test_inline_inputs_that_already_match_are_not_drift(tmp_path: Path):
+  """THE case that blocked v0.2.360 twice."""
+  p = tmp_path / "inline.md"
+  p.write_text(_inline(_INPUT_NOTE, _expected_names(_INPUT_NOTE)))
+  before = p.read_text()
+
+  assert stamp_note(p, write=False) is False, (
+    "an inline inputs: list carrying the deriver's exact answer is not drift"
+  )
+  assert stamp_note(p) is False
+  assert p.read_text() == before, "a correct note must not be rewritten"
+
+
+def test_inline_inputs_that_are_wrong_are_still_corrected(tmp_path: Path):
+  """Serialization-insensitive must not become value-insensitive."""
+  p = tmp_path / "inline-stale.md"
+  p.write_text(_inline(_INPUT_NOTE, ["wrongname"]))
+
+  assert stamp_note(p, write=False) is True
+  assert stamp_note(p) is True
+  out = p.read_text()
+  assert "wrongname" not in out
+  for name in _expected_names(_INPUT_NOTE):
+    assert name in out
+
+
+def test_inline_inputs_in_the_wrong_order_are_corrected(tmp_path: Path):
+  """Order is meaning — it is the compute() signature's parameter order."""
+  names = _expected_names(_MULTI_INPUT_NOTE)
+  assert len(names) > 1, "fixture must have enough inputs to reorder"
+  p = tmp_path / "inline-reordered.md"
+  p.write_text(_inline(_MULTI_INPUT_NOTE, list(reversed(names))))
+
+  assert stamp_note(p, write=False) is True
+  assert stamp_note(p) is True
+  assert _expected_names(_MULTI_INPUT_NOTE) == [
+    line.strip()[2:] for line in p.read_text().splitlines()
+    if line.startswith("  - ")
+  ]
+
+
+def test_an_empty_inline_list_on_an_input_note_is_drift(tmp_path: Path):
+  p = tmp_path / "inline-empty.md"
+  p.write_text(_inline(_INPUT_NOTE, []))
+  assert stamp_note(p, write=False) is True
+
+
+def test_check_mode_on_an_inline_vault_writes_nothing(tmp_path: Path):
+  """The gate that fires on these must not also mutate them."""
+  p = tmp_path / "inline.md"
+  p.write_text(_inline(_INPUT_NOTE, ["wrongname"]))
+  before = p.read_text()
+
+  assert stamp_vault(tmp_path, write=False) == [p]
+  assert p.read_text() == before
