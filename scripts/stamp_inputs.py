@@ -62,12 +62,20 @@ def _render_inputs(names: list[str]) -> str:
   return "inputs:\n" + "".join(f"  - {n}\n" for n in names)
 
 
-def stamp_note(path: Path) -> bool:
+def stamp_note(path: Path, *, write: bool = True) -> bool:
   """Bring one note's `inputs:` frontmatter in line with its Recipe.
 
-  Returns True if the file was changed. Idempotent: a note already carrying
-  the deriver's answer is left byte-identical and reports False, so this can
-  run on every sync without churning files.
+  Returns True if the note needed stamping. Idempotent: a note already
+  carrying the deriver's answer is left byte-identical and reports False, so
+  this can run on every sync without churning files.
+
+  `write=False` answers the same question without touching the file — the
+  mode `--check` runs in. Drain 2026-08-16-0910: `--check` used to change
+  only the printed verb and the exit code while `stamp_vault` wrote either
+  way, so the check MUTATED the vault it was inspecting. Wired into the
+  release preflight that means every cut silently rewrites bundled content,
+  and a red CI run goes green on retry with an unexplained working-tree
+  change. A gate must not fix what it is gating.
   """
   text = path.read_text(encoding="utf-8")
   fm_match = _FM_RE.match(text)
@@ -96,6 +104,9 @@ def stamp_note(path: Path) -> bool:
   if existing and existing.group(0).strip() == desired.strip():
     return False  # already correct — no write, no churn
 
+  if not write:
+    return True  # --check: it needs stamping, and we say so without doing it
+
   # Drop any prior inputs: representation (block or inline), then append.
   new_fm = _INPUTS_BLOCK_RE.sub("", fm + "\n")
   new_fm = _INPUTS_INLINE_RE.sub("", new_fm)
@@ -106,13 +117,16 @@ def stamp_note(path: Path) -> bool:
   return True
 
 
-def stamp_vault(root: Path) -> list[Path]:
-  """Stamp every `.md` under `root`. Returns the paths actually changed."""
+def stamp_vault(root: Path, *, write: bool = True) -> list[Path]:
+  """Stamp every `.md` under `root`. Returns the paths that needed stamping.
+
+  With `write=False` nothing is written and the return value is the list of
+  notes that WOULD have been stamped — what `--check` reports."""
   changed: list[Path] = []
   for p in sorted(root.rglob("*.md")):
     if any(part.startswith(".") for part in p.relative_to(root).parts):
       continue  # skip .obsidian/, .forge/, etc.
-    if stamp_note(p):
+    if stamp_note(p, write=write):
       changed.append(p)
   return changed
 
@@ -128,7 +142,7 @@ def main(argv: list[str]) -> int:
     if not root.is_dir():
       print(f"ERROR: not a directory: {root}", file=sys.stderr)
       return 2
-    changed = stamp_vault(root)
+    changed = stamp_vault(root, write=not check)
     total.extend(changed)
     for p in changed:
       print(f"  {'DRIFT' if check else 'stamped'}: {p}")

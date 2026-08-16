@@ -18,7 +18,7 @@ import pytest
 
 from forge.recipe.parser import derive_inputs_from_recipe
 
-from scripts.stamp_inputs import stamp_note, stamp_vault  # noqa: E402
+from scripts.stamp_inputs import main, stamp_note, stamp_vault  # noqa: E402
 
 _INPUT_NOTE = """---
 type: action
@@ -161,3 +161,84 @@ def test_stamp_vault_walks_recursively(tmp_path: Path):
   assert sorted(p.name for p in changed) == ["one.md", "two.md"]
   # Idempotent at the vault level too.
   assert stamp_vault(tmp_path) == []
+
+
+# --------------------------------------------------------------- --check
+
+
+"""Drain 2026-08-16-0910 — `--check` must not WRITE.
+
+Found while wiring the pass into the release preflight: `--check` only
+changed the printed verb and the exit code. `stamp_vault` wrote either
+way, so the check mutated the very vault it was inspecting — the first
+run "failed" and silently fixed the drift, and a re-run passed. As a
+release gate that means every cut rewrites bundled content, and a CI
+failure disappears on retry with an unexplained working-tree change.
+"""
+
+
+def test_check_mode_reports_drift_without_writing(tmp_path: Path):
+  p = tmp_path / "stale.md"
+  drifted = _INPUT_NOTE.replace("type: action\n", "type: action\ninputs:\n  - wrongname\n")
+  p.write_text(drifted)
+
+  needs = stamp_note(p, write=False)
+
+  assert needs is True, "a drifted note must still be REPORTED as needing a stamp"
+  assert p.read_text() == drifted, "--check must leave the file byte-identical"
+
+
+def test_check_mode_on_a_correct_note_reports_no_change(tmp_path: Path):
+  p = tmp_path / "ok.md"
+  p.write_text(_INPUT_NOTE)
+  stamp_note(p)  # bring it up to date for real
+  stamped = p.read_text()
+
+  assert stamp_note(p, write=False) is False
+  assert p.read_text() == stamped
+
+
+def test_stamp_vault_check_mode_writes_nothing(tmp_path: Path):
+  (tmp_path / "a").mkdir()
+  drifted = _INPUT_NOTE.replace("type: action\n", "type: action\ninputs:\n  - wrongname\n")
+  (tmp_path / "a" / "one.md").write_text(drifted)
+
+  found = stamp_vault(tmp_path, write=False)
+
+  assert [p.name for p in found] == ["one.md"]
+  assert (tmp_path / "a" / "one.md").read_text() == drifted
+
+
+def test_main_check_exits_1_and_leaves_the_vault_untouched(tmp_path: Path):
+  p = tmp_path / "stale.md"
+  drifted = _INPUT_NOTE.replace("type: action\n", "type: action\ninputs:\n  - wrongname\n")
+  p.write_text(drifted)
+
+  code = main(["--check", str(tmp_path)])
+
+  assert code == 1
+  assert p.read_text() == drifted, "the gate must not fix what it is gating"
+  # And it must STAY red — a second run reporting clean is the flaky-CI
+  # signature this bug produced.
+  assert main(["--check", str(tmp_path)]) == 1
+
+
+def test_main_without_check_still_stamps(tmp_path: Path):
+  """Regression guard — the write path is the pass's whole job."""
+  p = tmp_path / "stale.md"
+  p.write_text(_INPUT_NOTE.replace("type: action\n", "type: action\ninputs:\n  - wrongname\n"))
+
+  assert main([str(tmp_path)]) == 0
+
+  out = p.read_text()
+  assert "wrongname" not in out
+  for name in _expected_names(_INPUT_NOTE):
+    assert name in out
+
+
+def test_main_check_on_a_clean_vault_exits_0(tmp_path: Path):
+  p = tmp_path / "ok.md"
+  p.write_text(_INPUT_NOTE)
+  main([str(tmp_path)])
+
+  assert main(["--check", str(tmp_path)]) == 0
