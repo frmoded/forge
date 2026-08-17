@@ -13,6 +13,7 @@ note prints something the driver expects to see.
 """
 
 import io
+import os
 import sys
 
 import pytest
@@ -24,6 +25,46 @@ from forge.core.executor import (
 from forge.core.registry import GraphResolver, SnippetRegistry
 
 from tests.music._helpers import _find_vault as _find_music_vault
+
+
+def collect_action_note_basenames(vault):
+  """Basenames of every `type: action` note that BELONGS to `vault`.
+
+  Dot-directories are pruned from the walk. Drain 2026-08-17-1210: the
+  driver installs the plugin into the standalone forge-tutorial vault,
+  so `.obsidian/plugins/forge-client-obsidian/assets/vaults/` holds the
+  plugin's own bundled copies of the OTHER vaults (music-theory,
+  forge-moda, music-core). A raw `os.walk` collected those too, and the
+  coverage guard then demanded exec-smoke tests for notes that do not
+  exist in forge-tutorial at all — `murmuration`, `companions`,
+  `create_ink_particles`. The duplicate entries in its own failure
+  message (`describe_it` twice, `mood` twice) were the same basename
+  found once in the vault and once in the bundle.
+
+  `.forge/` (edge snapshots) is pruned by the same rule, which is also
+  correct: a frozen edge is not an authored note.
+
+  Pruning is done by mutating `dirs` in place — the documented way to
+  stop `os.walk` from descending, and the reason this loop binds `dirs`
+  rather than discarding it.
+  """
+  found = []
+  for root, dirs, files in os.walk(vault):
+    dirs[:] = [d for d in dirs if not d.startswith(".")]
+    for fn in files:
+      if not fn.endswith(".md"):
+        continue
+      path = os.path.join(root, fn)
+      try:
+        with open(path) as f:
+          head = f.read(200)
+      except OSError:
+        continue
+      # YAML frontmatter `type: action` check — same way the
+      # registry classifies notes.
+      if "\ntype: action" in head or head.startswith("---\ntype: action"):
+        found.append(fn[:-len(".md")])
+  return found
 
 
 def _find_tutorial_vault():
@@ -171,23 +212,8 @@ class TestAllTutorialActionNotesHaveCoverage:
   immediately."""
 
   def test_every_action_note_has_a_test(self, tutorial_resolver):
-    import os
     _, _, vault = tutorial_resolver
-    action_notes = []
-    for root, _dirs, files in os.walk(vault):
-      for fn in files:
-        if not fn.endswith(".md"):
-          continue
-        path = os.path.join(root, fn)
-        try:
-          with open(path) as f:
-            head = f.read(200)
-        except OSError:
-          continue
-        # YAML frontmatter `type: action` check — same way the
-        # registry classifies notes.
-        if "\ntype: action" in head or head.startswith("---\ntype: action"):
-          action_notes.append(fn[:-len(".md")])
+    action_notes = collect_action_note_basenames(vault)
     test_methods = {
       m for m in dir(TestActionNotesExec) if m.startswith("test_")
     }
@@ -262,3 +288,67 @@ class TestPrintShorthandVsKwargForm:
       )
     assert "text" in str(exc_info.value)
     assert "keyword argument" in str(exc_info.value)
+
+
+class TestActionNoteWalkFilter:
+  """Drain 2026-08-17-1210 — the dot-directory filter, proved on a
+  fixture tree rather than on the live vault.
+
+  Non-vacuity matters here more than usual: a filter that excluded
+  EVERYTHING would make the coverage guard pass for the wrong reason
+  and silence the real gap it exists to surface. Each test below
+  asserts both halves — the decoy is gone AND the real note survived.
+  """
+
+  ACTION_NOTE = "---\ntype: action\n---\n\n# Description\n\nDo a thing.\n"
+
+  def _tree(self, root):
+    """A vault with one real note and one decoy buried in a dot-dir,
+    mirroring the live layout: the installed plugin ships another
+    vault's notes under `.obsidian/plugins/.../assets/vaults/`."""
+    real = root / "01-hello" / "hello_world.md"
+    real.parent.mkdir(parents=True)
+    real.write_text(self.ACTION_NOTE)
+
+    decoy = (root / ".obsidian" / "plugins" / "forge-client-obsidian"
+             / "assets" / "vaults" / "music-theory" / "percussion"
+             / "murmuration.md")
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text(self.ACTION_NOTE)
+
+    snapshot = root / ".forge" / "edges" / "authoring" / "frozen.md"
+    snapshot.parent.mkdir(parents=True)
+    snapshot.write_text(self.ACTION_NOTE)
+    return real, decoy, snapshot
+
+  def test_notes_inside_dot_directories_are_excluded(self, tmp_path):
+    real, decoy, snapshot = self._tree(tmp_path)
+    # The fixture is real: if these ever stop existing the test below
+    # would pass vacuously.
+    assert decoy.exists() and snapshot.exists() and real.exists()
+
+    found = collect_action_note_basenames(str(tmp_path))
+
+    assert "murmuration" not in found, (
+      "a note from the installed plugin's bundled copy of ANOTHER vault "
+      "was collected as if it belonged to this one"
+    )
+    assert "frozen" not in found, "a .forge/ edge snapshot is not an authored note"
+
+  def test_the_filter_still_collects_real_notes(self, tmp_path):
+    self._tree(tmp_path)
+    found = collect_action_note_basenames(str(tmp_path))
+    assert found == ["hello_world"], (
+      f"the filter must exclude only dot-directories; got {found}"
+    )
+
+  def test_a_vault_of_only_dot_directories_yields_nothing(self, tmp_path):
+    decoy = tmp_path / ".obsidian" / "buried.md"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text(self.ACTION_NOTE)
+    assert collect_action_note_basenames(str(tmp_path)) == []
+
+  def test_non_action_notes_are_still_ignored(self, tmp_path):
+    (tmp_path / "data.md").write_text("---\ntype: data\n---\n\nrows: 3\n")
+    (tmp_path / "act.md").write_text(self.ACTION_NOTE)
+    assert collect_action_note_basenames(str(tmp_path)) == ["act"]
