@@ -200,6 +200,57 @@ class TestActionNotesExec:
       for m in exc_info.value.missing
     )
 
+  # -- drain 2026-08-19-0910: the three notes the coverage guard named --
+  #
+  # These are the notes the Input-keyword arc made interesting, and until
+  # now their only sentinel was a human running the dropdown smoke. Each
+  # assertion below is the headless twin of a UI behaviour.
+
+  def test_describe_it(self, tutorial_resolver):
+    """Cross-note composition: describe_it Calls [[excited_word]] and
+    splices its return into a sentence. Pins the composition, and with
+    it the sibling-resolution path describe_it depends on."""
+    _, result = _run(tutorial_resolver, "describe_it")
+    assert result == "This is wonderful."
+
+  def test_function_inputs_uses_declared_defaults(self, tutorial_resolver):
+    """Both Inputs are declared with defaults; calling with no kwargs
+    must use them rather than raising for missing arguments."""
+    _, result = _run(tutorial_resolver, "function_inputs")
+    assert result == "Ada Lovelace"
+
+  def test_function_inputs_supplied_values_win(self, tutorial_resolver):
+    """The defaulted-vs-supplied path: passing kwargs overrides the
+    declared defaults. Without this, a regression that ignored caller
+    input would still pass the defaults test."""
+    _, result = _run(
+      tutorial_resolver, "function_inputs",
+      first_name="Grace", last_name="Hopper",
+    )
+    assert result == "Grace Hopper"
+
+  def test_mood_cheerful_is_the_declared_default(self, tutorial_resolver):
+    """`Input style: 'cheerful' | 'formal' | 'sleepy' = "cheerful"` — the
+    enum-literal Input that renders as the Run dialog's dropdown. No
+    kwargs means the declared default literal."""
+    _, result = _run(tutorial_resolver, "mood")
+    assert result == "Hey hey hey!!!"
+
+  def test_mood_output_varies_with_each_enum_literal(self, tutorial_resolver):
+    """The headless twin of the dropdown smoke: every literal the Input
+    declares selects a distinct branch. Asserting distinctness as well as
+    values catches a regression that collapsed the If-chain to one arm
+    while still returning something."""
+    outputs = {}
+    for literal in ("cheerful", "formal", "sleepy"):
+      _, result = _run(tutorial_resolver, "mood", style=literal)
+      outputs[literal] = result
+    assert outputs["cheerful"] == "Hey hey hey!!!"
+    assert outputs["formal"] == "Good day to you."
+    assert outputs["sleepy"] == "...zzz..."
+    assert len(set(outputs.values())) == 3, (
+      f"each declared literal must select its own branch; got {outputs}"
+    )
 
 class TestAllTutorialActionNotesHaveCoverage:
   """Coverage-guard: every `type: action` note in the tutorial vault
