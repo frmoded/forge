@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from forge.core.registry import SnippetRegistry, GraphResolver
-from forge.core.executor import extract_python, exec_python
+from forge.core.executor import resolve_action_code, extract_python, exec_python
 from tests.moda._helpers import make_state, _find_vault
 
 
@@ -46,7 +46,15 @@ def run(vault_copy):
 
     def _run(sid, *args, **inputs):
         snip = res.resolve(sid)
-        code = extract_python(snip["body"])
+        # Drain 2026-08-20-1210(c) — was `extract_python(snip["body"])`,
+        # which reads the `# Python` facet directly. V2 notes have no
+        # such facet; `go.md` ships Description + Recipe only, so the
+        # read returned empty and the engine correctly refused to exec.
+        # That is why these 3 tests failed while `simulation` ran 300
+        # `go` ticks green: simulation goes through resolve_action_code,
+        # which transpiles the Recipe. conftest.py's `_run` was made
+        # V2-aware at v0.2.196; this file's local copy was missed.
+        code = resolve_action_code(snip)
         _, result = exec_python(
             code, inputs, res, args=args,
             vault_path=vault_copy, registry=reg,

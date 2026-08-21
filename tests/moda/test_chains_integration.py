@@ -35,9 +35,16 @@ def test_setup_temperature_threads_into_initial_speed(run_block):
     assert sorted(set(np.round(run_block("setup", "high").speeds, 3))) == [100.0]
 
 
-def test_create_water_particles_appends_to_state(run_block):
+def test_create_water_particles_appends_to_state():
+    # Drain 2026-08-20-1210(a) — was `run_block("create_water_particles")`,
+    # which resolved a VAULT NOTE. That note was deleted (3009f81): it
+    # called its own basename and so shadowed the engine library
+    # function it meant to call, recursing forever. The library function
+    # is and always was the real callee, so the test now exercises it
+    # directly rather than a wrapper that no longer exists.
+    from forge.moda.lib import create_water_particles
     s0 = make_state(n_water=3, n_ink=2)
-    s1 = run_block("create_water_particles", s0)
+    s1 = create_water_particles(s0)
     assert len(s1.ids) == 5 + 500
     # ids continue past the existing max
     assert s1.ids.max() == 504
@@ -50,7 +57,8 @@ def test_create_water_particles_appends_to_state(run_block):
 
 def test_on_mouse_click_adds_50_ink_as_a_radial_drop(run_block):
     """v0.4.13: ink spawns disperse radially from the click point —
-    each particle gets a small position jitter (within ±3 units of
+    each particle gets a small position jitter (within the library's
+    declared `radius` of
     the click) and its own random heading uniform in [0, 2π). The
     previous "coherent puff" with a shared heading was pedagogically
     misleading (ink dropped in water disperses; it doesn't migrate
@@ -62,10 +70,20 @@ def test_on_mouse_click_adds_50_ink_as_a_radial_drop(run_block):
     assert ink.sum() == 50
     # Position jitter: ±3 units of the click. Not all-equal — that
     # would mean we lost the per-particle randomness.
-    assert s1.xs[ink].min() >= 400.0 - 3.0
-    assert s1.xs[ink].max() <= 400.0 + 3.0
-    assert s1.ys[ink].min() >= 300.0 - 3.0
-    assert s1.ys[ink].max() <= 300.0 + 3.0
+    # Drain 2026-08-20-1210(a) — the bound is read from the library's
+    # own declared default instead of the hardcoded ±3 this test used to
+    # assert. `on_mouse_click` calls [[create_ink_particles]] without a
+    # radius, so the shipping spread is the library default (5.0); the
+    # ±3 traced to a v0.4.13-era vault note and had been asserting a
+    # radius the shipping path never uses. Deriving it means a future
+    # change to the default cannot silently diverge from this test again.
+    import inspect
+    from forge.moda.lib import create_ink_particles
+    radius = inspect.signature(create_ink_particles).parameters["radius"].default
+    assert s1.xs[ink].min() >= 400.0 - radius
+    assert s1.xs[ink].max() <= 400.0 + radius
+    assert s1.ys[ink].min() >= 300.0 - radius
+    assert s1.ys[ink].max() <= 300.0 + radius
     assert not np.allclose(s1.xs[ink], 400.0)  # not all identical
     assert not np.allclose(s1.ys[ink], 300.0)
     # Per-particle headings: many distinct values, not a single

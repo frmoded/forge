@@ -1,124 +1,167 @@
-"""Static conformance for the 25 MoDa block snippets.
+"""Static conformance for the moda blocks — V2 vocabulary.
 
-For each block, assert the generated Python:
-  - parses,
-  - has the expected `compute` signature (implicit-state convention:
-    `compute(context, state, <declared inputs>)`, except `setup`
-    which is the state-origin: `compute(context, temperature)`),
-  - calls exactly the peer snippets its English names (catches
-    hallucinated deps like the `get_colliding_pairs` slip),
-  - is vectorized where it does per-particle/per-pair work, and never
-    Python-loops over the particle arrays.
+Drain 2026-08-20-1210(b). The V1 test this replaces asserted that every
+note carried a `# Python` facet whose `context.compute("peer")` calls
+matched a hand-maintained peer set. That invariant describes an
+architecture that no longer exists: V2 notes declare their dependencies
+as Recipe wikilinks and have no `# Python` facet at all. Against the
+shipping vault it failed on 25 of 25 notes — not because the vault was
+wrong, but because the test was reading a vocabulary the project
+retired. Its SPEC also still enumerated two notes the driver had
+deleted.
+
+Retired on forge-core's adjudication, and replaced rather than dropped:
+the *spirit* — dependency correctness, checked statically, per note —
+is worth keeping. The V2 form of it is that **every wikilink in a
+Recipe resolves**, either to a vault note or to an engine library
+function. That is the property whose violation produced this session's
+two cohort-facing failures (`create_water_particles`,
+`create_ink_particles`), and unlike a hardcoded peer set it needs no
+maintenance as the vault evolves.
+
+What this deliberately does NOT do is re-encode expected peer sets in
+V2 clothing. A hand-maintained list of who-calls-whom was the part that
+rotted; asserting resolvability instead keeps the guarantee and drops
+the upkeep.
 """
 import ast
+import os
 import re
 
 import pytest
 
-# block id -> (extra params after the implicit `state`, expected
-# context.compute peer ids (exact set), must_be_vectorized)
-SPEC = {
-    # setup chain
-    "setup": (["temperature"], {"create_water_particles", "set_water_speed", "set_water_mass"}, False),
-    "create_water_particles": ([], set(), True),
-    "set_water_speed": (["temperature"], {"speed_for_temperature"}, True),
-    "set_water_mass": ([], set(), True),
-    # click chain
-    "on_mouse_click": (["x", "y"], {"create_ink_particles", "set_ink_speed", "set_ink_mass"}, False),
-    "create_ink_particles": (["x", "y"], set(), True),
-    "set_ink_speed": ([], {"speed_for_temperature"}, True),
-    "set_ink_mass": ([], set(), True),
-    # go chain
-    # go is now history-dependent (C8): optional state/dt/temperature,
-    # and it falls back through context.read_snapshot() →
-    # context.compute("sample_state"), so sample_state joins its peers.
-    "go": (["dt", "temperature"], {"sample_state", "ask_all_particles", "ask_water_particles"}, False),
-    "ask_all_particles": (["dt"], {"move", "if_wall_then_bounce", "interact"}, False),
-    "move": (["dt"], set(), True),
-    "interact": ([], {"if_particle_then_bounce"}, True),
-    "if_wall_then_bounce": ([], {"bounce_off_wall"}, False),
-    "bounce_off_wall": ([], set(), True),
-    "if_particle_then_bounce": (["pairs"], {"bounce_off_particle"}, False),
-    "bounce_off_particle": (["pairs"], set(), True),
-    # temperature chain
-    "ask_water_particles": (["temperature"], {
-        "if_temp_high_set_speed", "if_temp_medium_set_speed",
-        "if_temp_low_set_speed", "if_temp_zero_set_speed"}, False),
-    "if_temp_high_set_speed": (["temperature"], {"set_speed_high"}, False),
-    "set_speed_high": ([], {"speed_for_temperature"}, True),
-    "if_temp_medium_set_speed": (["temperature"], {"set_speed_medium"}, False),
-    "set_speed_medium": ([], {"speed_for_temperature"}, True),
-    "if_temp_low_set_speed": (["temperature"], {"set_speed_low"}, False),
-    "set_speed_low": ([], {"speed_for_temperature"}, True),
-    "if_temp_zero_set_speed": (["temperature"], {"set_speed_zero"}, False),
-    "set_speed_zero": ([], {"speed_for_temperature"}, True),
-}
+_ENGINE = os.path.join(os.path.dirname(__file__), "..", "..", "forge")
 
-# setup is the state origin — no `state` parameter.
-_NO_STATE = {"setup"}
+#: E-- language primitives: valid `[[...]]` targets that are neither
+#: vault notes nor library functions. `print` is documented as such in
+#: forge/recipe/parser.py's own grammar docstring
+#: (`Call [[print]] with text="hi".`).
+#:
+#: FINDING (drain 2026-08-20-1210, reported in FEEDBACK): the ENGINE has
+#: no authoritative primitive registry. The plugin has one —
+#: `LANGUAGE_PRIMITIVES` in the TS palette code, hardcoded there per
+#: drain 1300 ("language primitives are plugin-registered; not
+#: vault-configurable") — but nothing engine-side enumerates them, so
+#: this set is curated by hand and can drift. It is deliberately
+#: minimal: a name only belongs here with a citation.
+_LANGUAGE_PRIMITIVES = {"print"}
 
-_PARTICLE_LOOP = re.compile(
-    r"\bfor\s+\w+\s+in\s+(state\.|range\(\s*len\(\s*state\.|range\(\s*state\.)"
-)
-# A vectorized block operates on the struct-of-arrays fields directly.
-# Boolean-mask / fancy-index code (`state.types == 'water'`,
-# `speeds[is_water] = ...`) is vectorized but carries NO literal
-# `numpy.` token — so "touches a state array" + "no particle loop"
-# (asserted globally) is the faithful vectorization signal here.
-_STATE_ARRAY = re.compile(r"\bstate\.(xs|ys|headings|speeds|types|masses|ids)\b")
+#: `[[target]]` — the only dependency vocabulary V2 Recipes use.
+_WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
 
 
-def _find_compute(tree):
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "compute":
-            return node
-    return None
+def _library_function_names():
+    """Public callables in forge.core.lib + forge.moda.lib.
+
+    AST-read rather than imported: this is a static test and has no
+    business pulling numpy in to answer a name question.
+    """
+    names = set()
+    for mod in ("core", "moda"):
+        path = os.path.join(_ENGINE, mod, "lib.py")
+        if not os.path.isfile(path):
+            continue
+        for node in ast.parse(open(path).read()).body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if not node.name.startswith("_"):
+                    names.add(node.name)
+    return names
 
 
-def _compute_call_targets(tree):
-    targets = set()
-    for node in ast.walk(tree):
-        if (isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "compute"
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "context"
-                and node.args
-                and isinstance(node.args[0], ast.Constant)
-                and isinstance(node.args[0].value, str)):
-            targets.add(node.args[0].value)
-    return targets
+def _recipe_body(text):
+    out, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("# Recipe"):
+            inside = True
+            continue
+        if inside and line.startswith("# "):
+            break
+        if inside:
+            out.append(line)
+    return "\n".join(out)
 
 
-@pytest.mark.parametrize("sid", sorted(SPEC))
-def test_block_static_conformance(sid, block_source):
-    extra, expected_peers, must_vec = SPEC[sid]
-    src = block_source(sid)
-    assert src and src.strip(), f"{sid}: empty Python facet"
+def _notes(vault):
+    """{basename: (relpath, text)} for authored notes, dot-dirs pruned.
 
-    tree = ast.parse(src)  # raises SyntaxError -> test failure
-    fn = _find_compute(tree)
-    assert fn is not None, f"{sid}: no compute() defined"
+    `.obsidian/` holds the installed plugin's copies of OTHER vaults and
+    `.forge/` holds edge snapshots; neither is authored content here
+    (drain 2026-08-17-1210's lesson).
+    """
+    found = {}
+    for root, dirs, files in os.walk(vault):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for fn in files:
+            if not fn.endswith(".md"):
+                continue
+            full = os.path.join(root, fn)
+            try:
+                found[fn[: -len(".md")]] = (os.path.relpath(full, vault), open(full).read())
+            except OSError:
+                continue
+    return found
 
-    params = [a.arg for a in fn.args.args]
-    if sid in _NO_STATE:
-        expected = ["context"] + extra
-    else:
-        expected = ["context", "state"] + extra
-    assert params == expected, (
-        f"{sid}: signature {params} != expected {expected}")
 
-    peers = _compute_call_targets(tree)
-    assert peers == expected_peers, (
-        f"{sid}: context.compute targets {peers} != expected "
-        f"{expected_peers} (extra = hallucinated/missing dep)")
+def _note_ids(vault):
+    return sorted(_notes(vault))
 
-    # No block — dispatch or action — may Python-loop the particle arrays.
-    assert not _PARTICLE_LOOP.search(src), (
-        f"{sid}: Python loop over particle arrays detected; must vectorize")
 
-    if must_vec:
-        assert _STATE_ARRAY.search(src), (
-            f"{sid}: per-particle/per-pair block must operate on the "
-            f"struct-of-arrays state fields (state.xs / types / speeds / "
-            f"...); none referenced")
+@pytest.fixture(scope="module")
+def vault_notes(moda_vault):
+    return _notes(moda_vault)
+
+
+def test_the_vault_has_notes_to_check(vault_notes):
+    """Non-vacuity. Every assertion below is parameterized over the
+    vault's contents, so an empty or mis-resolved vault would make the
+    whole module pass while checking nothing — the silent-pass shape
+    (I23) that let the stale-vault binding survive so long."""
+    assert len(vault_notes) > 20, (
+        f"expected the moda vault's full note set, found {len(vault_notes)}"
+    )
+
+
+def test_the_library_names_resolved(vault_notes):
+    """Second non-vacuity guard: if the library read returned nothing,
+    every wikilink would look unresolvable and the parameterized test
+    below would fail for the wrong reason — or, if inverted, pass."""
+    assert "create_water_particles" in _library_function_names()
+
+
+def _all_note_ids():
+    """Parameter source. Resolved at collection time from the same
+    candidate list the fixtures use."""
+    from tests.moda._helpers import _find_vault
+    vault = _find_vault()
+    return _note_ids(vault) if vault else []
+
+
+@pytest.mark.parametrize("note_id", _all_note_ids())
+def test_every_recipe_wikilink_resolves(note_id, vault_notes, moda_vault):
+    """Per-note so a dangling link names its own note.
+
+    A target resolves if it is a vault note, an engine library
+    function, or a language primitive. Anything else is a link into
+    nothing — the shape that
+    broke `simulation` twice this session.
+    """
+    relpath, text = vault_notes[note_id]
+    targets = sorted(set(_WIKILINK.findall(_recipe_body(text))))
+    if not targets:
+        pytest.skip(f"{note_id}: no Recipe wikilinks")
+
+    known_notes = set(vault_notes)
+    known_lib = _library_function_names()
+    dangling = [
+        t for t in targets
+        if t not in known_notes
+        and t not in known_lib
+        and t not in _LANGUAGE_PRIMITIVES
+    ]
+
+    assert not dangling, (
+        f"{relpath}: Recipe references {dangling}, which resolve to neither a "
+        f"vault note nor an engine library function. A call to a name that "
+        f"does not exist fails at run time with SnippetResolutionError — "
+        f"precedent: simulation, broken twice this session by exactly this."
+    )

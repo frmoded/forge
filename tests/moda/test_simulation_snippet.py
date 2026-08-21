@@ -12,6 +12,8 @@ the generic /compute response (separate `unify-compute-serialization`
 work), so a TestClient roundtrip would 500 in the serialization
 layer even though the snippet itself runs cleanly.
 """
+import re
+
 import numpy as np
 
 
@@ -48,17 +50,40 @@ def test_simulation_respects_click_scenario(run_block):
     assert state.ys[ink_mask].max() <= state.height
 
 
-def test_simulation_dependencies_block(moda_vault):
-    """The Dependencies block at the bottom of simulation.md
-    resolves to the four expected wikilinks. B7 auto-sync would
-    handle this on regen; here we assert the hand-authored shape
-    matches the Python facet's actual context.compute() calls so
-    the snippet ships consistent."""
+def test_simulation_recipe_names_its_four_callees(moda_vault):
+    """Drain 2026-08-20-1210(c) — replaces test_simulation_dependencies_block.
+
+    That test asserted a trailing `# Dependencies` block whose wikilinks
+    mirrored the Python facet's `context.compute()` calls. Both halves
+    of that premise are V1: the shipping simulation.md has no
+    `# Dependencies` section and no Python facet — it has Description
+    and Recipe, and the Recipe IS where V2 declares dependencies.
+
+    So the convention is retired, not broken, and the check moves to
+    where the information now lives. The stronger half of the old
+    guarantee — that these names actually resolve — is covered per-note
+    by test_blocks_static.py::test_every_recipe_wikilink_resolves.
+    """
     from pathlib import Path
     body = (Path(moda_vault) / "simulation.md").read_text()
-    # The Dependencies section is the trailing block.
-    deps_section = body.split("# Dependencies", 1)[1] if "# Dependencies" in body else ""
+    recipe, inside = [], False
+    for line in body.splitlines():
+        if line.startswith("# Recipe"):
+            inside = True
+            continue
+        if inside and line.startswith("# "):
+            break
+        if inside:
+            recipe.append(line)
+    recipe_text = "\n".join(recipe)
+    assert recipe_text.strip(), "simulation.md has no Recipe body to check"
+    # Either citation form counts. Three are called as wikilinks;
+    # `on_mouse_click` is passed BY NAME as a callable argument
+    # (`on_click=on_mouse_click`), which is equally a dependency and
+    # equally breaks if the note disappears.
     for callee in ["setup", "sample_clicks", "on_mouse_click", "go"]:
-        assert f"[[{callee}]]" in deps_section, (
-            f"Dependencies block missing wikilink to {callee!r}; "
-            f"section was: {deps_section!r}")
+        cited = f"[[{callee}]]" in recipe_text or re.search(
+            rf"\b{re.escape(callee)}\b", recipe_text)
+        assert cited, (
+            f"simulation.md's Recipe no longer references {callee!r}; "
+            f"Recipe was: {recipe_text!r}")
