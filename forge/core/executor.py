@@ -141,6 +141,7 @@ try:
     "group_clicks_by_tick": _moda_lib.group_clicks_by_tick,
     "apply_clicks_at_tick": _moda_lib.apply_clicks_at_tick,
     "random_name": _moda_lib.random_name,
+    "latest_state": _moda_lib.latest_state,
     "show_simulation": _moda_lib.show_simulation,
     "tick_range": _moda_lib.tick_range,
   }
@@ -211,6 +212,7 @@ _MODA_LAZY_CHIP_NAMES = (
   "set_speed_for_type", "set_mass_for_type",
   "group_clicks_by_tick", "apply_clicks_at_tick",
   "random_name", "show_simulation", "tick_range",
+  "latest_state",
 )
 
 # Drift guard — the eager dict and the lazy-hydration name tuple MUST

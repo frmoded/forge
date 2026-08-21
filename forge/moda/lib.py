@@ -386,6 +386,42 @@ def tick_range(n):
     return list(range(int(n)))
 
 
+def latest_state(context):
+    """The state this snippet last produced, or None if it never has.
+
+    Drain 2026-08-21-1400. moda's `go` is history-dependent per
+    constitution C8: a parameterless call continues the simulation
+    rather than restarting it. V1 expressed that in a hand-written
+    Python facet calling `context.read_snapshot()`; the V2 migration
+    dropped the step, so every parameterless `go` restarted the world.
+
+    This is the V2 route to the same engine mechanism — a Recipe can
+    only reach `Call [[name]]`, and `context` is in scope because the
+    transpiler wraps every program in `def compute(context, ...)`. So
+    the note writes `Call [[latest_state]] with context=context.` and
+    the fallback chain stays legible in the Recipe rather than hidden
+    in generated code.
+
+    Returns None rather than raising when no snapshot exists, so the
+    caller's next fallback can take over — that is the first-call case,
+    not an error.
+
+    Unlike every other function in this module this takes `context`.
+    That is deliberate and should stay rare: it is the seam between the
+    Recipe vocabulary and engine services, and a library of
+    context-taking functions would be a library that only runs inside
+    the executor.
+    """
+    if context is None:
+        return None
+    reader = getattr(context, "read_snapshot", None)
+    if reader is None:
+        # Older executors, and any caller passing a stand-in object.
+        # Absent capability is "no prior state", not a crash.
+        return None
+    return reader()
+
+
 def show_simulation(state):
     """Render the simulation iframe with the given final ParticleState.
 
