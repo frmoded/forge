@@ -40,11 +40,18 @@ def vault_copy(tmp_path):
 
 @pytest.fixture
 def run(vault_copy):
+    """DELIBERATELY not conftest.py's `run_block`: these tests need a
+    throwaway vault copy with `.forge/` stripped (see `vault_copy`), so
+    snapshot accumulation starts from an empty edge store — `run_block`
+    runs against the real vault and would read whatever edges exist.
+    Drain 2026-08-22-1900 renamed the inner runner so the divergence is
+    visible: two different behaviours must not share one name, which is
+    what made drain 1210's drift so costly to untangle."""
     reg = SnippetRegistry()
     reg.scan(vault_copy)
     res = GraphResolver(reg)
 
-    def _run(sid, *args, **inputs):
+    def _run_against_isolated_vault(sid, *args, **inputs):
         snip = res.resolve(sid)
         # Drain 2026-08-20-1210(c) — was `extract_python(snip["body"])`,
         # which reads the `# Python` facet directly. V2 notes have no
@@ -62,7 +69,7 @@ def run(vault_copy):
         )
         return result
 
-    return _run
+    return _run_against_isolated_vault
 
 
 def test_go_first_call_uses_sample_state(run):
