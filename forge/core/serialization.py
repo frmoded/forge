@@ -418,7 +418,7 @@ def _try_serialize_music21(value, snippet):
 
   # v0.2.150 — dual-XML production for percussion scores. When the
   # value is a Score with at least one UnpitchedPercussion Part, also
-  # serialize a kit-notation fold so the plugin's Forge Output pane
+  # serialize a kit-notation fold so the plugin's Forge panel
   # can offer the multi-staff ↔ kit toggle. Backward-compat: `content`
   # remains the multi-staff XML (legacy plugin codepaths render it
   # unchanged); new fields `has_percussion` + `multi_staff_content` +

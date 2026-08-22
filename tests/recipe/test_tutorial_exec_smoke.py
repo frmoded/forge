@@ -108,7 +108,7 @@ class TestActionNotesExec:
     # hello_world's Recipe was rewritten from `[[print]] "hello, world".`
     # to `Return "hello, world".` to eliminate the phantom `[[print]]`
     # few-shot bleed vector to the LLM. Post-shift the value renders in
-    # the Forge Output panel via the returned value (same user-visible
+    # the Forge panel via the returned value (same user-visible
     # outcome), not stdout — the test assertion follows.
     _, result = _run(tutorial_resolver, "hello_world")
     assert result == "hello, world"

@@ -98,7 +98,7 @@ import random as _random
 # sentinels, producing a raw NameError / AttributeError that surfaces
 # to the user as noise. This helper is called at the top of chip
 # functions; if music21 is not yet available, it raises a RuntimeError
-# with an actionable message. Surfaced to the Forge Output panel via
+# with an actionable message. Surfaced to the Forge panel via
 # the executor's standard error propagation per Diagnostics-in-primary-
 # surface HARD RULE (no console.warn, no Notice toast — the message
 # IS the load-bearing signal).
@@ -697,7 +697,7 @@ def _coerce_student_pitches(student_pitches) -> list[str]:
 def _mcq_wrong(played: str, expected: str, diagnosis: str) -> str:
   """The exact ✗ frame mcq-widget-core.ts's WRONG_RE requires. Any
   drift from `✗ Not quite. You picked '<X>'; the correct answer is
-  '<Y>'.` and the Forge Output panel renders plain text, not a card."""
+  '<Y>'.` and the Forge panel renders plain text, not a card."""
   return (
     f"✗ Not quite. You picked '{played}'; the correct answer is "
     f"'{expected}'. {diagnosis} See [[diatonic_scale]]."
@@ -1355,7 +1355,7 @@ def play_at_beats(instrument, beats):
 
 def show_score(score):
   """Side-effect chip — surfaces a Score for the plugin to render in
-  Forge Output. For the spike this is a passthrough: the plugin's
+  the Forge panel. For the spike this is a passthrough: the plugin's
   auto-render fallback (v2-spec §15.4) catches Score returns and
   renders them, so explicit `[[show_score]]` is for V2.1's multi-
   destination orchestration. Returns the input unchanged so cohort
@@ -1647,7 +1647,7 @@ def has_percussion(score: stream.Score) -> bool:
   recognized percussion classes from lib.py's factories).
 
   Used by the plugin to decide whether to show the kit-notation toggle
-  button in the Forge Output pane. Piano-only / melodic-only scores
+  button in the Forge panel. Piano-only / melodic-only scores
   return False; the toggle stays hidden.
   """
   if not isinstance(score, stream.Score):

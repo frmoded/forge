@@ -12,7 +12,7 @@ those binaries do not exist inside Pyodide, which is where a Run-click
 executes this primitive. The shipped shape instead returns a
 music21 Stream — the same hear-it contract every Tier-1 primitive
 (rhythmic_line / melodic_line / chord_stream) uses, rendered by the
-Forge Output panel's midi-player. play_pitches delegates to
+Forge panel's midi-player. play_pitches delegates to
 melodic_line with a uniform quarter-note pattern and accepts the
 widget's JSON-string serialization via _coerce_student_pitches.
 """

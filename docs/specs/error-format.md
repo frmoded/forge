@@ -3,7 +3,7 @@
 **Introduced**: drain 2026-08-08-1300
 (CW-plugin-plus-mcp-structured-error-format-parity).
 **Implementations**: forge-client-obsidian `src/forge-error-core.ts`
-(Forge Output panel) and forge-mcp `src/forge_mcp/error_response.py`
+(Forge panel) and forge-mcp `src/forge_mcp/error_response.py`
 (tool responses). Both sides link here; this doc is the single source
 of truth for the shape and its rendering conventions.
 
@@ -34,7 +34,7 @@ TypeScript) — parity is the point.
 - `details` preserves everything an engineer needs: raw traceback,
   stdout, repr. It is never required reading for the cohort path.
 
-## Rendering — plugin (Forge Output panel)
+## Rendering — plugin (Forge panel)
 
 `renderForgeError` in `forge-error-core.ts`:
 
