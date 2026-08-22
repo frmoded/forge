@@ -356,8 +356,11 @@ def _domain_globals_for(domains):
   global _FORGE_MUSIC_LIB_NAMES, _FORGE_MODA_LIB_NAMES, _DOMAIN_GLOBALS
   global _music_hydration_logged, _moda_hydration_logged
 
-  music_active = domains is None or "music" in domains
-  moda_active = domains is None or "moda" in domains
+  # Same empty-means-unconfigured rule as _domain_globals_for's selection
+  # below (drain 2026-08-22-2200): if these disagreed, `domains=[]` would
+  # skip lazy hydration and hand back an empty bundle anyway.
+  music_active = domains is None or not domains or "music" in domains
+  moda_active = domains is None or not domains or "moda" in domains
 
   if music_active and not _FORGE_MUSIC_LIB_NAMES:
     # Catch the BROAD set of exceptions (not just ImportError) — pyodide
@@ -446,7 +449,16 @@ def _domain_globals_for(domains):
   if music_active and not _FORGE_MUSIC_LIB_NAMES:
     _diagnose_music_chips_empty(domains, where="_domain_globals_for")
 
-  if domains is None:
+  # Drain 2026-08-22-2200 (a) — `[]` means UNCONFIGURED, not "deny all".
+  # The v0.2.14 fresh-vault forge.toml stub writes `domains = []`, so
+  # reading it as deny-all turns every domain-chip note in a fresh vault
+  # into `name 'create_chamber' is not defined` the moment any caller
+  # starts honouring declared domains. No caller passes `domains` today,
+  # which is the only reason production never saw it — a latent trap,
+  # not a safe default. An author who wants a genuine restriction says
+  # so by naming domains; there is no way to spell "no domains at all",
+  # and nothing has ever needed one.
+  if domains is None or not domains:
     selected = _DOMAIN_GLOBALS.values()
   else:
     allow = set(domains)
@@ -455,6 +467,43 @@ def _domain_globals_for(domains):
   for bundle in selected:
     merged.update(bundle)
   return merged
+
+_MISSING_NAME = re.compile(r"name '([^']+)' is not defined")
+
+
+def _domain_gate_hint(exc, domains):
+  """If `exc` is a NameError for a chip that SOME registered domain
+  provides but the active `domains` excluded, return a message naming
+  the chip, the domain that has it, and the file that decided. Returns
+  None for every other case — including a name no domain provides, so a
+  plain typo never acquires a misleading domain explanation.
+
+  Drain 2026-08-22-2200 (c). Deliberately read-only about the gate: it
+  explains an exclusion, it never undoes one."""
+  if not isinstance(exc, NameError):
+    return None
+  if domains is None or not domains:
+    return None  # nothing was excluded; whatever failed, it isn't this
+  match = _MISSING_NAME.search(str(exc))
+  if not match:
+    return None
+  name = match.group(1)
+  allow = set(domains)
+  providers = sorted(
+    domain for domain, bundle in _DOMAIN_GLOBALS.items()
+    if domain not in allow and name in bundle
+  )
+  if not providers:
+    return None
+  provides = " or ".join(repr(d) for d in providers)
+  active = ", ".join(repr(d) for d in sorted(allow)) or "none"
+  return (
+    f"'{name}' is provided by the {provides} domain, which this vault "
+    f"does not declare (active domains: {active}). Add it to the "
+    f"`domains` list in the vault's forge.toml, or call a chip from an "
+    f"active domain."
+  )
+
 
 _PYTHON_HEADING = re.compile(r'^#{1,6}\s+python\s*$', re.IGNORECASE)
 
@@ -1265,7 +1314,13 @@ def exec_python(code, inputs, resolver=None, args=(), vault_path=None, registry=
   except SnippetExecError:
     raise
   except Exception as e:
-    raise SnippetExecError(str(e), stdout=buf.getvalue()) from e
+    # Drain 2026-08-22-2200 (c) — a NameError for a chip the domain gate
+    # excluded is the worst error in the system: it names neither the
+    # domain that provides the chip nor the file that decided to exclude
+    # it. Say both. Names no domain provides fall through unchanged, so
+    # an ordinary typo keeps its ordinary message.
+    hint = _domain_gate_hint(e, domains)
+    raise SnippetExecError(hint or str(e), stdout=buf.getvalue()) from e
   finally:
     sys.stdout = old_stdout
   return buf.getvalue(), local_ns.get("result")
