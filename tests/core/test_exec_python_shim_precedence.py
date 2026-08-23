@@ -26,6 +26,15 @@ import forge.music.lib as _music_lib
 
 def _registry_with_note(bare_id: str) -> SnippetRegistry:
   registry = SnippetRegistry()
+  # Drain 2026-08-23-1400 — the resolution order is now part of this
+  # fixture. It always was in production (`_auto_set_resolution_order`
+  # sets `[authoring, *declared deps, *imports]`, so a library a note
+  # dispatches into is necessarily listed), but the fixture skipped it,
+  # which made this a registry no dispatch could ever serve. Shims are
+  # now installed only for names dispatch can resolve, so the omission
+  # became visible. The precedence being pinned here — vault note
+  # shadows engine chip — is unchanged and still asserted below.
+  registry.set_resolution_order(["music-core"])
   registry._vaults.setdefault("music-core", {})
   registry._vaults["music-core"][bare_id] = {
     "meta": {"type": "action"},

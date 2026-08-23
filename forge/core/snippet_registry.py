@@ -37,6 +37,30 @@ _RESERVED_DIRS = {".forge", ".obsidian", ".git", ".stfolder"}
 import re
 _BAK_DIR_PATTERN = re.compile(r"\.bak\.")
 
+
+def is_reserved_dir(name: str) -> bool:
+  """True for a directory the vault walk must never descend into.
+
+  Drain 2026-08-23-1400 — ONE definition, because there are three
+  ingestion points and they disagreed. The authoring traversal pruned
+  _RESERVED_DIRS correctly; `_scan_library_vault` walked with the dirs
+  list discarded (`for root, _, files`), so it could not prune at all;
+  `refresh_file` indexed whatever path it was handed. The result was
+  `.forge/edges/**` snapshots indexed under library vaults with
+  path-shaped ids, which `_build_snippet_shims` then turned into
+  basename-keyed shims that shadow engine chips and cannot dispatch.
+  """
+  return name in _RESERVED_DIRS or bool(_BAK_DIR_PATTERN.search(name))
+
+
+def path_is_reserved(path: str, root: str = None) -> bool:
+  """True when any path segment is a reserved dir. `root`, when given,
+  limits the check to segments below it, so a vault living inside a
+  directory that happens to be called `.git` is still scannable."""
+  target = os.path.relpath(path, root) if root else path
+  parts = os.path.normpath(target).split(os.sep)
+  return any(is_reserved_dir(part) for part in parts[:-1] if part not in ("", ".", ".."))
+
 # v0.2.82 Item A — dedup set for AUTHORING-vault basename-collision
 # warnings. Module-scoped so multiple SnippetRegistry instances share
 # the same dedup state across a single Pyodide-instance lifetime
@@ -161,6 +185,13 @@ class SnippetRegistry:
     AUTHORING_VAULT keyed by basename — the right default for "write
     into an empty vault" / pre-scan file creation cases.
     """
+    # Drain 2026-08-23-1400 — the plugin's per-file sync path lands
+    # here, and it had no exclusion: it would index a file the scan had
+    # just correctly skipped. A reserved path is never a snippet, so
+    # refusing is not a partial answer.
+    if path_is_reserved(filepath):
+      return None
+
     if vault_name is not None:
       # Legacy path: caller specified the vault explicitly. Honor it.
       vault_path = None
@@ -468,8 +499,15 @@ class SnippetRegistry:
       return None
 
     self._vaults[name] = {}
-    for root, _, files in os.walk(lib_path):
-      for fname in files:
+    for root, dirs, files in os.walk(lib_path):
+      # Drain 2026-08-23-1400 — this walk discarded `dirs` and so could
+      # never prune. `.forge/edges/**` snapshots were indexed here with
+      # path-shaped ids (library vaults are sub-path keyed), which is
+      # the create_water_particles failure's actual origin. Same rule
+      # as the authoring traversal, from the same definition.
+      dirs[:] = [d for d in dirs if not is_reserved_dir(d)]
+      dirs.sort()
+      for fname in sorted(files):
         if not fname.endswith(".md"):
           continue
         filepath = os.path.join(root, fname)

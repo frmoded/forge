@@ -1141,6 +1141,46 @@ def extract_python(body):
   return "\n".join(code_lines).strip() or None
 
 
+def _dispatch_can_resolve(context, registry, basename):
+  """Whether `context.compute(basename)` could actually find something.
+
+  Mirrors dispatch by asking the very object dispatch asks. The shim
+  body calls `context.compute(basename)`, which goes to
+  `GraphResolver.resolve(basename, caller_id=context._caller_id)`, and
+  that is more than a `get_bare` walk: it probes the caller's own
+  directory and its sibling subdirs first (A4.1). Predicating on
+  `get_bare` alone would therefore drop shims for sibling notes that
+  dispatch resolves perfectly well, so the resolver is used whenever
+  the context carries one.
+
+  `find_qualified_by_bare` is deliberately NOT used: its Pass 3
+  basename-scans sub-path keys, so it matches the very phantom this
+  guards against (`.forge/edges/a/b/create_water_particles` ends in
+  `create_water_particles`). It answers "does this name exist
+  anywhere", which is not the question — the question is whether
+  dispatch can serve it.
+
+  An ambiguity raise counts as resolvable: dispatch will surface a
+  legible ambiguity error, which is a real answer."""
+  # Local import: forge.core.exceptions is tiny, and executor.py has no
+  # module-level exception imports to piggyback on.
+  from forge.core.exceptions import AmbiguousSnippetResolutionError
+  resolver = getattr(context, "_resolver", None)
+  try:
+    if resolver is not None:
+      return resolver.try_resolve(
+        basename, caller_id=getattr(context, "_caller_id", None)) is not None
+    # No resolver (test fixtures, and any caller that builds a context
+    # without one): fall back to the registry walk dispatch would use.
+    return registry.get_bare(basename) is not None
+  except AmbiguousSnippetResolutionError:
+    return True
+  except Exception:
+    # A lookup that blows up for any other reason is not something to
+    # install a chip-shadowing shim on top of.
+    return False
+
+
 def _build_snippet_shims(context, registry):
   """v0.2.68 — Stage 2.5 sibling-snippet namespace injection.
 
@@ -1165,6 +1205,26 @@ def _build_snippet_shims(context, registry):
   installable. Same-basename collisions across vaults: first one
   wins; A4.1 dispatches the actual resolution at compute time.
 
+  PRECEDENCE (unchanged, and deliberate): these shims are spread into
+  the exec namespace AFTER the domain globals, so a vault note SHADOWS
+  an engine chip of the same name (drain 2026-08-10-1700). That is the
+  documented A4 rule and stays.
+
+  RESOLVABLE BY CONSTRUCTION (drain 2026-08-23-1400): a shim is
+  installed only when `registry.get_bare(basename)` can actually find
+  something. Shadowing was decided by one index (list_snippets, keyed
+  per vault by bare_id — which for LIBRARY vaults is a sub-path like
+  `.forge/edges/a/b/create_water_particles`) while dispatch used
+  another (get_bare, exact-key). An entry whose id is path-shaped
+  therefore installed a basename shim that shadowed the engine chip and
+  then failed to dispatch — the create_water_particles failure. The
+  predicate is get_bare rather than a type check ("skip snapshots")
+  because get_bare IS what dispatch calls: it stays correct for any
+  future entry shape, where a type blocklist would need extending each
+  time. An AMBIGUOUS basename still gets its shim: dispatch raises a
+  legible ambiguity error, which is a real answer, and silently falling
+  through to the chip would reintroduce the shadowing bug this closes.
+
   Returns `{}` when `registry` is None (test fixtures that bypass
   registry construction)."""
   shims = {}
@@ -1182,6 +1242,8 @@ def _build_snippet_shims(context, registry):
       if not basename or not basename.isidentifier():
         continue
       if basename in seen:
+        continue
+      if not _dispatch_can_resolve(context, registry, basename):
         continue
       seen.add(basename)
       shims[basename] = (
