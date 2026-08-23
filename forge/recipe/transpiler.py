@@ -195,9 +195,39 @@ def _render_type_hint(type_hint: str) -> str:
 
 
 def _render_block(stmts, depth):
+  """Render a statement list, stopping at the block's terminal Return.
+
+  Drain 2026-08-23-2000 (c). A `Return` ends its block, so anything the
+  Recipe puts after one in the SAME block is dead code. /generate
+  produced exactly that on 2026-08-23 (a duplicated `Return result.`)
+  and the transpiler passed both through, emitting two identical
+  `return` lines into the note's Python.
+
+  Adjudicated as strip-with-notice rather than a parse error: the
+  statements are LLM noise on a facet the cohort member did not type,
+  and a hard error would convert a generation-quality slip into a
+  user-facing failure with no repair the user can perform except
+  re-running Forge. The notice keeps it visible to anyone looking
+  (the suite, the service logs) without breaking the run.
+
+  Only the ENCLOSING block terminates. A Return inside an If body does
+  not make the statements after that If unreachable — this walks each
+  block independently, so that case keeps rendering (pinned by
+  test_reachable_code_after_a_nested_return_is_kept).
+  """
   out = []
-  for s in stmts:
+  for i, s in enumerate(stmts):
     out.extend(_render_stmt(s, depth))
+    if isinstance(s, ReturnStmt):
+      dropped = stmts[i + 1:]
+      if dropped:
+        warnings.warn(
+          f"dropped {len(dropped)} unreachable statement(s) after a "
+          f"Return; a Return ends its block",
+          SyntaxWarning,
+          stacklevel=2,
+        )
+      break
   return out
 
 

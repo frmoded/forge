@@ -121,3 +121,73 @@ class TestExec:
     assert isinstance(out, stream.Part)
     notes = list(out.recurse().notes)
     assert len(notes) == 2
+
+
+class TestUnreachableAfterReturn:
+  """Drain 2026-08-23-2000 (c) — statements after a terminal `Return`.
+
+  Driver live repro 2026-08-23 19:41: /generate emitted a duplicated
+  `Return result.` and the transpiler passed BOTH through, producing
+  dead Python. Adjudicated: strip-with-notice. Rationale in the drain
+  FEEDBACK; the short form is that a second Return is LLM noise, not
+  authored intent, and turning it into a parse error would convert
+  generation sloppiness into a user-facing failure on a note the user
+  never typed.
+  """
+
+  def test_duplicate_return_emits_one_return(self):
+    # The driver's exact shape.
+    src = (
+      "Let rand = Call [[random]] with.\n"
+      "Let result = rand * scale.\n"
+      "Return result.\n"
+      "Return result.\n"
+    )
+    py = transpile(parse(src))
+    assert py.count("return result") == 1, py
+
+  def test_statements_after_return_are_dropped(self):
+    py = transpile(parse("Return 1.\nLet x = 2.\n"))
+    assert "return 1" in py
+    assert "x = 2" not in py, py
+
+  def test_dropping_unreachable_warns(self):
+    import warnings as _w
+    with _w.catch_warnings(record=True) as caught:
+      _w.simplefilter("always")
+      transpile(parse("Return 1.\nReturn 2.\n"))
+    msgs = [str(c.message) for c in caught]
+    assert any("unreachable" in m for m in msgs), msgs
+
+  def test_unreachable_inside_if_body_is_dropped(self):
+    src = (
+      "If 1 > 0:\n"
+      "  Return 1.\n"
+      "  Let dead = 2.\n"
+      "Return 0.\n"
+    )
+    py = transpile(parse(src))
+    assert "dead" not in py, py
+    assert "return 0" in py
+
+  def test_reachable_code_after_a_nested_return_is_kept(self):
+    # NON-VACUITY: the strip must be terminal-only. A Return inside an
+    # If body does not make the rest of the enclosing block dead.
+    src = (
+      "If 1 > 0:\n"
+      "  Return 1.\n"
+      "Let after = 2.\n"
+      "Return after.\n"
+    )
+    py = transpile(parse(src))
+    assert "after = 2" in py, py
+    assert "return after" in py, py
+
+  def test_no_warning_when_nothing_is_unreachable(self):
+    # NON-VACUITY: the notice must not fire on ordinary recipes.
+    import warnings as _w
+    with _w.catch_warnings(record=True) as caught:
+      _w.simplefilter("always")
+      transpile(parse("Let x = 1.\nReturn x.\n"))
+    msgs = [str(c.message) for c in caught]
+    assert not any("unreachable" in m for m in msgs), msgs
