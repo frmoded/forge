@@ -23,9 +23,40 @@ forge/core/executor.py — see `_FORGE_CORE_LIB_NAMES`.
 """
 from __future__ import annotations
 
+import random as _stdlib_random
 from typing import Sequence, TypeVar
 
 _T = TypeVar("_T")
+
+
+# Drain 2026-08-24-0910. Named `random_float`, NOT `random`: the engine
+# always injects Python's stdlib `random` MODULE under that name
+# (executor.py's base globals), so a chip called `random` would shadow
+# it. That collision IS the incident this chip closes — a cohort
+# member's generated note called `[[random]]`, compiled to `random()`,
+# and failed with `'module' object is not callable` (drain 2010).
+#
+# The rationale lives here rather than in the docstring on purpose: the
+# docstring is cohort-facing surface. It is read verbatim into chip docs
+# AND into the /generate prompt catalog via forge-transpile's AST
+# introspector, so drain numbers and incident history would be noise
+# shipped to every cohort member and every LLM call.
+def random_float() -> float:
+  """Return a random number between 0 and 1.
+
+  The value is at least 0.0 and always less than 1.0, and every call
+  gives a different number.
+
+  Multiply it to reach any range you like — for "somewhere between 0
+  and 10", Let a value from this and multiply by 10.
+
+  Because each call is different, a note using this returns something
+  new every time you run it. Freeze the edge if you want one particular
+  draw to stay put.
+
+  Example: `Let r = Call [[random_float]] with.` then `Let scaled = r * 10.`
+  """
+  return _stdlib_random.random()
 
 
 def nth(lst: Sequence[_T], index: int) -> _T:

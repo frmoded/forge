@@ -163,6 +163,11 @@ try:
     # Drain 2026-08-03-1125 — multiple-choice scoring. Core, not music:
     # the primitive is about the interaction shape, not the subject.
     "mcq": _core_lib.mcq,
+    # Drain 2026-08-24-0910 — "a random number" is among the first
+    # things a cohort member reaches for and Forge had no word for it.
+    # NOT named `random`: that name is the stdlib module injected below
+    # as a base global, and shadowing it is the incident this closes.
+    "random_float": _core_lib.random_float,
   }
 except ImportError:
   _FORGE_CORE_LIB_NAMES = {}
