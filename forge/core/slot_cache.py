@@ -1,5 +1,5 @@
 """Slot-cache helpers for canonical-form snippet `{{ ... }}` value
-slots (Phase 1 design, not yet wired).
+slots.
 
 Three helpers:
 
@@ -15,10 +15,24 @@ cache_key → python_expr. Helpers are tolerant of missing / malformed
 input (return {} on parse error) mirroring extract_python's shape at
 executor.py:508.
 
-NOT YET WIRED. Phase 2 will call parse_slots_section from the
-canonical compile path at executor.py:486-505 and serialize_slots_section
-from the plugin-side cache write path. This module is Pyodide-safe:
-no I/O, no os.environ, no anthropic client.
+WIRED as of drain 2026-08-24-2350. `parse_slots_section` is read by
+`resolve_action_code`'s V2 transpile path; `serialize_slots_section` is
+written by the plugin's `handleSlotCacheMiss` after /resolve-slot
+returns. The header above said "NOT YET WIRED. Phase 2 will…" for long
+enough that FEEDBACK 2330 found both helpers referenced by nothing but
+their own tests, while every run of a slot-bearing note re-hit the LLM.
+Phase 2 is done; if you are reading this to find out whether the cache
+is live, it is.
+
+WHAT IS CACHED IS AN EXPRESSION, NEVER A VALUE. A hit returns the
+`python_expr` string, which the transpiler splices into the generated
+code and which then re-executes on every run. Two runs of one cache
+entry can and should differ. That distinction is the driver's standing
+rule — cache translations (Description → Recipe, Recipe → Python,
+slot → code), never execution results — and it is what makes caching
+`__import__('random').random()` correct rather than absurd.
+
+This module is Pyodide-safe: no I/O, no os.environ, no anthropic client.
 """
 
 from __future__ import annotations

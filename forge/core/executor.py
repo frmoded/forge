@@ -997,15 +997,28 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False,
     if code is not None:
       return code
 
-  # v0.2.252 — description-source short-circuit. The plugin's
-  # forgeSnippet path aborts early with a "run /generate first"
-  # message when Description is the source facet, so this path is
-  # only hit by transitive `context.compute("X")` calls where the
-  # transitive snippet is Description-source. Same reasoning: skip
-  # the V2 parse (Recipe is stale by definition when Description is
-  # source) and return None so the caller routes to /generate.
-  if layer == "description":
-    return None
+  # Drain 2026-08-24-2350 — the `description` short-circuit is GONE.
+  #
+  # It read `if layer == "description": return None`, on the reasoning
+  # that a Description-source note's Recipe is stale by definition so
+  # the caller should route to /generate. Two things were wrong with
+  # that, both established by probe in drain 2330:
+  #
+  #   1. It was UNREACHABLE from its own documented caller. It claimed
+  #      to serve transitive `context.compute("X")` calls, but that
+  #      path (ForgeContext.compute, above) passes no canonical_layer
+  #      at all, so `layer` is None there and always was.
+  #   2. Its premise is INVERTED on the only path that ever reached
+  #      it. The plugin's two-hop auto-forge derives the Recipe FROM
+  #      the Description immediately before running, which makes the
+  #      Recipe the freshest thing on the note — not the stalest.
+  #
+  # Drain 1600 threaded the plugin's facet through to the run call so
+  # the error message could name the right facet, which handed this
+  # branch a `'description'` it had never seen, and every run of a
+  # Description-canonical note got no code at all. The client now
+  # filters the value (`engineRoutingLayer`) and keeps that filter as
+  # a belt; this removes the trap it was guarding.
 
   try:
     from forge.recipe import detect_recipe_shape as _v2_detect
@@ -1019,9 +1032,29 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False,
       v2_snippet_id = snippet.get("snippet_id", "<unknown>")
       from forge.core.slot_cache import (
         build_engine_slot_resolver as _v2_slot_resolver_factory,
+        parse_slots_section as _v2_parse_slots,
         SlotCacheMissError as _V2SlotCacheMissError,
       )
-      v2_slot_cache = slot_resolutions or {}
+      # Drain 2026-08-24-2350 — Phase 2, at last. The note's own
+      # `# Slots` heading is the persistent cache; `slot_resolutions`
+      # is what the plugin passes inline on its second pass after
+      # /resolve-slot.
+      #
+      # ORDER IS LOAD-BEARING: inline wins. The second pass is the
+      # miss path and therefore the repair path — if a persisted
+      # entry shadowed it, a note whose cached expression had gone
+      # bad could never be fixed by re-resolving.
+      #
+      # `parse_slots_section` returns {} for a missing or malformed
+      # heading, so a mangled cache degrades to a cold one and the
+      # run re-resolves rather than failing.
+      #
+      # What is cached is the EXPRESSION. A hit splices
+      # `__import__('random').random()` into the transpile output and
+      # that re-executes on every run — the driver's rule is cache
+      # translations, never execution results.
+      v2_slot_cache = dict(_v2_parse_slots(snippet["body"]))
+      v2_slot_cache.update(slot_resolutions or {})
       v2_missing = []
       v2_resolver = _v2_slot_resolver_factory(
         v2_snippet_id, v2_slot_cache, v2_missing,

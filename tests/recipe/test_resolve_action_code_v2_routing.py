@@ -108,9 +108,24 @@ def compute(context):
     assert "hand-authored python wins" in code
     assert "return 42" in code
 
-  def test_source_description_short_circuits_to_none(self):
-    # Description-source means Recipe + Python are stale.
-    # Engine returns None so caller routes to /generate.
+  def test_source_description_now_parses_the_recipe(self):
+    # Drain 2026-08-24-2350 — was
+    # `test_source_description_short_circuits_to_none`, asserting
+    # `code is None` on the reasoning that "Description-source means
+    # Recipe + Python are stale".
+    #
+    # That reasoning was true when it was written and is false now.
+    # The plugin's two-hop auto-forge derives the Recipe FROM the
+    # Description immediately before running, so on the only path that
+    # reaches here with this signal the Recipe is the FRESHEST facet,
+    # not the stalest. Drain 2330 traced the driver's
+    # "Empty or missing Python code" to exactly this branch; forge-core
+    # adjudicated its retirement.
+    #
+    # Kept as the inverted assertion rather than deleted: the routing
+    # signal still arrives (the plugin's belt filters it, but a
+    # transitive or third-party caller may not), and what it must do
+    # now is parse the Recipe like any other note.
     body = """---
 type: action
 description_hash: DDD
@@ -122,7 +137,7 @@ Just edited description.
 
 # Recipe
 
-Call [[print]] with text="stale".
+Call [[print]] with text="fresh".
 
 # Python
 
@@ -132,7 +147,10 @@ def compute(context):
 ```
 """
     code = resolve_action_code(_mksnip(body), source_layer="description")
-    assert code is None
+    assert code is not None, "the 'description' -> None branch is back"
+    # The RECIPE was transpiled — not the stale Python facet returned.
+    assert "fresh" in code
+    assert "return \"stale\"" not in code
 
   def test_source_recipe_uses_v2_parse_path(self):
     # Recipe-source → engine parses Recipe normally.

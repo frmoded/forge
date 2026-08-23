@@ -76,29 +76,27 @@ def test_no_routing_layer_raises_slot_miss_not_none():
   assert NESTED_ID in str(excinfo.value)
 
 
-def test_description_routing_layer_still_returns_none():
-  """The behaviour the client must not trigger, pinned as-is.
-
-  This is NOT an endorsement — it is the reason the client-side fix
-  exists. Recording it means a future reader can see that the engine
-  branch is intact and that the client is what changed. If this branch
-  is ever retired engine-side, this test is the one to delete, and its
-  failure will say so out loud.
-  """
-  assert resolve_action_code(_driver_snip(), canonical_layer="description") is None
-
-
-def test_that_none_is_exactly_what_produced_the_drivers_error():
-  """Closes the loop between the None above and the reported message.
-
-  Without this, the two facts (`returns None` / `driver saw empty-code`)
-  sit next to each other as a plausible story rather than a demonstrated
-  one.
-  """
-  code = resolve_action_code(_driver_snip(), canonical_layer="description")
-  with pytest.raises(Exception) as excinfo:
-    exec_python(code, {}, None, snippet_id=NESTED_ID)
-  assert "Empty or missing Python code for 'authoring/random_note'" in str(excinfo.value)
+# RETIRED by drain 2026-08-24-2350, as designed.
+#
+# Two tests stood here: `test_description_routing_layer_still_returns_none`
+# and `test_that_none_is_exactly_what_produced_the_drivers_error`. They
+# recorded the `'description' -> None` branch as-is, and the first
+# carried a note saying it was the one to delete if the branch were ever
+# retired, so that its failure would announce the retirement rather than
+# look like a regression. forge-core adjudicated the retirement; the
+# branch is gone (executor.py), and both tests failed by name on the
+# next run, which is exactly what they were built to do.
+#
+# What they proved is not lost. The causal chain they demonstrated —
+# routing signal -> None -> empty-code error — is recorded in FEEDBACK
+# 2330 with the probe transcript, and it can no longer be exercised
+# because the mechanism no longer exists. The guard that still matters
+# is the first test in this file: no routing layer must reach the
+# Recipe, never return None.
+#
+# Its replacement, asserting the OPPOSITE of the deleted behaviour,
+# lives in `test_persistent_slot_cache.py`
+# (`test_description_routing_layer_no_longer_suppresses_the_recipe`).
 
 
 def test_python_routing_layer_is_still_honoured():
