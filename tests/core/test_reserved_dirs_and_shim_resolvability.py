@@ -198,3 +198,117 @@ def test_chip_name_is_a_real_engine_chip():
   would be green for the wrong reason."""
   chips = {name for bundle in _DOMAIN_GLOBALS.values() for name in bundle}
   assert CHIP_NAME in chips
+
+
+# ---------------------------------------------------------------------------
+# Drain 2026-08-23-2010 — the `random`-shaped case.
+#
+# The 1400 guards above are stated over _DOMAIN_GLOBALS (the domain chip
+# bundles). They do NOT cover the three BASE globals the executor injects
+# unconditionally — `random`, `math`, `numpy` (executor.py local_ns) —
+# which sit in the same namespace and are shadowed by the same shim
+# spread, since shims are spread AFTER them.
+#
+# That gap is not hypothetical. Reproduced against the pre-1400 engine
+# (`2491055^`) with a library vault carrying `.forge/edges/**/random.md`:
+#
+#   vaults: {'authoring': ['caller'],
+#            'problib': ['.forge/edges/authoring/foo/authoring/random']}
+#   shim names: ['caller', 'random']
+#   'random' shadowed by a shim? True
+#   SnippetExecError: Snippet 'random' not found. Searched: authoring, ...
+#
+# and the same fixture at HEAD:
+#
+#   vaults: {'authoring': ['caller'], 'problib': []}
+#   shim names: ['caller']
+#   'random' shadowed by a shim? False
+#
+# So 1400's pruning closes it. These pin that it stays closed, over the
+# base names rather than the chip names.
+# ---------------------------------------------------------------------------
+
+BASE_GLOBAL_NAMES = ("random", "math", "numpy")
+
+
+def test_no_shim_shadows_a_base_global_it_cannot_serve():
+  registry = _registry_with_unresolvable_entry()
+  shims = _build_snippet_shims(_FakeContext(), registry)
+  unserviceable = sorted(
+    name for name in set(shims) & set(BASE_GLOBAL_NAMES)
+    if registry.get_bare(name) is None)
+  assert unserviceable == [], (
+    f"these shims shadow an always-injected base global but cannot "
+    f"dispatch: {unserviceable}")
+
+
+def test_base_globals_are_actually_injected_by_the_executor():
+  """Non-vacuity: the guard above is only meaningful while these three
+  names really are in the executor's namespace. If the injection moved
+  or was renamed, the guard would pass by guarding nothing."""
+  import inspect
+  from forge.core import executor as _ex
+
+  src = inspect.getsource(_ex)
+  for name in BASE_GLOBAL_NAMES:
+    assert f'"{name}": {name},' in src, (
+      f"{name} is no longer injected as a base global — this guard's "
+      f"premise moved; re-derive the list from the executor")
+
+
+def test_reserved_dir_note_named_random_never_reaches_the_registry(tmp_path):
+  """The founding shape, end to end: a `random.md` parked under a
+  library vault's `.forge/` must not be indexed, because indexing it
+  installs a `random` shim that shadows the stdlib module for every
+  note in the vault."""
+  from forge.core.registry import SnippetRegistry
+
+  vault = tmp_path / "vault"
+  lib = vault / "lib"
+  parked = lib / ".forge" / "edges" / "authoring" / "foo" / "authoring"
+  parked.mkdir(parents=True)
+  (vault / "forge.toml").write_text(
+    'name = "probe"\nversion = "0.1.0"\ndescription = "d"\ndomains = []\n')
+  (lib / "forge.toml").write_text(
+    'name = "problib"\nversion = "0.1.0"\ndescription = "d"\n')
+  (parked / "random.md").write_text(
+    "---\ntype: action\n---\n\n# Python\n\n"
+    "```python\ndef compute(context):\n  return 0.5\n```\n")
+
+  registry = SnippetRegistry()
+  registry.scan(str(vault))
+  ids = [e.get("id") for e in registry.list_snippets().get("problib", [])]
+  assert ids == [], f"parked note was indexed: {ids}"
+  shims = _build_snippet_shims(_FakeContext(), registry)
+  assert "random" not in shims, sorted(shims)
+
+
+def test_the_same_note_outside_a_reserved_dir_does_index(tmp_path):
+  """Non-vacuity for the test above: the exclusion is the RESERVED DIR,
+  not the filename. Move the identical file out of `.forge/` and it is
+  indexed — so the green above is pruning working, not `random.md`
+  being unreadable or the fixture being malformed.
+
+  Asserted on the REGISTRY, deliberately, not on the shims: at HEAD a
+  library-vault entry produces no shim either way, because drain 1400's
+  resolvability predicate drops shims dispatch cannot serve (library
+  entries are sub-path keyed, so `get_bare('random')` is None). Two
+  independent defenses, and this pair isolates the first one."""
+  from forge.core.registry import SnippetRegistry
+
+  vault = tmp_path / "vault"
+  lib = vault / "lib"
+  live = lib / "notes"
+  live.mkdir(parents=True)
+  (vault / "forge.toml").write_text(
+    'name = "probe"\nversion = "0.1.0"\ndescription = "d"\ndomains = []\n')
+  (lib / "forge.toml").write_text(
+    'name = "problib"\nversion = "0.1.0"\ndescription = "d"\n')
+  (live / "random.md").write_text(
+    "---\ntype: action\n---\n\n# Python\n\n"
+    "```python\ndef compute(context):\n  return 0.5\n```\n")
+
+  registry = SnippetRegistry()
+  registry.scan(str(vault))
+  ids = [e.get("id") for e in registry.list_snippets().get("problib", [])]
+  assert ids == ["notes/random"], ids
