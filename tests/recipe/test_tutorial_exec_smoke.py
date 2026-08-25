@@ -184,38 +184,42 @@ class TestActionNotesExec:
     assert result == 120
 
   def test_octopus_fact(self, tutorial_resolver):
-    """octopus_fact uses `{{...}}` slot syntax.
-
-    Drain 2026-08-25-0110 REWROTE this assertion, and the reason is
-    worth more than the test.
-
-    It used to assert that running the note raises SlotCacheMissError —
-    encoding "a no-layer call transpiles the Recipe", which was the
-    engine's old default. That default is gone: the engine now reads
-    the note's own `source_facet`, and this note declares
-    `source_facet: python` with a cached `# Python` body.
-
-    The important part is that this is NOT a change in what the cohort
-    sees. The plugin's `whichLayerIsSource` already returns `python`
-    for this note, so the toolbar play button already served the cached
-    Python and the slot already did not re-resolve. What changed is
-    that the strip and Cmd-P now agree with the toolbar, which is the
-    entire point of the 2390 -> 0110 arc.
-
-    SEPARATE, REAL DEFECT, reported to forge-core rather than papered
-    over here: Chapter 9 is the tutorial's demonstration of slot
-    resolution, and with `source_facet: python` on it, a cohort member
-    reaching that chapter gets the hardcoded fact instead of a live
-    resolution. That is true TODAY on the toolbar path, before this
-    drain. Fixing it means fixing the NOTE's frontmatter — this drain
-    is forbidden from writing to cohort notes, so it does not.
-
-    The slot machinery's own coverage is unaffected and lives in
+    """octopus_fact uses `{{...}}` slot syntax. Pre-V2.1 (drain at
+    2026-06-28-2130) we asserted the resolved string was in stdout;
+    post-restore the resolution is LLM-driven (or cached in
+    frontmatter), so this exec-smoke test now just confirms that the
+    `{{...}}` slot triggers SlotCacheMissError (the expected first-
+    pass behavior). A full resolved-cache E2E lives in
     `tests/core/test_v2_slot_resolution.py`.
-    """
-    _, result = _run(tutorial_resolver, "octopus_fact")
-    # The note's declared facet is honoured: its `# Python` body runs.
-    assert "octopus" in str(result).lower()
+
+    RESTORED at drain 2026-08-25-0130, and the round trip is the
+    lesson. Drain 0110 rewrote this assertion after it started failing,
+    on the reasoning that the note declares `source_facet: python` with
+    a cached `# Python`, so honouring the declared facet was correct
+    and Chapter 9 had stopped demonstrating slots. That reasoning was
+    sound; the premise was not.
+
+    `source_facet: python` was never in the note. It was an UNCOMMITTED
+    edit in the driver's `~/projects/forge-tutorial` working tree —
+    which is exactly what `_find_tutorial_vault` binds to. HEAD, and
+    the copy the plugin bundles and ships, both carry
+    `source_facet: description` with `return None`. Chapter 9 works.
+
+    THE HAZARD, stated plainly because it will recur: this module reads
+    a LIVE WORKING TREE, not a fixture. A failure here can be caused by
+    uncommitted state, and "the assertion encodes a stale assumption"
+    is an explanation that fits that evidence just as well as the true
+    one. Before rewriting an assertion in this file, diff the vault
+    (`git -C ~/projects/forge-tutorial status`) and confirm the note
+    you are reasoning about is the note that ships."""
+    from forge.core.slot_cache import SlotCacheMissError
+    import pytest
+    with pytest.raises(SlotCacheMissError) as exc_info:
+      _run(tutorial_resolver, "octopus_fact")
+    assert any(
+      "octopus" in m["slot_text"].lower()
+      for m in exc_info.value.missing
+    )
 
   # -- drain 2026-08-19-0910: the three notes the coverage guard named --
   #
