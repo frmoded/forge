@@ -992,8 +992,40 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False,
   # canonical_layer). The old keyword name is still accepted for
   # back-compat during the S9 field rename; delete in v0.2.290.
   layer = source_layer if source_layer is not None else canonical_layer
+
+  # Drain 2026-08-25-0110 — the engine reads the note's OWN
+  # `source_facet` when the caller passes no routing layer.
+  #
+  # Drain 2390 measured the gap this closes: three of the four shipped
+  # notes declaring `source_facet: python` executed DIFFERENT code
+  # depending on which button was pressed, because the Inputs strip and
+  # Cmd-P pass no layer. For all three, the no-layer path raised
+  # SlotCacheMissError — an LLM round trip, and then Recipe code, in
+  # place of the cohort's hand-edited Python.
+  #
+  # Until now this function read `source_facet` zero times, so every
+  # protection for hand-authored code lived in an argument each caller
+  # had to remember. The note itself already carries the answer, the
+  # plugin already maintains it, and the shipped notes already have it.
+  #
+  # PRECEDENCE: an explicit caller-passed layer always wins. This is
+  # only the DEFAULT, for the strip, Cmd-P, MCP, scripts, transitive
+  # paths and whatever comes next.
+  #
+  # ONLY `python` is honoured here. Every other value — `description`,
+  # `recipe`, `synced`, unknown, absent — falls through unchanged, and
+  # no `None`-returning branch comes back: drain 2350's retirement
+  # stands.
+  if layer is None:
+    facet = snippet["meta"].get("source_facet")
+    if facet == "python":
+      layer = "python"
+
   if layer == "python":
     code = extract_python(snippet["body"])
+    # A fall-through, NOT a short-circuit: a note that declares Python
+    # but has no `# Python` heading (describe_forge's shape) carries on
+    # to the normal path, exactly as it did before.
     if code is not None:
       return code
 

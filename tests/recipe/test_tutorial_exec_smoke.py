@@ -184,21 +184,38 @@ class TestActionNotesExec:
     assert result == 120
 
   def test_octopus_fact(self, tutorial_resolver):
-    """octopus_fact uses `{{...}}` slot syntax. Pre-V2.1 (drain at
-    2026-06-28-2130) we asserted the resolved string was in stdout;
-    post-restore the resolution is LLM-driven (or cached in
-    frontmatter), so this exec-smoke test now just confirms that the
-    `{{...}}` slot triggers SlotCacheMissError (the expected first-
-    pass behavior). A full resolved-cache E2E lives in
-    `tests/core/test_v2_slot_resolution.py`."""
-    from forge.core.slot_cache import SlotCacheMissError
-    import pytest
-    with pytest.raises(SlotCacheMissError) as exc_info:
-      _run(tutorial_resolver, "octopus_fact")
-    assert any(
-      "octopus" in m["slot_text"].lower()
-      for m in exc_info.value.missing
-    )
+    """octopus_fact uses `{{...}}` slot syntax.
+
+    Drain 2026-08-25-0110 REWROTE this assertion, and the reason is
+    worth more than the test.
+
+    It used to assert that running the note raises SlotCacheMissError —
+    encoding "a no-layer call transpiles the Recipe", which was the
+    engine's old default. That default is gone: the engine now reads
+    the note's own `source_facet`, and this note declares
+    `source_facet: python` with a cached `# Python` body.
+
+    The important part is that this is NOT a change in what the cohort
+    sees. The plugin's `whichLayerIsSource` already returns `python`
+    for this note, so the toolbar play button already served the cached
+    Python and the slot already did not re-resolve. What changed is
+    that the strip and Cmd-P now agree with the toolbar, which is the
+    entire point of the 2390 -> 0110 arc.
+
+    SEPARATE, REAL DEFECT, reported to forge-core rather than papered
+    over here: Chapter 9 is the tutorial's demonstration of slot
+    resolution, and with `source_facet: python` on it, a cohort member
+    reaching that chapter gets the hardcoded fact instead of a live
+    resolution. That is true TODAY on the toolbar path, before this
+    drain. Fixing it means fixing the NOTE's frontmatter — this drain
+    is forbidden from writing to cohort notes, so it does not.
+
+    The slot machinery's own coverage is unaffected and lives in
+    `tests/core/test_v2_slot_resolution.py`.
+    """
+    _, result = _run(tutorial_resolver, "octopus_fact")
+    # The note's declared facet is honoured: its `# Python` body runs.
+    assert "octopus" in str(result).lower()
 
   # -- drain 2026-08-19-0910: the three notes the coverage guard named --
   #
