@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v25)
+# Forge — Core Invariants and Discipline (V2a v27)
 
 ## Mission
 
@@ -362,38 +362,22 @@ Frontmatter schema for lineage tracking:
 - `python_derived_from_recipe_hash` — stamped at transpile time
   with Recipe's current hash. Python's parent is Recipe.
 
-*Sync-state rollup (v23, drain 2026-07-23-1700 Phase 1).* Alongside
-`source_facet` (which facet is canonical) and the per-facet visibility
-suffixes (how each non-source facet relates to source), the note carries
-a note-level rollup field `sync_state` for external observability.
-Values:
+*Sync state is derived, never stored (v26 amendment, 2026-08-17, driver-approved; supersedes the v23 persisted rollup).* A note's sync state is computed on read from its stored hash lineage (`recipe_derived_from_description_hash` vs `description_hash`; `python_derived_from_recipe_hash` vs `recipe_hash`; interpreted under `source_facet`), by the single engine-owned derivation `forge.core.sync_state.derive_sync_state`. No component persists a `sync_state` field; a persisted copy of a computable fact is a cache that can lie, and this one did (five documented incidents, 2026-08-14..16 — vocabulary drift between independent writers, false `synced` on contradictory content, false `synced` manufactured by backfill, and a silently missing field).
 
-- `synced` — all three facets aligned with their stored hashes.
-- `stale-recipe` — Description edited since Recipe was last derived.
-- `stale-python` — Recipe edited since Python was compiled (or a
-  downstream Python-only edit not yet reconciled with Recipe).
-- `stale-both` — Description edited AND Recipe not re-derived
-  (Python transitively stale).
+The vocabulary names the FIRST broken link in the Description → Recipe → Python chain:
 
-(Drain 2026-07-23-1900 removed the vestigial `authoring` value from
-the enum per YAGNI: no code path ever wrote it. If a future in-transit
-consumer arises, re-introduce as a Phase 3 drain with the writer +
-reader landing together in one commit.)
+- `synced` — every derivation the note's source facet implies is current. (A `source_facet: python` note is always `synced`: nothing derives from Python; upstream facets render "— ignored".)
+- `stale-recipe` — the Recipe is not a current derivation of the Description.
+- `stale-python` — the Recipe is current (or is the source) and the Python is not a current derivation of the Recipe. This is the normal state immediately after `commit_recipe`, which deliberately does not re-transpile (I18).
+- `unknown` — the lineage cannot be evaluated (legacy / never-stamped). A missing lineage NEVER reads as `synced`.
 
-`sync_state` is a Phase 1 external-observability field: forge-mcp
-returns it on `forge_read_note` / `forge_read_notes_in_vault` so wizard
-/ CC / CCQA / cohort scripts can query note state without loading the
-plugin. Downstream consumers migrate to `sync_state` as source-of-truth
-(in place of hash-comparison-per-render) as later phases. Phase 1 is
-introduce + populate + display; consumer migration is out of scope for
-this drain.
+`stale-both` is retired: first-broken-link ordering makes it information-free (a stale Recipe implies stale downstream), and the 2026-08-16 consumer inventory found it had zero readers.
 
-`sync_state` and `source_facet` are DIFFERENT fields; both are
-plugin-written; neither replaces the other. `source_facet` records
-authorial intent (which facet drives runtime). `sync_state` records
-a freshness rollup for observers. Per-facet render-time state
-continues to be surfaced via the `FacetState` enum (below) and the
-per-facet visibility suffixes.
+Live-edit detection ("is someone mid-edit right now") is deliberately NOT this value's job — the per-facet visibility suffixes cover it. This value answers "did the derivations this note claims actually happen against the content present."
+
+forge-mcp returns the derived value on `forge_read_note` / `forge_read_notes_in_vault` so wizard / CC / CCQA / cohort scripts can query note state without loading the plugin. Any `sync_state` field still present in a note's frontmatter is ignored residue pending removal (Phase 3 of the 2026-08-16 retirement arc).
+
+`sync_state` (derived) and `source_facet` (stored) are DIFFERENT concepts; neither replaces the other. `source_facet` records authorial intent (which facet drives runtime). The derived sync state records a freshness rollup for observers. Per-facet render-time state continues to be surfaced via the `FacetState` enum (below) and the per-facet visibility suffixes.
 
 Visibility contract. Each non-source facet is annotated by the CM6
 view plugin with a state suffix + body opacity reflecting lineage +
@@ -520,6 +504,25 @@ Qualified references (per A4) are unaffected — they dispatch directly
 to the named vault. Caller directory takes priority over siblings.
 Ambiguous bare references across siblings are an authoring error,
 resolved by explicit qualification.
+
+**A4.2.** *Shadowing is decided by the resolving index.* A name may
+shadow another (vault note over engine chip, per A4) only if the
+shadowing entry is resolvable by the SAME mechanism that will dispatch
+it — `GraphResolver.resolve`, including the A4.1 caller-directory and
+sibling-subdir probes. An index used to decide shadowing must be the
+index used to resolve; where the deciding index is necessarily broader
+(e.g. a basename inventory), shadow installation is gated on a
+resolution check against the dispatching resolver. Ambiguity counts as
+resolvable — a legible ambiguity error is a real answer; a shadow that
+shadows successfully and then fails to resolve is not.
+
+Rationale of record: the create_water_particles incident (2026-08) —
+phantom `.forge/edges/` cache entries, ingested by an unpruned
+library-vault walk, installed basename shims that shadowed working
+engine chips and then raised `SnippetResolutionError` at dispatch. Ten
+such collisions sat latent in music-theory alone. Two indexes, one
+name, different answers. (Driver-approved 2026-08-24; predicate shipped
+in forge `2491055`.)
 
 **A5.** Vaults are distributed via per-vault GitHub repositories, with
 tagged tarballs and SHA-256 integrity verification at install time.
