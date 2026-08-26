@@ -47,6 +47,92 @@ INDENT = "  "
 # instead for shorter signatures, since the dialect AST is larger).
 _active_resolve_slot = None
 _active_slot_collector = None
+# Drain 2026-08-26-1610 — names the codegen must not emit bare.
+#
+# `Let greeting = Call [[greeting]].` compiled to `greeting = greeting()`.
+# Python makes a name local for the WHOLE function body as soon as it is
+# assigned anywhere, so the local assignment shadows the callable and the
+# call dies (UnboundLocalError, or a TypeError when the shadowing name is
+# a parameter that already holds a value).
+#
+# That same scoping rule is why the obvious fix does not work: an alias
+# line like `_c = greeting` placed BEFORE the assignment also reads the
+# unbound local. Any alias has to be bound outside the body, which means
+# touching `compute`'s signature — and that signature is the wire
+# contract the strip and the engine pass kwargs against.
+#
+# So: rename the colliding LOCAL (Let / For each), which no caller can
+# see. `_active_renames` maps original -> emitted name; it is empty for
+# every Recipe with no collision, which is what keeps §2's
+# "byte-identical output to today" true for existing notes.
+_active_renames: dict = {}
+# Callees shadowed by an INPUT name. Inputs cannot be renamed — they ARE
+# the kwargs contract — so those calls route through an explicit globals()
+# lookup instead of the bare name.
+_active_input_shadowed: set = set()
+
+
+def _walk_exprs(node):
+  """Every expression reachable from a statement or expression."""
+  yield node
+  for attr in ("value", "expr", "condition", "iterable", "count", "arg",
+               "left", "right"):
+    child = getattr(node, attr, None)
+    if child is not None and hasattr(child, "__class__"):
+      yield from _walk_exprs(child)
+  for attr in ("body", "then_body", "else_body", "items", "statements"):
+    children = getattr(node, attr, None) or []
+    for c in children:
+      if hasattr(c, "__class__"):
+        yield from _walk_exprs(c)
+  for kw in (getattr(node, "kwargs", None) or []):
+    v = getattr(kw, "value", None)
+    if v is not None:
+      yield from _walk_exprs(v)
+
+
+def _collision_plan(module: Module, input_names):
+  """Which local bindings collide with a callee name, and what to call
+  them instead.
+
+  Returns `(renames, input_shadowed)`.
+
+  A callee is only ever referenced by its BARE name in the emitted
+  Python, so any local that shares that name breaks the call. Locals we
+  can rename freely — no caller sees them. Input names we cannot: they
+  are the kwargs contract.
+  """
+  callees = set()
+  bindings = []            # ordered, so the rename scheme is deterministic
+  for stmt in module.statements:
+    for node in _walk_exprs(stmt):
+      cls = type(node).__name__
+      if cls in ("ChipCall", "CallStmt"):
+        name = getattr(node, "name", None)
+        # Path-shaped callees route through context.compute() and never
+        # appear as a bare name, so they cannot collide.
+        if name and "/" not in name:
+          callees.add(name)
+      if cls == "LetStmt" and getattr(node, "name", None):
+        bindings.append(node.name)
+      if cls == "ForEachStmt" and getattr(node, "var", None):
+        bindings.append(node.var)
+
+  taken = set(bindings) | set(callees) | set(input_names)
+  renames: dict = {}
+  for name in bindings:
+    if name not in callees or name in renames:
+      continue
+    # PEP 8's own idiom for a name that would otherwise collide. Keeps
+    # the word the cohort chose visible, which `greeting_1` does not.
+    candidate = name + "_"
+    while candidate in taken:
+      candidate += "_"
+    taken.add(candidate)
+    renames[name] = candidate
+
+  input_shadowed = {n for n in input_names if n in callees}
+  return renames, input_shadowed
 
 
 def transpile(module: Module, inputs=None, resolve_slot=None,
@@ -72,11 +158,22 @@ def transpile(module: Module, inputs=None, resolve_slot=None,
       having to walk the AST themselves.
   """
   global _active_resolve_slot, _active_slot_collector
+  global _active_renames, _active_input_shadowed
   _active_resolve_slot = resolve_slot
   _active_slot_collector = collect_slots
+  # Drain 2026-08-26-1610 — plan the collision renames before rendering.
+  # Input names come from BOTH sources the signature can draw on: the
+  # `Input` statements in the Recipe and the caller-supplied decls.
+  _input_names = {s.name for s in module.statements
+                  if isinstance(s, InputStmt)}
+  _input_names |= {getattr(d, "name", None) for d in (inputs or [])}
+  _input_names.discard(None)
+  _active_renames, _active_input_shadowed = _collision_plan(module, _input_names)
   try:
     return _transpile_inner(module, inputs)
   finally:
+    _active_renames = {}
+    _active_input_shadowed = set()
     _active_resolve_slot = None
     _active_slot_collector = None
 
@@ -231,6 +328,14 @@ def _render_block(stmts, depth):
   return out
 
 
+def _emit_name(name: str) -> str:
+  """The Python name to emit for a local binding or reference.
+
+  Identity for every Recipe with no callee/local collision, which is
+  what keeps existing notes' generated Python byte-identical."""
+  return _active_renames.get(name, name)
+
+
 def _render_stmt(stmt, depth):
   pad = INDENT * depth
   if isinstance(stmt, LetStmt):
@@ -243,8 +348,8 @@ def _render_stmt(stmt, depth):
     # only ever produced for LEADING Lets, which legacy-mode's
     # promotion always slices out of the body — see _transpile_inner).
     if stmt.type_hint is not None:
-      return [f"{pad}{stmt.name}: {_render_type_hint(stmt.type_hint)} = {_render_expr(stmt.value)}"]
-    return [f"{pad}{stmt.name} = {_render_expr(stmt.value)}"]
+      return [f"{pad}{_emit_name(stmt.name)}: {_render_type_hint(stmt.type_hint)} = {_render_expr(stmt.value)}"]
+    return [f"{pad}{_emit_name(stmt.name)} = {_render_expr(stmt.value)}"]
   if isinstance(stmt, ReturnStmt):
     if stmt.value is None:
       return [f"{pad}return None"]
@@ -269,7 +374,7 @@ def _render_stmt(stmt, depth):
     if not inner:
       inner = [INDENT * (depth + 1) + "pass"]
     return [
-      f"{pad}for {stmt.var} in {_render_expr(stmt.iterable)}:",
+      f"{pad}for {_emit_name(stmt.var)} in {_render_expr(stmt.iterable)}:",
       *inner,
     ]
   if isinstance(stmt, IfStmt):
@@ -326,6 +431,16 @@ def _render_chip_invocation(name: str, kwargs_pyexpr: str) -> str:
     if kwargs_pyexpr:
       return f"context.compute({name!r}, {kwargs_pyexpr})"
     return f"context.compute({name!r})"
+  # Drain 2026-08-26-1610 — an INPUT shares this callee's name. Inputs
+  # are the kwargs contract and cannot be renamed, and the parameter
+  # shadows the callable for the whole body, so the bare name is
+  # unusable here. Reach the shim through the module globals the
+  # execution scope actually binds it into. Only ever emitted for a real
+  # collision; every other call keeps the plain bare-name form.
+  if name in _active_input_shadowed:
+    if kwargs_pyexpr:
+      return f"globals()[{name!r}]({kwargs_pyexpr})"
+    return f"globals()[{name!r}]()"
   # Bare name → through the shim.
   if kwargs_pyexpr:
     return f"{name}({kwargs_pyexpr})"
@@ -348,7 +463,7 @@ def _render_expr(expr) -> str:
   if isinstance(expr, StringLit):
     return repr(expr.value)
   if isinstance(expr, IdentRef):
-    return expr.name
+    return _emit_name(expr.name)
   if isinstance(expr, BoolLit):
     return "True" if expr.value else "False"
   if isinstance(expr, NoneLit):
