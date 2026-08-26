@@ -30,6 +30,16 @@ from forge.recipe.transpiler import transpile
 
 _REPO = Path(__file__).resolve().parents[2]
 
+# Drain 2026-08-26-1610 — the transpiler AS IT WAS before this drain.
+#
+# Pinned to a SHA, not to HEAD. The first version of these tests used
+# HEAD, which was correct only until the fix was committed — at that
+# moment "before" became "after", the byte-identical comparison went
+# new-vs-new, and the check silently stopped proving anything. Its
+# non-vacuity partner caught exactly that and went red, which is the
+# whole reason that partner exists.
+_PRE_DRAIN = "478431d"
+
 
 def _run(src: str, shims: dict, **kwargs):
   """Transpile and execute, with the callables bound the way the real
@@ -82,7 +92,7 @@ def test_non_colliding_output_is_byte_identical_to_pre_drain(src):
   """
   import subprocess, sys, types
   before_src = subprocess.run(
-    ["git", "show", "HEAD:forge/recipe/transpiler.py"],
+    ["git", "show", f"{_PRE_DRAIN}:forge/recipe/transpiler.py"],
     cwd=str(_REPO), capture_output=True, text=True, check=True).stdout
   mod = types.ModuleType("_transpiler_before")
   mod.__file__ = str(_REPO / "forge" / "recipe" / "transpiler.py")
@@ -96,7 +106,7 @@ def test_the_byte_identical_check_would_notice_a_change():
   DISAGREE on the colliding shape, or the comparison proves nothing."""
   import subprocess, types
   before_src = subprocess.run(
-    ["git", "show", "HEAD:forge/recipe/transpiler.py"],
+    ["git", "show", f"{_PRE_DRAIN}:forge/recipe/transpiler.py"],
     cwd=str(_REPO), capture_output=True, text=True, check=True).stdout
   mod = types.ModuleType("_transpiler_before2")
   mod.__file__ = str(_REPO / "forge" / "recipe" / "transpiler.py")
