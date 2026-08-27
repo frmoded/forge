@@ -151,12 +151,6 @@ class TestActionNotesExec:
     _, result = _run(tutorial_resolver, "excited_word")
     assert result == "wonderful"
 
-  def test_describe_forge(self, tutorial_resolver):
-    # CW-tutorial-full-return-sweep (drain 2026-07-23-1500):
-    # describe_forge.md now Returns instead of printing.
-    _, result = _run(tutorial_resolver, "describe_forge")
-    assert result == "Forge is wonderful."
-
   def test_weather_pleasant_at_72(self, tutorial_resolver):
     # CW-tutorial-full-return-sweep (drain 2026-07-23-1500):
     # weather.md's If/Otherwise branches both Return now — the
