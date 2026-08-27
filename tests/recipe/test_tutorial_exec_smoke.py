@@ -23,6 +23,7 @@ from forge.core.executor import (
     resolve_action_code,
 )
 from forge.core.registry import GraphResolver, SnippetRegistry
+from forge.recipe.parser import ParseError
 
 from tests.music._helpers import _find_vault as _find_music_vault
 
@@ -130,6 +131,21 @@ class TestActionNotesExec:
     # cheer.md now Returns instead of printing — assertion shifted.
     _, result = _run(tutorial_resolver, "cheer")
     assert result == "hooray!"
+
+  def test_fix_the_call(self, tutorial_resolver):
+    """Chapter 3's broken-on-purpose note (drain 2026-08-27-1200).
+
+    It demonstrates the missing-`word=` mistake, so the guard is that it
+    FAILS -- and fails at the E-- parse layer, not at runtime. Asserting the
+    exact error class matters: if a future parser change made the positional
+    call legal, the note would quietly start working and the exercise would
+    be gone with nothing going red.
+    """
+    res, reg, vault = tutorial_resolver
+    snip = res.resolve("fix_the_call")
+    with pytest.raises(ParseError) as exc:
+      resolve_action_code(snip)
+    assert "malformed kwarg" in str(exc.value)
 
   def test_excited_word_returns_word(self, tutorial_resolver):
     _, result = _run(tutorial_resolver, "excited_word")

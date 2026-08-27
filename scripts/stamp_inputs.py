@@ -39,7 +39,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
   sys.path.insert(0, str(_REPO_ROOT))
 
-from forge.recipe.parser import derive_inputs_from_recipe  # noqa: E402
+from forge.recipe.parser import ParseError, derive_inputs_from_recipe  # noqa: E402
 
 _FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 _RECIPE_RE = re.compile(r"^# Recipe\s*$", re.M)
@@ -117,7 +117,17 @@ def stamp_note(path: Path, *, write: bool = True) -> bool:
   if not recipe:
     return False
 
-  decls = derive_inputs_from_recipe(recipe)
+  # Drain 2026-08-27-1200 — a Recipe that does not PARSE has no inputs to
+  # derive, and a vault may legitimately contain one: chapter 3's
+  # fix_the_call.md is broken on purpose (principle 10, "show one real
+  # failure"), and any learner mid-edit produces the same state. Before this
+  # guard, one such note raised ParseError out of stamp_vault and took the
+  # whole sweep down with a traceback that did not even name the file --
+  # which meant a release preflight failing with no usable diagnostic.
+  try:
+    decls = derive_inputs_from_recipe(recipe)
+  except ParseError:
+    return False
   # Only notes with an actual `Input` statement are in scope. The deriver
   # falls back to legacy typed-Let inference when none exist; that path is
   # deliberately NOT stamped here (drain §4).
