@@ -51,6 +51,13 @@ try:
   from music21 import chord
 except ImportError:
   chord = None
+# CW 1210 — build_chord's interval-stacking (transpose by a stacked
+# interval per chord degree) needs music21.interval directly; nothing
+# in this file imported it before now.
+try:
+  from music21 import interval
+except ImportError:
+  interval = None
 try:
   from music21 import harmony
 except ImportError:
@@ -648,6 +655,61 @@ def diatonic_scale(
     )
   pitches = s.getPitches(f"{tonic}{start_oct}", f"{tonic}{end_oct}")
   return [p.nameWithOctave for p in pitches]
+
+
+# CW 1210 — shared chord-building library note. Extracted from a `{{ }}`
+# value slot inline inside build_seventh_chord.md's Recipe: a slot is
+# resolved ONCE at transpile time by an LLM matching English prose, not a
+# Python evaluator, so pasting a literal comprehension there was a
+# structural landmine (any future Description-driven regenerate, or
+# `/resolve-slot` re-resolution, is free to produce something else
+# entirely). Recipe grammar has no raw-expression-call form (constitution
+# B7.1) — the only grammar-legal way to run real music21 logic from a
+# Recipe is `Call [[note]]` to a wrapper like this one.
+_SEVENTH_CHORD_INTERVALS: dict[str, list[str]] = {
+  "maj7": ["P1", "M3", "P5", "M7"],
+  "dom7": ["P1", "M3", "P5", "m7"],
+  "min7": ["P1", "m3", "P5", "m7"],
+  "half_dim7": ["P1", "m3", "d5", "m7"],
+  "dim7": ["P1", "m3", "d5", "d7"],
+  "dom9": ["P1", "M3", "P5", "m7", "M9"],
+  "dom11": ["P1", "M3", "P5", "m7", "M9", "P11"],
+  "dom13": ["P1", "M3", "P5", "m7", "M9", "P11", "M13"],
+}
+
+
+def build_chord(tonic: str, quality: str) -> list[str]:
+  """Build a chord on `tonic` by stacking the intervals for `quality`.
+
+  Contract:
+    - Returns `list[str]` of `nameWithOctave` pitch names — e.g.
+      `["C4", "E4", "G4", "B-4"]` for `build_chord("C4", "dom7")`.
+    - `quality` is one of: `maj7`, `dom7`, `min7`, `half_dim7`, `dim7`
+      (seventh chords), or `dom9`, `dom11`, `dom13` (extended dominant
+      chords that keep stacking thirds past the seventh). Unknown
+      `quality` raises `KeyError` (music21's own lookup-miss shape;
+      not re-wrapped, since the caller's own quality string is already
+      in the message).
+    - Accidentals follow music21's `.nameWithOctave` convention verbatim:
+      flats as `-` (e.g. `"B-4"`), sharps as `#`.
+    - `tonic` accepts anything `music21.pitch.Pitch(tonic)` accepts —
+      a pitch name with octave, e.g. `"C4"`, `"F#3"`, `"B-4"`.
+
+  Musical correctness reference: `music21.interval.Interval` /
+  `music21.pitch.Pitch.transpose`. Thin adapter — no hand-rolled
+  interval arithmetic; follows whatever music21 says each named
+  interval transposes to.
+  """
+  _require_music21()
+  if interval is None:
+    raise RuntimeError(
+      "music21.interval is unavailable in this environment; "
+      "build_chord requires the full music21 install."
+    )
+  intervals = _SEVENTH_CHORD_INTERVALS[quality]
+  root = pitch.Pitch(tonic)
+  return [root.transpose(interval.Interval(iv)).nameWithOctave
+          for iv in intervals]
 
 
 # CW-forge-music-lib-add-scale-construction-exercise-plus-first-fixtures

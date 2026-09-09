@@ -46,6 +46,11 @@ try:
     # major/minor scale via music21 scale.MajorScale/MinorScale, so
     # authoring doesn't fall back to a `{{ music21.scale.… }}` slot.
     "diatonic_scale": _music_lib.diatonic_scale,
+    # CW 1210 — shared chord-building library note (interval-stacking
+    # via music21.interval.Interval), replacing an inline {{ }} slot
+    # that held a literal Python comprehension in
+    # build_seventh_chord.md's Recipe.
+    "build_chord": _music_lib.build_chord,
     # Tier-1 composition primitives: rhythmic_line first
     # (CW-forge-music-lib-add-rhythmic-line-tier-1, drain
     # 2026-08-05-0730), melodic_line second
@@ -187,6 +192,8 @@ _MUSIC_LAZY_CHIP_NAMES = (
   # 7-note diatonic scale with octave-anchored pitch names, mirroring
   # music21's MajorScale / MinorScale contract.
   "diatonic_scale",
+  # CW 1210 — shared chord-building library note.
+  "build_chord",
   "melodic_line",
   "rhythmic_line",
   # Drain 2026-08-05-1730 — scale-construction exercise grading.
