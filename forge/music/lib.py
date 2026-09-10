@@ -657,15 +657,15 @@ def diatonic_scale(
   return [p.nameWithOctave for p in pitches]
 
 
-# CW 1210 — shared chord-building library note. Extracted from a `{{ }}`
-# value slot inline inside build_seventh_chord.md's Recipe: a slot is
-# resolved ONCE at transpile time by an LLM matching English prose, not a
-# Python evaluator, so pasting a literal comprehension there was a
-# structural landmine (any future Description-driven regenerate, or
-# `/resolve-slot` re-resolution, is free to produce something else
-# entirely). Recipe grammar has no raw-expression-call form (constitution
-# B7.1) — the only grammar-legal way to run real music21 logic from a
-# Recipe is `Call [[note]]` to a wrapper like this one.
+# CW 1210 — shared chord-building library notes. Extracted from `{{ }}`
+# value slots inline inside vault Recipes: a slot is resolved ONCE at
+# transpile time by an LLM matching English prose, not a Python
+# evaluator, so pasting a literal comprehension there was a structural
+# landmine (any future Description-driven regenerate, or `/resolve-slot`
+# re-resolution, is free to produce something else entirely). Recipe
+# grammar has no raw-expression-call form (constitution B7.1) — the
+# only grammar-legal way to run real music21 logic from a Recipe is
+# `Call [[note]]` to a wrapper like these.
 _SEVENTH_CHORD_INTERVALS: dict[str, list[str]] = {
   "maj7": ["P1", "M3", "P5", "M7"],
   "dom7": ["P1", "M3", "P5", "m7"],
@@ -676,6 +676,30 @@ _SEVENTH_CHORD_INTERVALS: dict[str, list[str]] = {
   "dom11": ["P1", "M3", "P5", "m7", "M9", "P11"],
   "dom13": ["P1", "M3", "P5", "m7", "M9", "P11", "M13"],
 }
+
+# CW 1245 — build_triad_chord's quality vocabulary, sibling to
+# _SEVENTH_CHORD_INTERVALS above. Copied verbatim from build_triad.md's
+# own pre-fix Recipe.
+_TRIAD_INTERVALS: dict[str, list[str]] = {
+  "major": ["P1", "M3", "P5"],
+  "minor": ["P1", "m3", "P5"],
+  "diminished": ["P1", "m3", "d5"],
+  "augmented": ["P1", "M3", "A5"],
+}
+
+
+def _stack_intervals(tonic: str, intervals: list[str]) -> list[str]:
+  """Transpose `tonic` by each named interval in `intervals`, in order.
+
+  Shared core of `build_chord` and `build_triad_chord` — CW 1245
+  factored this out rather than duplicating the
+  `Pitch(...).transpose(Interval(...))` loop a second time. Both
+  callers own their own quality-to-intervals table; only the stacking
+  mechanics live here.
+  """
+  root = pitch.Pitch(tonic)
+  return [root.transpose(interval.Interval(iv)).nameWithOctave
+          for iv in intervals]
 
 
 def build_chord(tonic: str, quality: str) -> list[str]:
@@ -698,7 +722,9 @@ def build_chord(tonic: str, quality: str) -> list[str]:
   Musical correctness reference: `music21.interval.Interval` /
   `music21.pitch.Pitch.transpose`. Thin adapter — no hand-rolled
   interval arithmetic; follows whatever music21 says each named
-  interval transposes to.
+  interval transposes to. Companion to `build_triad_chord` — both
+  share `_stack_intervals`; this one owns the seventh/extended-
+  dominant vocabulary.
   """
   _require_music21()
   if interval is None:
@@ -706,10 +732,46 @@ def build_chord(tonic: str, quality: str) -> list[str]:
       "music21.interval is unavailable in this environment; "
       "build_chord requires the full music21 install."
     )
-  intervals = _SEVENTH_CHORD_INTERVALS[quality]
-  root = pitch.Pitch(tonic)
-  return [root.transpose(interval.Interval(iv)).nameWithOctave
-          for iv in intervals]
+  return _stack_intervals(tonic, _SEVENTH_CHORD_INTERVALS[quality])
+
+
+def build_triad_chord(tonic: str, quality: str) -> list[str]:
+  """Build a triad on `tonic` by stacking the intervals for `quality`.
+
+  Named `build_triad_chord`, not `build_triad` — the vault note that
+  calls this (`build_triad.md`) has that exact basename, and a Recipe
+  calling `[[build_triad]]` from a note ALSO named `build_triad` would
+  resolve to itself and recurse forever rather than reaching this
+  function (`tests/core/test_library_shadow_guard.py` catches this
+  shape; the same trap already cost two prior notes,
+  `create_water_particles.md` / `create_ink_particles.md`). The note
+  keeps its own name — it's the real pedagogical exercise page, not a
+  redundant wrapper — so the chip took the different name instead.
+
+  Contract:
+    - Returns `list[str]` of `nameWithOctave` pitch names — e.g.
+      `["C4", "E4", "G4"]` for `build_triad_chord("C4", "major")`.
+    - `quality` is one of: `major`, `minor`, `diminished`, `augmented`.
+      Unknown `quality` raises `KeyError` (music21's own lookup-miss
+      shape; not re-wrapped, since the caller's own quality string is
+      already in the message).
+    - Accidentals follow music21's `.nameWithOctave` convention verbatim:
+      flats as `-` (e.g. `"E-4"`), sharps as `#`.
+    - `tonic` accepts anything `music21.pitch.Pitch(tonic)` accepts —
+      a pitch name with octave, e.g. `"C4"`, `"F#3"`, `"B-4"`.
+
+  Musical correctness reference: `music21.interval.Interval` /
+  `music21.pitch.Pitch.transpose`. Thin adapter — no hand-rolled
+  interval arithmetic. Companion to `build_chord` — both share
+  `_stack_intervals`; this one owns the triad-quality vocabulary.
+  """
+  _require_music21()
+  if interval is None:
+    raise RuntimeError(
+      "music21.interval is unavailable in this environment; "
+      "build_triad_chord requires the full music21 install."
+    )
+  return _stack_intervals(tonic, _TRIAD_INTERVALS[quality])
 
 
 # CW-forge-music-lib-add-scale-construction-exercise-plus-first-fixtures

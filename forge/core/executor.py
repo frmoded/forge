@@ -51,6 +51,11 @@ try:
     # that held a literal Python comprehension in
     # build_seventh_chord.md's Recipe.
     "build_chord": _music_lib.build_chord,
+    # CW 1245 — sibling to build_chord (drain 1210): same tonic +
+    # quality -> interval-stack -> transpose shape, triad vocabulary.
+    # Named build_triad_chord, not build_triad, to avoid colliding
+    # with build_triad.md's own basename (test_library_shadow_guard.py).
+    "build_triad_chord": _music_lib.build_triad_chord,
     # Tier-1 composition primitives: rhythmic_line first
     # (CW-forge-music-lib-add-rhythmic-line-tier-1, drain
     # 2026-08-05-0730), melodic_line second
@@ -194,6 +199,8 @@ _MUSIC_LAZY_CHIP_NAMES = (
   "diatonic_scale",
   # CW 1210 — shared chord-building library note.
   "build_chord",
+  # CW 1245 — sibling to build_chord, triad vocabulary.
+  "build_triad_chord",
   "melodic_line",
   "rhythmic_line",
   # Drain 2026-08-05-1730 — scale-construction exercise grading.
