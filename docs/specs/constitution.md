@@ -770,8 +770,33 @@ endpoint (parallel to `/generate`, same bearer-token auth). The
 resolved expression is spliced into the transpiled Python; the
 result lands in the note's `# Python` facet — the same cache surface
 used by other transpile output. Hash-keyed bookkeeping that links
-slot text to its resolution lives transiently in memory during
-transpile and is never persisted as a user-facing artifact.
+slot text to its resolution is persisted in a `# Slots` section
+appended after `# Python`, as a YAML `slots:` map of
+`sha256(slot_text + snippet_id + surrounding_context)` → resolved
+Python expression string (never an executed value, so runtime
+randomness is preserved). The section sits outside every facet's
+hash-relevant text — each facet extractor stops at the next
+top-level heading — so it never enters `description_hash`,
+`recipe_hash`, or `python_hash`.
+
+*Correction, v29 amendment, 2026-09-11 (forge-core).* This clause
+previously read "lives transiently in memory during transpile and is
+never persisted as a user-facing artifact," describing a design this
+project shipped in June 2026 and then deliberately REVERSED: drain
+`2026-08-24-2350` (driver-ruled: *"I am happy with caching slots,
+recipe → python and Description → recipe. Not execution results"*)
+wired the persistent `# Slots` sidecar precisely because the
+transient in-memory version re-hit the LLM on every Forge-click and
+made slot-bearing notes non-deterministic across runs, contradicting
+the ruled caching policy. `forge/forge/core/slot_cache.py`'s own
+docstring has read "WIRED as of drain 2026-08-24-2350" since that
+landed; this document was never updated to match and is corrected
+here. See `parse_slots_section` / `serialize_slots_section` in
+`slot_cache.py` for the read/write contract, and
+`forge-client-obsidian/src/slots-section-writer-core.ts` for the
+plugin-side write path (`writeSlotsSection`, called from
+`handleSlotCacheMiss` immediately after a `/resolve-slot`
+round-trip, merging new resolutions non-destructively).
 
 **Cache only when the cache pays for itself.** Slot-free Recipes
 continue transpiling fresh on every compute; transpile is
