@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v27)
+# Forge — Core Invariants and Discipline (V2a v28)
 
 ## Mission
 
@@ -350,8 +350,11 @@ State machine — transitions:
 | python | click Forge | — | python | Run Python as-authored; no regeneration |
 | synced | click Forge | — | synced | Same as `description` source (LLM regenerate → transpile → run) |
 | any | programmatic write (transpile output, `/generate` write-back) | `_programmaticWriteInFlight` = true | (unchanged) | Update stored `<facet>_hash` + derived-from stamps; do NOT overwrite existing `source_facet` |
+| any | out-of-process derivative write (CC drain, forge-mcp tool call, any writer outside the plugin's own runtime) declares `derivation_of: <facet>` in the same write | frontmatter carries `derivation_of` naming the facet it derives from | (unchanged) | Update stored `<facet>_hash` + derived-from stamps; do NOT overwrite existing `source_facet`; the `derivation_of` key is transient — the writer clears it in the same commit once the derived stamps are set, so it never persists as steady state |
 | (absent) | backfill on first-open per session | source_facet absent AND V2 note | inferred (upstream-wins: Description > Recipe > Python) | Seed `source_facet` via hash-mismatch inference; seed derived-from stamps |
 | any | external file rewrite (git checkout, `cp`, external editor) | multi-facet body-hash drift detected simultaneously | description | Write `source_facet=description` (CW-1800 upstream-wins tiebreak); refresh hash cache |
+
+*Cross-process exemption for derivative writes (v28 amendment, 2026-08-26, driver-approved — Gate M).* The programmatic-write exemption above has only ever been implemented in-process (`_programmaticWriteInFlight`, a `Set` scoped to the running plugin instance). Any writer outside that process — CC's drains, forge-mcp's tools, `git checkout`, `cp` — cannot claim an exemption the constitution already grants it, because the flag cannot cross a process boundary. Two 2026-08-26 incidents demonstrated the gap concretely: a CC drain's write flipped `function_inputs`/`mood` from `source_facet: description` to `python`, and wizard's `forge_commit_recipe` call flipped `greeting` from `description` to `recipe` on a content-preserving round-trip — both were derivations mistaken for fresh authorship because the writer had no way to declare otherwise. The `derivation_of` frontmatter key is the on-disk, cross-process equivalent of `_programmaticWriteInFlight`: any writer performing a derivation (not fresh authorship) declares it explicitly in the same write, and the reader/engine honors it exactly as the in-process exemption already specifies. Implementation (forge-mcp tool support for the `derivation_of` parameter; engine-side honoring logic) is tracked as a follow-up drain, not yet shipped as of this amendment.
 
 Frontmatter schema for lineage tracking:
 - `description_hash`, `recipe_hash`, `python_hash` — SHA-256 of
