@@ -111,45 +111,118 @@ def test_parse_slots_section_handles_empty_body():
 
 
 # ---------------------------------------------------------------------
-# serialize_slots_section
+# CW 1200 — parse_slots_section reads frontmatter's `slots_cache` too,
+# falling back to the body # Slots section only when frontmatter has
+# none (read-compat, not a hard cutover — at least one note on disk,
+# forge-tutorial/09-slots/octopus_fact.md, still has a real body
+# section as of this drain).
 # ---------------------------------------------------------------------
 
 
-def test_serialize_slots_section_empty_dict_returns_empty_string():
-  assert serialize_slots_section({}) == ""
+def test_parse_slots_section_reads_frontmatter_slots_cache():
+  fm = {"slots_cache": {"abc123": "42"}}
+  assert parse_slots_section("", fm) == {"abc123": "42"}
 
 
-def test_serialize_slots_section_single_entry_renders_full_heading():
+def test_parse_slots_section_frontmatter_absent_falls_back_to_body():
+  body = (
+    "# Slots\n\n"
+    "```yaml\n"
+    "slots:\n"
+    '  "k1": "v1"\n'
+    "```\n"
+  )
+  # No frontmatter arg at all (default None) — matches every pre-
+  # migration caller that hasn't been updated to pass one yet.
+  assert parse_slots_section(body) == {"k1": "v1"}
+  # Explicit None, and a dict with no slots_cache key — both "absent".
+  assert parse_slots_section(body, None) == {"k1": "v1"}
+  assert parse_slots_section(body, {"type": "action"}) == {"k1": "v1"}
+
+
+def test_parse_slots_section_merges_body_and_frontmatter_no_false_miss():
+  # THE MIGRATION-SAFETY PROPERTY. A note mid-migration can have keys
+  # in EITHER place — a false cache miss (re-hitting the LLM for
+  # something already resolved) is exactly what read-compat exists to
+  # prevent. Frontmatter wins on key collision since it's the newer
+  # source of truth going forward.
+  body = (
+    "# Slots\n\n"
+    "```yaml\n"
+    "slots:\n"
+    '  "body_only": "1"\n'
+    '  "both": "STALE_BODY_VALUE"\n'
+    "```\n"
+  )
+  fm = {"slots_cache": {"fm_only": "2", "both": "FRESH_FM_VALUE"}}
+  result = parse_slots_section(body, fm)
+  assert result == {
+    "body_only": "1",
+    "fm_only": "2",
+    "both": "FRESH_FM_VALUE",
+  }
+
+
+def test_parse_slots_section_frontmatter_slots_cache_wrong_shape_falls_back():
+  # Defensive: a malformed slots_cache (not a dict) is treated the same
+  # as absent, not a crash — matches the tolerant-by-design contract
+  # the rest of this module already follows.
+  body = "# Slots\n\n```yaml\nslots:\n  \"k1\": \"v1\"\n```\n"
+  assert parse_slots_section(body, {"slots_cache": "not a dict"}) == {"k1": "v1"}
+  assert parse_slots_section(body, {"slots_cache": ["a", "list"]}) == {"k1": "v1"}
+
+
+def test_parse_slots_section_frontmatter_slots_cache_drops_non_string_values():
+  # Same filter the body-parsing path already applies.
+  fm = {"slots_cache": {"real_key": "valid", "int_value": 42, "list_value": [1, 2]}}
+  assert parse_slots_section("", fm) == {"real_key": "valid"}
+
+
+# ---------------------------------------------------------------------
+# serialize_slots_section
+#
+# CW 1200 — no longer renders a body `# Slots` heading + fenced YAML
+# string. Returns a plain dict (sorted by key) ready to be written as
+# the value of a note's `slots_cache` frontmatter field by whatever
+# frontmatter-writing tool the caller uses — that tool owns YAML
+# emission (and therefore string escaping) for the surrounding
+# frontmatter block as a whole, so this function no longer needs its
+# own manual backslash/quote-escaping logic at all. Returns {} for an
+# empty input dict — callers omit the `slots_cache` field entirely
+# when there's nothing to cache, same omit-when-empty convention the
+# old body-heading version used.
+# ---------------------------------------------------------------------
+
+
+def test_serialize_slots_section_empty_dict_returns_empty_dict():
+  assert serialize_slots_section({}) == {}
+
+
+def test_serialize_slots_section_returns_a_plain_dict():
   rendered = serialize_slots_section({"k1": "42"})
-  assert "# Slots" in rendered
-  assert "```yaml" in rendered
-  assert "slots:" in rendered
-  assert '"k1": "42"' in rendered
-  assert "```" in rendered
+  assert rendered == {"k1": "42"}
+  assert isinstance(rendered, dict)
 
 
 def test_serialize_slots_section_stable_ordering_by_key():
   # Insertion order should NOT determine output order — only
-  # asciibetical-by-key. Critical for diff-friendliness.
+  # asciibetical-by-key. Critical for diff-friendliness (a YAML dumper
+  # downstream preserves dict insertion order, so this is what actually
+  # controls the emitted line order).
   d1 = {"zzz": "v1", "aaa": "v2", "mmm": "v3"}
   d2 = {"mmm": "v3", "aaa": "v2", "zzz": "v1"}
   out1 = serialize_slots_section(d1)
   out2 = serialize_slots_section(d2)
-  assert out1 == out2
-  # Confirm the actual sorted order:
-  aaa_pos = out1.index("aaa")
-  mmm_pos = out1.index("mmm")
-  zzz_pos = out1.index("zzz")
-  assert aaa_pos < mmm_pos < zzz_pos
+  assert list(out1.keys()) == list(out2.keys()) == ["aaa", "mmm", "zzz"]
+  assert out1 == out2 == d1
 
 
-def test_serialize_slots_section_escapes_backslash_and_quote():
+def test_serialize_slots_section_values_pass_through_unescaped():
+  # No manual escaping any more — a native dict has no string-embedding
+  # concerns. Special characters in a value are just the value.
   d = {'key"with"quotes': 'val\\with\\back', "k2": 'expr("nested")'}
   rendered = serialize_slots_section(d)
-  # Backslashes doubled, quotes escaped.
-  assert '"key\\"with\\"quotes"' in rendered
-  assert '"val\\\\with\\\\back"' in rendered
-  assert '"expr(\\"nested\\")"' in rendered
+  assert rendered == d
 
 
 # ---------------------------------------------------------------------
@@ -164,7 +237,7 @@ def test_parse_serialize_parse_roundtrip_preserves_dict():
     "ghi789": "[1, 2, 3]",
   }
   rendered = serialize_slots_section(original)
-  reparsed = parse_slots_section(rendered)
+  reparsed = parse_slots_section("", {"slots_cache": rendered})
   assert reparsed == original
 
 
@@ -178,7 +251,7 @@ def test_parse_serialize_parse_roundtrip_handles_python_expressions():
     "k_call": "range(10)",
   }
   rendered = serialize_slots_section(original)
-  reparsed = parse_slots_section(rendered)
+  reparsed = parse_slots_section("", {"slots_cache": rendered})
   assert reparsed == original
 
 

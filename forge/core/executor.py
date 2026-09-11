@@ -1106,7 +1106,15 @@ def resolve_action_code(snippet, slot_resolutions=None, force=False,
       # `__import__('random').random()` into the transpile output and
       # that re-executes on every run — the driver's rule is cache
       # translations, never execution results.
-      v2_slot_cache = dict(_v2_parse_slots(snippet["body"]))
+      #
+      # CW 1200 — thread snippet["meta"] (the parsed frontmatter) in
+      # too. parse_slots_section merges the note's frontmatter
+      # `slots_cache` field with any legacy body `# Slots` heading
+      # (frontmatter wins on key collision) — read-compat for notes
+      # that predate this drain, not a hard cutover.
+      v2_slot_cache = dict(
+        _v2_parse_slots(snippet["body"], snippet.get("meta"))
+      )
       v2_slot_cache.update(slot_resolutions or {})
       v2_missing = []
       v2_resolver = _v2_slot_resolver_factory(

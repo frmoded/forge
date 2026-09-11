@@ -3,26 +3,39 @@ slots.
 
 Three helpers:
 
-- parse_slots_section(body)  →  dict[str, str]
-- serialize_slots_section(slots)  →  str
+- parse_slots_section(body, frontmatter=None)  →  dict[str, str]
+- serialize_slots_section(slots)  →  dict[str, str]
 - compute_slot_cache_key(slot_text, snippet_id, surrounding_context=None)
    →  str (hex sha256)
 
-The cache shape matches the design in
-docs/investigations/slot-resolution-design.md §B: a sidecar `# Slots`
-heading inside the snippet's .md, containing a YAML-encoded dict of
-cache_key → python_expr. Helpers are tolerant of missing / malformed
-input (return {} on parse error) mirroring extract_python's shape at
-executor.py:508.
+CW 2026-09-11-1200 — the cache moved from a body `# Slots` heading to
+a `slots_cache` frontmatter field (driver, on seeing the heading
+render at the bottom of a note after forging: "why are we seeing the
+Slots section... write in frontmatter"). `parse_slots_section` now
+reads frontmatter's `slots_cache` field as the primary source, falling
+back to (and merging with, frontmatter winning on collision) the old
+body `# Slots` heading — read-compat, not a hard cutover, since notes
+that predate this drain aren't migrated automatically.
+`serialize_slots_section` returns a plain dict now, not markdown body
+text — the caller's frontmatter-writing tool owns YAML emission for
+the block as a whole.
+
+The design docs/investigations/slot-resolution-design.md §B predates
+this move and still describes the retired body-heading-only shape;
+this module's own docstrings here are the current source of truth.
+Helpers are tolerant of missing / malformed input (return {} / skip
+on parse error) mirroring extract_python's shape at executor.py:508.
 
 WIRED as of drain 2026-08-24-2350. `parse_slots_section` is read by
-`resolve_action_code`'s V2 transpile path; `serialize_slots_section` is
-written by the plugin's `handleSlotCacheMiss` after /resolve-slot
-returns. The header above said "NOT YET WIRED. Phase 2 will…" for long
-enough that FEEDBACK 2330 found both helpers referenced by nothing but
-their own tests, while every run of a slot-bearing note re-hit the LLM.
-Phase 2 is done; if you are reading this to find out whether the cache
-is live, it is.
+`resolve_action_code`'s V2 transpile path; `serialize_slots_section`'s
+output is written into frontmatter by the plugin's
+`handleSlotCacheMiss` after /resolve-slot returns (drain 1200 moved
+WHERE it writes; the write still happens at the same call site). The
+header above said "NOT YET WIRED. Phase 2 will…" for long enough that
+FEEDBACK 2330 found both helpers referenced by nothing but their own
+tests, while every run of a slot-bearing note re-hit the LLM. Phase 2
+is done; if you are reading this to find out whether the cache is
+live, it is.
 
 WHAT IS CACHED IS AN EXPRESSION, NEVER A VALUE. A hit returns the
 `python_expr` string, which the transpiler splices into the generated
@@ -197,19 +210,53 @@ _YAML_FENCE_OPEN = re.compile(r"^\s*```ya?ml\s*$", re.IGNORECASE)
 _YAML_FENCE_CLOSE = re.compile(r"^\s*```\s*$")
 
 
-def parse_slots_section(body):
-  """Extract the # Slots YAML heading from a snippet body.
+def parse_slots_section(body, frontmatter=None):
+  """Extract the persistent slot cache for a snippet.
+
+  CW 1200 — the cache moved from a body `# Slots` heading to a
+  `slots_cache` frontmatter field (driver: "why are we seeing the
+  Slots section... write in frontmatter" — the section is load-bearing,
+  not display cruft, but was mechanically movable with no facet-hash
+  impact). This function now reads BOTH sources and merges them:
+
+    - `frontmatter["slots_cache"]`, if present and a dict, is the new
+      source of truth.
+    - The body's `# Slots` heading (the old format, unchanged parsing
+      logic below) is the read-compat fallback for notes that predate
+      this drain and haven't been migrated.
+    - Both are merged when both are present — frontmatter wins on key
+      collision. This is NOT "prefer one, ignore the other": a note
+      mid-migration can have live keys in either place, and merging is
+      what prevents a false cache miss (re-hitting the LLM for
+      something already resolved) or losing an entry that only exists
+      in the older location.
 
   Returns a dict mapping cache_key (hex string) to python_expr (str).
-  Returns {} when no # Slots heading is present, when the heading
-  exists but its YAML body is empty, when the YAML is malformed, or
-  when the top-level shape isn't dict-of-strings.
-
-  Tolerant by design — a malformed cache shouldn't crash the engine;
-  the next transpile will re-resolve missing entries via /resolve-slot
-  and the plugin will rewrite the heading cleanly.
+  Tolerant by design — a malformed cache (either source) shouldn't
+  crash the engine; the next transpile will re-resolve missing entries
+  via /resolve-slot and the writer will persist them to frontmatter
+  going forward.
 
   Mirrors extract_python's tolerance at executor.py:508.
+  """
+  merged = dict(_parse_body_slots_section(body))
+
+  # CW 1200 — frontmatter source, merged in with priority on collision.
+  if isinstance(frontmatter, dict):
+    candidate = frontmatter.get("slots_cache")
+    if isinstance(candidate, dict):
+      for k, v in candidate.items():
+        if isinstance(k, str) and isinstance(v, str):
+          merged[k] = v
+
+  return merged
+
+
+def _parse_body_slots_section(body):
+  """The pre-CW-1200 body-parsing logic, unchanged, extracted so
+  `parse_slots_section` can call it as the read-compat fallback.
+  Returns {} under the same tolerance conditions it always did (no
+  heading, empty YAML body, malformed YAML, non-dict top-level shape).
   """
   lines = body.splitlines() if body else []
   yaml_lines = []
@@ -270,40 +317,23 @@ def parse_slots_section(body):
 
 
 def serialize_slots_section(slots):
-  """Inverse of parse_slots_section: render a slots dict as the body
-  of a `# Slots` heading, including the heading line itself.
+  """Inverse-ish of parse_slots_section: render a slots dict in stable
+  (sorted-by-key) order, ready to be written as the value of a note's
+  `slots_cache` frontmatter field.
 
-  Stable ordering by cache_key (asciibetical) for diff-friendliness.
-  Returns the empty string for an empty dict — callers omit the
-  heading entirely when there's nothing to cache.
+  CW 1200 — no longer renders body `# Slots` heading text. Returns a
+  plain dict, sorted by key for diff-friendliness (Python 3.7+ dicts
+  preserve insertion order, so this ordering survives into whatever
+  YAML the caller's frontmatter writer ultimately emits). No manual
+  string escaping here any more — the caller's frontmatter/YAML writer
+  owns escaping for the block as a whole; a native dict has no
+  string-embedding concerns of its own.
 
-  Output shape:
-
-      # Slots
-
-      ```yaml
-      slots:
-        "<cache_key_1>": "<python_expr_1>"
-        "<cache_key_2>": "<python_expr_2>"
-      ```
-
-  The wrapper `slots:` key is load-bearing for forward compatibility
-  per the design's "self-describing top-level shape" note.
+  Returns {} for an empty input dict — callers omit the `slots_cache`
+  field entirely when there's nothing to cache, same omit-when-empty
+  convention the old body-heading version used.
   """
-  if not slots:
-    return ""
-  body_lines = ["# Slots", "", "```yaml", "slots:"]
-  for key in sorted(slots.keys()):
-    value = slots[key]
-    # YAML double-quoted string escaping: escape backslashes and
-    # double quotes only. Single-line Python expressions don't
-    # contain raw newlines (the resolver validates single-line);
-    # multi-line expressions are out of scope per E-- spec §4.4.2.
-    escaped_key = key.replace("\\", "\\\\").replace('"', '\\"')
-    escaped_value = value.replace("\\", "\\\\").replace('"', '\\"')
-    body_lines.append(f'  "{escaped_key}": "{escaped_value}"')
-  body_lines.append("```")
-  return "\n".join(body_lines) + "\n"
+  return {key: slots[key] for key in sorted(slots.keys())}
 
 
 def compute_slot_cache_key(slot_text, snippet_id,
