@@ -58,6 +58,12 @@ try:
   from music21 import interval
 except ImportError:
   interval = None
+# CW 1655 — render_graded_scale's TextExpression verdict overlay needs
+# music21.expressions directly; nothing in this file imported it before.
+try:
+  from music21 import expressions
+except ImportError:
+  expressions = None
 try:
   from music21 import harmony
 except ImportError:
@@ -772,6 +778,92 @@ def build_triad_chord(tonic: str, quality: str) -> list[str]:
       "build_triad_chord requires the full music21 install."
     )
   return _stack_intervals(tonic, _TRIAD_INTERVALS[quality])
+
+
+# CW 1655 — extracted from a `{{ }}` value slot inline inside
+# construct_c_major_piano.md's Recipe (a full lambda combining grading
+# and rendering). Split into two chips matching the drain 1245 shape
+# (pure computation + call-site composition): grade_scale_attempt has
+# no music21 dependency at all (plain string/list comparison), so it
+# does NOT call _require_music21() — render_graded_scale does the
+# music21-dependent part. Verdict wording, the octave-insensitivity
+# rule (rstrip trailing digits before comparing), and the three-case
+# structure (exact / wrong-count / wrong-position) are extracted
+# VERBATIM from the original slot, including its zip()-truncation
+# quirk (positions past the shorter of guess/correct never appear in
+# the wrong-position list, only in the count message) — not
+# redesigned.
+def grade_scale_attempt(guess: list[str], correct: list[str]) -> str:
+  """Grade a scale-building attempt against the correct answer,
+  octave-insensitively, and return a verdict string.
+
+  Contract:
+    - Returns one of three shapes:
+      - `"Correct! You built the full C major scale, tonic to tonic."`
+        when `guess` and `correct` are the same length and every
+        pitch matches (pitch-class only — octave is ignored).
+      - `"You entered N note(s); the scale needs M. Not yet - wrong "`
+        `"at position(s): [...]"` when the lengths differ.
+      - `"Not yet - wrong at position(s): [...]"` when the lengths
+        match but one or more positions don't.
+    - Comparison strips trailing digits from each pitch name before
+      comparing (`"C5"` and `"C4"` are the same pitch class) — a
+      right pitch-class at ANY octave counts as correct.
+    - The wrong-position list is built from `zip(guess, correct)`,
+      which stops at the shorter sequence — positions beyond the
+      shorter list's length are never flagged individually, only
+      reflected in the "You entered N note(s)" count. This is the
+      original slot's behavior, preserved exactly, not a bug fixed
+      here.
+    - Positions are 1-indexed (matching how a learner counts their
+      own keys pressed).
+
+  No music21 dependency — this is plain string/list comparison, no
+  `_require_music21()` guard needed.
+  """
+  if len(guess) == len(correct) and all(
+    g.rstrip("0123456789") == e.rstrip("0123456789")
+    for g, e in zip(guess, correct)
+  ):
+    return "Correct! You built the full C major scale, tonic to tonic."
+  count_prefix = (
+    f"You entered {len(guess)} note(s); the scale needs {len(correct)}. "
+    if len(guess) != len(correct) else ""
+  )
+  wrong_positions = [
+    i + 1 for i, (g, e) in enumerate(zip(guess, correct))
+    if g.rstrip("0123456789") != e.rstrip("0123456789")
+  ]
+  return f"{count_prefix}Not yet - wrong at position(s): {wrong_positions}"
+
+
+def render_graded_scale(guess: list[str], verdict: str) -> "stream.Part":
+  """Build a `Part` of quarter-note `Note` objects from `guess`, with
+  `verdict` inserted as a `TextExpression` at offset 0 so it renders
+  above the staff, before the first note.
+
+  Contract:
+    - `guess` is a list of pitch names (e.g. `["C4", "D4", ...]`) —
+      each becomes one quarter-note `Note`, in order.
+    - `verdict` is inserted as `music21.expressions.TextExpression`
+      at offset 0 — it coincides with the first note's start time
+      rather than shifting the notes, matching the original slot's
+      `notes.insert(0, TextExpression(verdict))` call exactly.
+    - Returns the `Part` (verdict + notes), not a `Score` — matching
+      the original slot's return shape (a bare `Part`, not wrapped).
+
+  Companion to `grade_scale_attempt` — call that first to compute
+  `verdict`, then pass its result here.
+  """
+  _require_music21()
+  if expressions is None:
+    raise RuntimeError(
+      "music21.expressions is unavailable in this environment; "
+      "render_graded_scale requires the full music21 install."
+    )
+  notes = stream.Part([note.Note(n, quarterLength=1.0) for n in guess])
+  notes.insert(0, expressions.TextExpression(verdict))
+  return notes
 
 
 # CW-forge-music-lib-add-scale-construction-exercise-plus-first-fixtures

@@ -56,6 +56,11 @@ try:
     # Named build_triad_chord, not build_triad, to avoid colliding
     # with build_triad.md's own basename (test_library_shadow_guard.py).
     "build_triad_chord": _music_lib.build_triad_chord,
+    # CW 1655 — construct_c_major_piano.md's real fix: grading (pure,
+    # no music21) + rendering (music21 Part + TextExpression verdict),
+    # split into two chips matching drain 1245's shape.
+    "grade_scale_attempt": _music_lib.grade_scale_attempt,
+    "render_graded_scale": _music_lib.render_graded_scale,
     # Tier-1 composition primitives: rhythmic_line first
     # (CW-forge-music-lib-add-rhythmic-line-tier-1, drain
     # 2026-08-05-0730), melodic_line second
@@ -201,6 +206,8 @@ _MUSIC_LAZY_CHIP_NAMES = (
   "build_chord",
   # CW 1245 — sibling to build_chord, triad vocabulary.
   "build_triad_chord",
+  # CW 1655 — construct_c_major_piano.md's grading + rendering chips.
+  "grade_scale_attempt", "render_graded_scale",
   "melodic_line",
   "rhythmic_line",
   # Drain 2026-08-05-1730 — scale-construction exercise grading.
