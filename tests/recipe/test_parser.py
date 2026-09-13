@@ -11,6 +11,7 @@ from forge.recipe.parser import (
     ListLit,
     NumberLit,
     ParseError,
+    PrintStmt,
     RepeatStmt,
     ReturnStmt,
     StringLit,
@@ -82,6 +83,32 @@ class TestReturn:
     s = m.statements[0]
     assert isinstance(s, ReturnStmt)
     assert s.value is None
+
+
+class TestPrint:
+  """v29 constitution amendment (2026-09-13) — `Print expr.` as a
+  first-class statement keyword, mirroring Return's shape."""
+
+  def test_print_value(self):
+    m = parse('Print "hello, world".')
+    s = m.statements[0]
+    assert isinstance(s, PrintStmt)
+    assert isinstance(s.value, StringLit)
+    assert s.value.value == "hello, world"
+
+  def test_print_ident(self):
+    m = parse("Print x.")
+    s = m.statements[0]
+    assert isinstance(s, PrintStmt)
+    assert isinstance(s.value, IdentRef)
+    assert s.value.name == "x"
+
+  def test_print_bare_is_a_parse_error(self):
+    # Unlike Return, a bare Print. (no expr) is almost certainly a
+    # mistake — printing nothing is rarely intentional the way
+    # returning nothing is. Chosen to raise rather than allow a no-op.
+    with pytest.raises(ParseError):
+      parse("Print.")
 
 
 class TestShorthandCall:

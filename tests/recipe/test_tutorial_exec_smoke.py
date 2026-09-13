@@ -371,6 +371,26 @@ class TestPrintShorthandVsKwargForm:
     assert "text" in str(exc_info.value)
     assert "keyword argument" in str(exc_info.value)
 
+  def test_print_keyword_transpiles_and_executes(self):
+    """v29 constitution amendment (2026-09-13) — `Print expr.` is the
+    third, now-canonical way to print: no wikilink indirection, no
+    positional-args exception to the kwargs-only invariant. Proves it
+    transpiles to a bare `print(...)` call and actually runs, same
+    end-to-end shape as the shorthand-form positive test above. Does
+    NOT replace or weaken the shorthand/kwarg tests in this class —
+    both wikilink forms remain valid for legacy content per the
+    amendment."""
+    import io
+    import sys
+    from forge.recipe import parse, transpile
+    from forge.core.executor import exec_python
+    code = transpile(parse('Print "hello, world".\nReturn.\n'))
+    assert 'print(\'hello, world\')' in code or 'print("hello, world")' in code
+    stdout, _ = exec_python(
+      code, inputs={}, snippet_id="hello_world_print_keyword_synthetic",
+    )
+    assert "hello, world" in stdout
+
 
 class TestActionNoteWalkFilter:
   """Drain 2026-08-17-1210 — the dot-directory filter, proved on a

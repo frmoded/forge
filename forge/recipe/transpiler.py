@@ -29,6 +29,7 @@ from .parser import (
     Module,
     NoneLit,
     NumberLit,
+    PrintStmt,
     RepeatStmt,
     ReturnStmt,
     SlotExpr,
@@ -354,6 +355,12 @@ def _render_stmt(stmt, depth):
     if stmt.value is None:
       return [f"{pad}return None"]
     return [f"{pad}return {_render_expr(stmt.value)}"]
+  if isinstance(stmt, PrintStmt):
+    # Doesn't end control flow (unlike Return), so no _render_block
+    # block-termination treatment — confirmed by reading that function's
+    # isinstance(s, ReturnStmt) check, which PrintStmt deliberately
+    # does not join.
+    return [f"{pad}print({_render_expr(stmt.value)})"]
   if isinstance(stmt, CallStmt):
     arg_expr = "" if stmt.arg is None else _render_expr(stmt.arg)
     return [f"{pad}{_render_chip_invocation(stmt.name, arg_expr)}"]

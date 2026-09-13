@@ -79,6 +79,16 @@ class ReturnStmt:
 
 
 @dataclass
+class PrintStmt:
+  """`Print expr.` — v29 constitution amendment (2026-09-13). A bare
+  expr is required (unlike Return, whose bare `Return.` is a legitimate
+  no-op) — printing nothing is almost certainly a mistake, so
+  `_parse_print_body` raises ParseError on an empty `Print.` rather
+  than allowing it."""
+  value: "Expr"
+
+
+@dataclass
 class CallStmt:
   """Bare shorthand call as a statement (e.g. `[[show_score]] part.`)."""
   name: str
@@ -184,7 +194,7 @@ class SlotExpr:
   text: str   # the free text between {{ and }}, stripped
 
 
-Stmt = Union[LetStmt, InputStmt, ReturnStmt, CallStmt, ExprStmt, RepeatStmt, ForEachStmt, IfStmt]
+Stmt = Union[LetStmt, InputStmt, ReturnStmt, PrintStmt, CallStmt, ExprStmt, RepeatStmt, ForEachStmt, IfStmt]
 Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit, BinaryOp, SlotExpr]
 
 
@@ -192,7 +202,7 @@ Expr = Union[ChipCall, ListLit, NumberLit, StringLit, IdentRef, BoolLit, NoneLit
 
 # Token kinds: KEYWORD, IDENT, NUMBER, STRING, WIKILINK, OP, NEWLINE, INDENT, DEDENT, EOF.
 # Keywords are lexed as IDENT then matched against this set:
-_KEYWORDS = {"Let", "Input", "Return", "Call", "with", "Repeat", "times", "For", "each", "in",
+_KEYWORDS = {"Let", "Input", "Return", "Print", "Call", "with", "Repeat", "times", "For", "each", "in",
              "If", "Otherwise"}
 
 
@@ -517,6 +527,9 @@ class _Parser:
     if head.kind == "KEYWORD" and head.value == "Return":
       self.pos += 1
       return self._parse_return_body(toks)
+    if head.kind == "KEYWORD" and head.value == "Print":
+      self.pos += 1
+      return self._parse_print_body(toks)
     if head.kind == "KEYWORD" and head.value == "Repeat":
       self.pos += 1
       header_indent = indent
@@ -680,6 +693,21 @@ class _Parser:
       return ReturnStmt(value=None)
     expr = _parse_expr(expr_toks)
     return ReturnStmt(value=expr)
+
+  def _parse_print_body(self, toks: List[Tok]) -> PrintStmt:
+    # Print expr .
+    # Unlike Return, expr is mandatory — a bare Print. is almost
+    # certainly a mistake (see PrintStmt's docstring).
+    body = toks[1:]
+    expr_toks, _tail = _split_at_terminator(body, ".")
+    if not expr_toks:
+      raise ParseError(
+        "Print requires an expression (bare 'Print.' prints nothing, "
+        "which is almost certainly a mistake)",
+        lineno=toks[0].line, col_offset=toks[0].col,
+      )
+    expr = _parse_expr(expr_toks)
+    return PrintStmt(value=expr)
 
   def _parse_shorthand_call_body(self, toks: List[Tok]) -> CallStmt:
     # WIKILINK expr? .
