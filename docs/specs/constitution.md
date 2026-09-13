@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v28)
+# Forge — Core Invariants and Discipline (V2a v29)
 
 ## Mission
 
@@ -86,7 +86,8 @@ naming as `forge-runtime` code identifiers.
    Required on every action note. Syntax: `Let X = Y.`,
    `Input NAME: TYPE = DEFAULT.` (parameter declaration; omit
    `= DEFAULT` for a required parameter), `Call [[note]] with k=v.`,
-   `Return X.`, `If/Otherwise`, `For each/Repeat`, `{{...}}` slots.
+   `Return X.`, `Print X.` (v29 — see B7.1), `If/Otherwise`,
+   `For each/Repeat`, `{{...}}` slots.
    Frontmatter `inputs:` is DERIVED from `Input` declarations (or,
    for pre-drain-2000 notes with no `Input` statement, from a
    backward-compatible typed-`Let`-at-top inference) — cohort never
@@ -979,8 +980,43 @@ grammar productions). The constitutional invariants of the grammar:
   declarations (`Input NAME: TYPE = DEFAULT.` or `Input NAME: TYPE.`
   for required — may appear anywhere in the Recipe; not lifted from
   position), calls (`Call [[y]] with k=v.`), returns (`Return expr.`),
-  control flow (`If cond`, `Otherwise`, `For each ... In ...`,
-  `Repeat N times`).
+  printing (`Print expr.` — v29, see below), control flow (`If cond`,
+  `Otherwise`, `For each ... In ...`, `Repeat N times`).
+
+**`Print expr.` (v29 amendment, 2026-09-13, driver-approved).** A
+first-class statement keyword, transpiling to `print(expr)`. Added to
+close a real gap this clause's own worked example had been silently
+exposing: printing was previously only reachable via the wikilink-call
+machinery, and the two shapes that machinery admits disagree with each
+other. The kwargs form `Call [[print]] with text="...".` — the form
+this Examples block itself showed until this amendment — transpiles
+literally to `print(text="...")`, which raises `TypeError: print()
+got an unexpected keyword argument 'text'` at runtime (Python's
+builtin `print` has no `text` parameter); this was never a hypothesis,
+`forge/tests/recipe/test_tutorial_exec_smoke.py`'s
+`TestPrintShorthandVsKwargForm.test_kwarg_form_transpiles_to_text_kwarg_which_would_crash_at_runtime`
+pins the crash as documented, expected behavior. The only form that
+actually runs is an undocumented positional shorthand-call statement
+(`[[print]] "hello, world".` → `print('hello, world')`, added v0.2.185
+as `ExprStmt` specifically to absorb this LLM-bleed), which itself
+violates this clause's own "kwargs-only, no positional args"
+invariant — an unprincipled exception load-bearing enough that
+`forge-tutorial`'s canonical `hello_world.md` was deliberately moved
+OFF it entirely (drain `2026-07-23-1305`) rather than risk the LLM
+few-shot-bleeding the broken kwargs form from it. `Print expr.`
+resolves this cleanly: one statement keyword, no wikilink indirection,
+no positional-args exception to the kwargs-only invariant (the
+exception was only ever needed because `print` was being routed
+through call syntax it doesn't fit), no LLM-bleed risk once the
+shorthand and kwargs forms are retired in cohort-facing teaching
+material. `[[print]]` (either shape) and `Call [[print]] with
+text=...` remain parseable for legacy content per this document's
+general "grammar expansions land as staged drains; cohort-authored
+content re-generates through `/generate` when grammar conventions
+shift" policy (Anticipated extensions, "Grammar-canonical Recipe") —
+this amendment adds a keyword, it does not retire the wikilink forms.
+Implementation (parser, transpiler, tests) tracked as a follow-up
+drain, not yet shipped as of this amendment.
 
 **Consumers of this contract**:
 
@@ -1001,7 +1037,7 @@ Examples:
 
 ```
 Let result = Call [[fibonacci]] with n=7.
-Call [[print]] with text="hello world".
+Print "hello world".
 Let chord = Call [[major_chord]] with root="C", inversion=2.
 Let harmony = Call [[form]] with key_name="E", mode_name="major", tempo_bpm=70, ts_str="12/8".
 Return harmony.
