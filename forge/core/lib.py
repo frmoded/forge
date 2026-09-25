@@ -24,7 +24,7 @@ forge/core/executor.py — see `_FORGE_CORE_LIB_NAMES`.
 from __future__ import annotations
 
 import random as _stdlib_random
-from typing import Sequence, TypeVar
+from typing import Sequence, Sized, TypeVar
 
 _T = TypeVar("_T")
 
@@ -57,6 +57,18 @@ def random_float() -> float:
   Example: `Let r = Call [[random_float]] with.` then `Let scaled = r * 10.`
   """
   return _stdlib_random.random()
+
+
+def length_of(items: Sized) -> int:
+  """Return how many items are in `items`.
+
+  Works on a list, a string, a tuple, a dict — anything you could ask
+  the length of. An empty list gives 0.
+
+  Example: `Let n = Call [[length_of]] with items=names.` then
+  `Return n.`
+  """
+  return len(items)
 
 
 def nth(lst: Sequence[_T], index: int) -> _T:

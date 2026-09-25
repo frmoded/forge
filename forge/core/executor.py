@@ -175,6 +175,11 @@ try:
   _FORGE_CORE_LIB_NAMES = {
     "nth": _core_lib.nth,
     "pick_indices": _core_lib.pick_indices,
+    # Drain 2026-09-26-0310 — "how many items" had no valid Recipe form:
+    # `len` takes a positional argument and the grammar's expression-position
+    # chip call is kwargs-only, so `Let n = [[len]] items.` does not parse and
+    # `Call [[len]] with obj=items.` crashes. A kwarg-callable wrapper closes it.
+    "length_of": _core_lib.length_of,
     # Drain 2026-08-03-1125 — multiple-choice scoring. Core, not music:
     # the primitive is about the interaction shape, not the subject.
     "mcq": _core_lib.mcq,
