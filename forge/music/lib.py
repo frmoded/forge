@@ -3126,6 +3126,90 @@ def drum_chorus(*, profile="standard"):
   return voices(*parts)
 
 
+# Beat-as-data Phase 1 — channel name -> percussion-instrument factory. These are the three
+# channels the rhythm_box widget exports (its CHANNELS list), mapped to the SAME factories
+# drum_chorus's build_part calls use, so a rhythm-data kick/snare/hihat lands on the same
+# channel-10 GM slots (36 / 38 / 42) as the rest of the engine's drums.
+_RHYTHM_CHANNEL_INSTRUMENTS = {
+  "kick": kick,
+  "snare": snare,
+  "hihat": closed_hihat,
+}
+
+
+def rhythm_data_to_stream(data):
+  """Convert a rhythm-box pattern (the JSON a rhythm-data note holds, as exported by the
+  rhythm_box widget's "Export JSON" button) into a Score with one percussion Part per channel.
+
+  `data` is a dict:
+    time_signature  e.g. "4/4" or "3/4"
+    steps           grid length for one bar (16 for 4/4 sixteenths, 12 for 3/4)
+    group_size      steps per beat (4); `steps` must be a whole number of groups
+    swing_pct       0-100 (see NOTE below)
+    tempo_bpm       quarter-note BPM
+    channels        {"kick"|"snare"|"hihat": [bool] * steps}
+
+  One bar per channel. A True step becomes a note one step long (bar length / steps); each run
+  of False steps becomes ONE Rest of the matching total length (not one Rest per step). Placement
+  is play_at_offsets' own cursor/gap algorithm — the same hit-then-rest construction drum_chorus's
+  _drum_bar uses — fed with hit offsets, so there is one placement algorithm for engine drums, not
+  two. Each Part carries its instrument plus, on measure 1, the TimeSignature and a
+  MetronomeMark(tempo_bpm); music21's MIDI/MusicXML writers honor both.
+
+  NOTE on swing: music21 streams have no swing attribute and nothing downstream of this
+  converter interprets one, so `swing_pct` is validated (0-100) and otherwise NOT rendered —
+  the stream's hits sit on the straight grid. (The widget applies swing only at playback time.)
+
+  Result composes with sequence()/voices() unchanged. A channel name outside kick/snare/hihat
+  raises ValueError rather than being silently dropped."""
+  _require_music21()
+  if not isinstance(data, dict):
+    raise ValueError(f"rhythm_data_to_stream: data must be a dict, got {type(data).__name__}")
+  for key_name in ("time_signature", "steps", "group_size", "tempo_bpm", "channels"):
+    if key_name not in data:
+      raise ValueError(f"rhythm_data_to_stream: missing required field {key_name!r}")
+  steps = data["steps"]
+  group_size = data["group_size"]
+  if isinstance(steps, bool) or not isinstance(steps, int) or steps <= 0:
+    raise ValueError(f"rhythm_data_to_stream: steps must be a positive int, got {steps!r}")
+  if isinstance(group_size, bool) or not isinstance(group_size, int) or group_size <= 0 or steps % group_size:
+    raise ValueError(
+      f"rhythm_data_to_stream: group_size must be a positive int dividing steps "
+      f"(steps={steps!r}, group_size={group_size!r})"
+    )
+  swing = data.get("swing_pct", 0)
+  if isinstance(swing, bool) or not isinstance(swing, (int, float)) or not 0 <= swing <= 100:
+    raise ValueError(f"rhythm_data_to_stream: swing_pct must be a number 0-100, got {swing!r}")
+  channels = data["channels"]
+  if not isinstance(channels, dict) or not channels:
+    raise ValueError("rhythm_data_to_stream: channels must be a non-empty dict")
+  unknown = sorted(c for c in channels if c not in _RHYTHM_CHANNEL_INSTRUMENTS)
+  if unknown:
+    raise ValueError(
+      f"rhythm_data_to_stream: unknown channel(s) {unknown}; "
+      f"supported: {sorted(_RHYTHM_CHANNEL_INSTRUMENTS)}"
+    )
+
+  bar_ql = meter.TimeSignature(data["time_signature"]).barDuration.quarterLength
+  step_ql = bar_ql / steps
+  parts = []
+  for channel_name, hits in channels.items():
+    if not isinstance(hits, (list, tuple)) or len(hits) != steps:
+      raise ValueError(
+        f"rhythm_data_to_stream: channel {channel_name!r} must be a list of {steps} booleans"
+      )
+    offsets = [i * step_ql for i, hit in enumerate(hits) if hit]
+    parts.append(play_at_offsets(
+      _RHYTHM_CHANNEL_INSTRUMENTS[channel_name](),
+      offsets,
+      duration=step_ql,
+      bars=1,
+      time_signature=data["time_signature"],
+      tempo_bpm=data["tempo_bpm"],
+    ))
+  return voices(*parts)
+
+
 def drums_shuffle():
   """A 12-bar shuffle drum pattern in 12/8 — kick on beats 1+3, snare
   on 2+4, hi-hat on every dotted-quarter beat. The rhythmic backbone

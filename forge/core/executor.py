@@ -124,6 +124,9 @@ try:
     "piano_voicing": _music_lib.piano_voicing,
     "violin_bowing": _music_lib.violin_bowing,
     "vocal_line": _music_lib.vocal_line,
+    # Beat-as-data Phase 1 (drain 2026-10-03-0930) — rhythm-box JSON -> Score,
+    # one percussion Part per channel; composes with sequence()/voices().
+    "rhythm_data_to_stream": _music_lib.rhythm_data_to_stream,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}
@@ -233,6 +236,8 @@ _MUSIC_LAZY_CHIP_NAMES = (
   "walking_bass_line",
   # Drain 2026-07-10-1340 phases 2-4 — piano/violin/vocal.
   "piano_voicing", "violin_bowing", "vocal_line",
+  # Beat-as-data Phase 1 (drain 2026-10-03-0930).
+  "rhythm_data_to_stream",
 )
 
 _MODA_LAZY_CHIP_NAMES = (
