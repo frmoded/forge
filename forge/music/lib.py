@@ -3139,6 +3139,9 @@ _RHYTHM_CHANNEL_INSTRUMENTS = {
 # music21 leaves Note.volume.velocity unset and its MIDI writer plays 90 (verified against music21 8.3 by a
 # MIDI write/parse round trip). Used explicitly for a plain `true` step in a channel that also has int steps.
 _RHYTHM_DEFAULT_VELOCITY = 90
+# Beatbox Phase 3b: a hit whose explicit int velocity is >= this gets a visible Accent mark in the score, so a loud
+# hit can be SEEN, not only heard. Deliberately above the default velocity (90): a plain `true` is never accented.
+_RHYTHM_ACCENT_THRESHOLD = 100
 _RHYTHM_REST = object()   # sentinel: "this step is a rest" (None is taken: it means "plain hit, no velocity")
 
 
@@ -3183,6 +3186,11 @@ def rhythm_data_to_stream(data):
   naming the channel and step index — never silently coerced. Velocities are applied per channel, to
   that channel's hits in ascending step order, through play_at_offsets' existing `velocity=[...]` path
   (with_velocity's cyclic-list pattern) — there is no second velocity mechanism.
+
+  Accents (Beatbox Phase 3b): a hit with an explicit int velocity >= _RHYTHM_ACCENT_THRESHOLD (100) also carries a
+  music21 Accent articulation, so loud hits show as `>` marks in the rendered score. The mark is notation only —
+  its volumeShift is zeroed so the MIDI velocity stays exactly as authored. All-boolean data and plain `true`
+  steps get no mark.
 
   One bar per channel. A hit step becomes a note one step long (bar length / steps); each run
   of rest steps becomes ONE Rest of the matching total length (not one Rest per step). Placement
@@ -3244,7 +3252,7 @@ def rhythm_data_to_stream(data):
     velocity = None
     if any(v is not None for v in hit_velocities):
       velocity = [_RHYTHM_DEFAULT_VELOCITY if v is None else v for v in hit_velocities]
-    parts.append(play_at_offsets(
+    part = play_at_offsets(
       _RHYTHM_CHANNEL_INSTRUMENTS[channel_name](),
       offsets,
       duration=step_ql,
@@ -3252,7 +3260,19 @@ def rhythm_data_to_stream(data):
       time_signature=data["time_signature"],
       tempo_bpm=data["tempo_bpm"],
       velocity=velocity,
-    ))
+    )
+    if velocity is not None:
+      # Accent marks: only on hits that carry an EXPLICIT int velocity >= the threshold (a plain `true` is
+      # None here and is never marked). play_at_offsets built the hits in ascending step order, so the
+      # k-th note is the k-th entry of hit_velocities.
+      for hit_note, authored in zip(part.flatten().notes, hit_velocities):
+        if authored is not None and authored >= _RHYTHM_ACCENT_THRESHOLD:
+          mark = _articulations.Accent()
+          # music21's MIDI writer ADDS an articulation's volumeShift (Accent: +0.1) to the note velocity
+          # (112 -> 125, 100 -> 113). The mark must be notation only, so the authored velocity is left exact.
+          mark.volumeShift = 0.0
+          hit_note.articulations.append(mark)
+    parts.append(part)
   return voices(*parts)
 
 

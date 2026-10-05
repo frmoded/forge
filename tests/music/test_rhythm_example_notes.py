@@ -64,6 +64,9 @@ def test_rhythm_accented_is_one_bar_with_the_hand_worked_velocities(world):
     [72, 112],
     [112, 112, 72, 112, 72, 112, 112, 112],
   ]
+  # Beatbox Phase 3b: the loud hits carry a visible Accent mark — kick 1, snare 1, hi-hat 6.
+  assert [sum(any(type(a).__name__ == "Accent" for a in n.articulations) for n in p.flatten().notes)
+          for p in score.parts] == [1, 1, 6]
 
 
 def test_shipped_rhythm_multiplex_output_is_unchanged_six_parts_no_velocities_set(world):
@@ -72,6 +75,7 @@ def test_shipped_rhythm_multiplex_output_is_unchanged_six_parts_no_velocities_se
   assert _names(score) == ["Kick", "Snare", "Closed Hi-Hat"] * 2
   assert [len(p.getElementsByClass("Measure")) for p in score.parts] == [1] * 6
   assert all(set(_vels(p)) == {None} for p in score.parts)
+  assert all(not n.articulations for p in score.parts for n in p.flatten().notes)   # no accent marks on boolean data
 
 
 @pytest.mark.parametrize("name", ["rhythm_sequence", "rhythm_accented"])

@@ -381,3 +381,127 @@ def test_the_two_example_notes_sequence_and_accented_compose_as_documented():
     assert len(part.getElementsByClass("Measure")) == 2
   kick = seq.parts[0].flatten().notes
   assert [float(n.offset) for n in kick] == [0.0, 2.0, 4.0, 4.75, 6.5]   # rock 0,8 -> 0,2 ; synco 0,3,10 -> 4,4.75,6.5
+
+
+# ---------------------------------------------------------------------------------------------------
+# Beatbox Phase 3b (drain 2026-10-05-1800): accented hits are VISIBLE in the score. A hit whose int velocity is
+# >= _RHYTHM_ACCENT_THRESHOLD (100) carries a music21 Accent articulation; nothing else does.
+# ---------------------------------------------------------------------------------------------------
+import hashlib
+import re
+
+from music21 import articulations as m21_articulations
+
+
+def _accent_flags(part):
+  """One bool per hit, in time order: does the note carry an Accent articulation?"""
+  return [any(isinstance(a, m21_articulations.Accent) for a in n.articulations) for n in part.flatten().notes]
+
+
+def _accent_count(score):
+  return [sum(_accent_flags(p)) for p in score.parts]
+
+
+def _midi_bytes(score):
+  fp = os.path.join(tempfile.mkdtemp(), "x.mid")
+  score.write("midi", fp=fp)
+  return open(fp, "rb").read()
+
+
+def _musicxml_normalised(score):
+  """MusicXML with the volatile fields (encoding date, ids) removed, so two writes of the same score compare equal."""
+  fp = os.path.join(tempfile.mkdtemp(), "x.xml")
+  score.write("musicxml", fp=fp)
+  raw = open(fp, "rb").read()
+  raw = re.sub(rb"<encoding-date>.*?</encoding-date>", b"", raw)
+  return re.sub(rb' id="[^"]*"', b"", raw)
+
+
+def test_accent_threshold_is_a_named_module_constant_next_to_the_default_velocity():
+  assert lib._RHYTHM_ACCENT_THRESHOLD == 100
+  assert lib._RHYTHM_DEFAULT_VELOCITY == 90          # the default stays below the threshold on purpose
+
+
+def test_accent_boundary_99_is_not_accented_100_is():
+  part = lib.rhythm_data_to_stream(_data(channels={"snare": [99, 100, 101, 127, 1, 72] + [0] * 10})).parts[0]
+  assert _accent_flags(part) == [False, True, True, True, False, False]
+
+
+def test_all_boolean_data_has_no_articulations_at_all():
+  score = lib.rhythm_data_to_stream(_data(channels={"kick": _four_on_floor(), "hihat": [True] * 16}))
+  for part in score.parts:
+    assert all(not n.articulations for n in part.flatten().notes)
+
+
+def test_plain_true_in_a_mixed_channel_is_never_accented_even_though_it_plays_at_90():
+  part = lib.rhythm_data_to_stream(_data(channels={"hihat": [True, 127, True, 100, True] + [0] * 11})).parts[0]
+  assert _vels(part) == [90, 127, 90, 100, 90]
+  assert _accent_flags(part) == [False, True, False, True, False]
+
+
+def test_accent_mask_rock_by_syncopated_puts_the_marks_on_the_loud_hits():
+  score = lib.rhythm_data_to_stream(lib.accent_mask(_rock(), _synco()))
+  kick, snare, hat = (p for p in score.parts)
+  assert _accent_flags(kick) == [True, False]
+  assert _accent_flags(snare) == [False, True]
+  assert _accent_flags(hat) == [True, True, False, True, False, True, True, True]
+  assert _accent_count(score) == [1, 1, 6]
+
+
+def test_accents_are_exactly_the_hits_with_velocity_at_or_above_the_threshold():
+  score = lib.rhythm_data_to_stream(lib.accent_mask(_rock(), _synco()))
+  for part in score.parts:
+    assert _accent_flags(part) == [v >= lib._RHYTHM_ACCENT_THRESHOLD for v in _vels(part)]
+
+
+def test_the_accent_mark_does_not_change_midi_velocity_or_timing():
+  """music21's Accent carries a volumeShift (0.1) that its MIDI writer adds to the velocity: a bare Accent turns
+  112 into 125 and 100 into 113. The mark must be notation only, so the converter zeroes the shift. Pin the
+  written MIDI: every velocity exactly as authored, and identical bytes to the same data built WITHOUT marks."""
+  d = _data(channels={"hihat": [127, 0, 112, 0, 100, 0, 99, 0, 72, 0, 90] + [0] * 5})
+  score = lib.rhythm_data_to_stream(d)
+  assert _accent_count(score) == [3]                                   # 127, 112, 100
+  assert _midi_velocities_by_pitch(score)[42] == [127, 112, 100, 99, 72, 90]
+  for p in score.parts:
+    for n in p.flatten().notes:
+      for a in n.articulations:
+        assert a.volumeShift == 0
+  unmarked = lib.rhythm_data_to_stream(d)
+  for p in unmarked.parts:
+    for n in p.flatten().notes:
+      n.articulations = []
+  assert _midi_bytes(score) == _midi_bytes(unmarked)
+
+
+def test_the_accent_marks_reach_the_musicxml_the_score_is_drawn_from():
+  xml = _musicxml_normalised(lib.rhythm_data_to_stream(lib.accent_mask(_rock(), _synco())))
+  assert xml.count(b"<accent") == 8                                      # 1 + 1 + 6
+
+
+def test_accent_marks_survive_sequence_list_and_voices_list():
+  accented = lib.rhythm_data_to_stream(lib.accent_mask(_rock(), _synco()))
+  plain = lib.rhythm_data_to_stream(_rock())
+  seq = lib.sequence_list(sections=[accented, plain])
+  assert [p.getInstrument().instrumentName for p in seq.parts] == ["Kick", "Snare", "Closed Hi-Hat"]
+  assert _accent_count(seq) == [1, 1, 6]                                 # merged staves: marks from bar 1 only
+  lay = lib.voices_list(sections=[accented, plain])
+  assert _accent_count(lay) == [1, 1, 6, 0, 0, 0]                        # the plain rock layer stays unmarked
+
+
+def test_all_boolean_output_is_byte_identical_to_before_this_change():
+  """Golden check (taken from the pre-change code, 2026-10-05): MIDI bytes and MusicXML (normalised) of the all-boolean
+  rock, syncopated, multiplex and sequence pipelines. Hashes are first-16-hex of sha256."""
+  rock_s, synco_s = lib.rhythm_data_to_stream(_rock()), lib.rhythm_data_to_stream(_synco())
+  h = lambda b: hashlib.sha256(b).hexdigest()[:16]
+  assert h(_midi_bytes(rock_s)) == "6c02645971500ce9"
+  assert h(_musicxml_normalised(rock_s)) == "a089ec38ccc19fe0"
+  assert h(_midi_bytes(synco_s)) == "6e66aa6a61046c69"
+  assert h(_musicxml_normalised(synco_s)) == "2bc6b94489579f67"
+  multiplex = lib.voices_list(sections=[rock_s, synco_s])
+  assert h(_midi_bytes(multiplex)) == "b79d126caa092e22"
+  assert h(_musicxml_normalised(multiplex)) == "b258c6d8965599cb"
+  seq = lib.sequence_list(sections=[lib.rhythm_data_to_stream(_rock()), lib.rhythm_data_to_stream(_synco())])
+  assert h(_midi_bytes(seq)) == "3dcae346faf53782"
+  assert h(_musicxml_normalised(seq)) == "907bb305602e9110"
+  # and the accented pattern's MIDI is unchanged by the marks too
+  assert h(_midi_bytes(lib.rhythm_data_to_stream(lib.accent_mask(_rock(), _synco())))) == "74587562e638a5bc"
