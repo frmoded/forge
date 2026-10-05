@@ -28,7 +28,7 @@ def world():
   return GraphResolver(reg), reg
 
 
-def _run(world, snippet_id):
+def _run_note(world, snippet_id):
   res, reg = world
   snip = res.resolve(snippet_id)
   _, result = exec_python(
@@ -47,7 +47,7 @@ def _vels(part):
 
 
 def test_rhythm_sequence_is_two_bars_with_same_instrument_staves_merged(world):
-  score = _run(world, "rhythm_sequence")
+  score = _run_note(world, "rhythm_sequence")
   assert _names(score) == ["Kick", "Snare", "Closed Hi-Hat"]
   assert [len(p.getElementsByClass("Measure")) for p in score.parts] == [2, 2, 2]
   kick = [float(n.offset) for n in score.parts[0].flatten().notes]
@@ -56,7 +56,7 @@ def test_rhythm_sequence_is_two_bars_with_same_instrument_staves_merged(world):
 
 
 def test_rhythm_accented_is_one_bar_with_the_hand_worked_velocities(world):
-  score = _run(world, "rhythm_accented")
+  score = _run_note(world, "rhythm_accented")
   assert _names(score) == ["Kick", "Snare", "Closed Hi-Hat"]
   assert [len(p.getElementsByClass("Measure")) for p in score.parts] == [1, 1, 1]
   assert [_vels(p) for p in score.parts] == [
@@ -68,7 +68,7 @@ def test_rhythm_accented_is_one_bar_with_the_hand_worked_velocities(world):
 
 def test_shipped_rhythm_multiplex_output_is_unchanged_six_parts_no_velocities_set(world):
   """Prompt §8: the shipped multiplex must produce identical output after the schema extension."""
-  score = _run(world, "rhythm_multiplex")
+  score = _run_note(world, "rhythm_multiplex")
   assert _names(score) == ["Kick", "Snare", "Closed Hi-Hat"] * 2
   assert [len(p.getElementsByClass("Measure")) for p in score.parts] == [1] * 6
   assert all(set(_vels(p)) == {None} for p in score.parts)
