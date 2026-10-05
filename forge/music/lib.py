@@ -1638,7 +1638,10 @@ def play_at_offsets(
       (a) flat list [0, 2] — same pattern every bar, OR
       (b) list of lists [[0, 2], [0, 1, 2]] — per-bar variation,
           cycled when `bars` exceeds `len(offsets)`.
-    duration: per-hit quarterLength (default 0.25 = 16th note).
+    duration: per-hit quarterLength (default 0.25 = 16th note), OR a list/tuple with ONE quarterLength per hit
+      — parallel to the ascending offsets of a bar and reused for every bar — so a hit can be written as long
+      as the gap to the next one (Beatbox Phase 4: rhythm_data_to_stream passes each hit its gap). The cursor
+      algorithm is unchanged; a list whose length differs from a bar's hit count raises ValueError.
     bars: total bars in this Part.
 
   Common subdivisions in 4/4 (offsets + matching duration):
@@ -1695,11 +1698,20 @@ def play_at_offsets(
       m.append(copy.deepcopy(mm_obj))
     cursor = 0.0
     sorted_offs = sorted(bar_patterns[bar_idx])
-    for off in sorted_offs:
+    if isinstance(duration, (list, tuple)):
+      if len(duration) != len(sorted_offs):
+        raise ValueError(
+          f"play_at_offsets: duration list has {len(duration)} entries but bar {bar_idx + 1} has "
+          f"{len(sorted_offs)} hit(s); give one duration per hit"
+        )
+      hit_durations = list(duration)
+    else:
+      hit_durations = [duration] * len(sorted_offs)
+    for off, hit_duration in zip(sorted_offs, hit_durations):
       if off > cursor:
         m.append(note.Rest(quarterLength=off - cursor))
         cursor = off
-      n = note.Note('C4', quarterLength=duration)
+      n = note.Note('C4', quarterLength=hit_duration)
       if pmp is not None:
         try:
           n.pitch.midi = pmp
@@ -1707,8 +1719,8 @@ def play_at_offsets(
           pass
       m.append(n)
       built_notes.append(n)
-      cursor += duration
-    if cursor < bar_ql:
+      cursor += hit_duration
+    if bar_ql - cursor > 1e-9:       # tolerance: per-hit durations are floats and may sum to bar_ql - 1 ulp
       m.append(note.Rest(quarterLength=bar_ql - cursor))
     part.append(m)
 
@@ -3245,7 +3257,14 @@ def rhythm_data_to_stream(data):
     steps_parsed = [
       _rhythm_step_velocity(v, "rhythm_data_to_stream", channel_name, i) for i, v in enumerate(hits)
     ]
-    offsets = [i * step_ql for i, v in enumerate(steps_parsed) if v is not _RHYTHM_REST]
+    hit_steps = [i for i, v in enumerate(steps_parsed) if v is not _RHYTHM_REST]
+    offsets = [i * step_ql for i in hit_steps]
+    # Notation: each hit is WRITTEN as long as the gap to the next hit in this channel (the last hit runs to
+    # the end of the bar), so a hi-hat on every other sixteenth reads as eighths and not as sixteenth + rest.
+    # Note-on offsets, velocities and accents are unchanged. A leading rest before the first hit stays.
+    hit_durations = [
+      (nxt - cur) * step_ql for cur, nxt in zip(hit_steps, hit_steps[1:] + [steps])
+    ] if hit_steps else step_ql
     hit_velocities = [v for v in steps_parsed if v is not _RHYTHM_REST]
     # Only a channel that actually carries an int velocity gets a velocity list; an all-boolean channel
     # is built exactly as before (velocity=None leaves every note's velocity untouched).
@@ -3255,7 +3274,7 @@ def rhythm_data_to_stream(data):
     part = play_at_offsets(
       _RHYTHM_CHANNEL_INSTRUMENTS[channel_name](),
       offsets,
-      duration=step_ql,
+      duration=hit_durations,
       bars=1,
       time_signature=data["time_signature"],
       tempo_bpm=data["tempo_bpm"],
@@ -3350,6 +3369,160 @@ def accent_mask(base, mask, mask_channel=None, accent=112, normal=72):
     for channel_name, flags in base_hits.items()
   }
   return result
+
+
+# Beat-as-data Phase 4 — growing a one-bar seed into a longer developed pattern. The three styles are small,
+# deterministic and hand-checkable (drum_chorus's named profiles are the precedent). All need a 16-step grid.
+_RHYTHM_EXTEND_STYLES = ("repeat_with_fills", "building", "ghost_notes")
+_RHYTHM_FILL_VELOCITIES = (64, 80, 96, 112)     # snare steps 12-15 of a filled bar, a crescendo into the next bar
+_RHYTHM_GHOST_VELOCITY = 36
+_RHYTHM_BUILDING_LOUD, _RHYTHM_BUILDING_SOFT = 80, 56   # hi-hat velocities: on the beat / off it (both < accent threshold)
+
+
+def _rhythm_building_hihat(bar_index):
+  """Hi-hat for bar `bar_index` of the `building` style: quarters, then eighths, then sixteenths."""
+  if bar_index == 0:
+    hit_steps = range(0, 16, 4)
+  elif bar_index == 1:
+    hit_steps = range(0, 16, 2)
+  else:
+    hit_steps = range(16)
+  return [
+    (_RHYTHM_BUILDING_LOUD if i % 4 == 0 else _RHYTHM_BUILDING_SOFT) if i in hit_steps else False
+    for i in range(16)
+  ]
+
+
+def extend_rhythm(data, bars=4, style="repeat_with_fills"):
+  """Grow a one-bar rhythm-data seed into `bars` bars. Returns a LIST of rhythm-data dicts, one per bar (feed it
+  to rhythm_bars_to_stream); pure — `data` is never mutated and no list is shared between the returned bars.
+
+  `bars` is an int 1-64 (bool rejected). `style` is one of:
+    repeat_with_fills  every bar is a copy of the seed; bar i also gets a FILL when (i + 1) % 4 == 0 or it is the
+                       last bar: steps 12-15 of kick and hihat are cleared and snare steps 12-15 become
+                       [64, 80, 96, 112] (replacing whatever the snare had there).
+    building           kick and snare are the seed's in every bar; the hi-hat is REBUILT by density — bar 0
+                       quarters (steps 0, 4, 8, 12), bar 1 eighths (even steps), bar >= 2 sixteenths — at
+                       velocity 80 on steps divisible by 4, else 56. The seed's own hi-hat is ignored.
+    ghost_notes        every bar starts as a copy of the seed; snare ghosts at velocity 36 are added on steps with
+                       step % 4 == 3 in even bars and step % 4 == 1 in odd bars, never on a step where the SEED's
+                       snare or kick already hits. Seed hits are left exactly as they were.
+  All styles need a 16-step grid (steps == 16, group_size == 4 — 4/4 in sixteenths); any other grid raises
+  ValueError rather than being resampled. A channel missing from the seed counts as all rest; a style that adds
+  hits to a missing channel creates it, and every returned bar then carries the same channel set (so the bars
+  line up when sequenced by position). Top-level fields (time_signature, steps, group_size, swing_pct,
+  tempo_bpm) are the seed's. The accent threshold is never reached by building's or ghost_notes' velocities;
+  a fill's final 112 is an accent."""
+  if isinstance(bars, bool) or not isinstance(bars, int) or not 1 <= bars <= 64:
+    raise ValueError(f"extend_rhythm: bars must be an int from 1 to 64, got {bars!r}")
+  if style not in _RHYTHM_EXTEND_STYLES:
+    raise ValueError(
+      f"extend_rhythm: unknown style {style!r}; valid styles: {', '.join(_RHYTHM_EXTEND_STYLES)}"
+    )
+  if not isinstance(data, dict):
+    raise ValueError(f"extend_rhythm: data must be a rhythm-data dict, got {type(data).__name__}")
+  for key_name in ("time_signature", "steps", "group_size", "channels"):
+    if key_name not in data:
+      raise ValueError(f"extend_rhythm: missing required field {key_name!r}")
+  if data["steps"] != 16 or data["group_size"] != 4 or isinstance(data["steps"], bool):
+    raise ValueError(
+      "extend_rhythm: every style needs a 16-step grid (steps == 16, group_size == 4, i.e. 4/4 in sixteenths); "
+      f"got steps={data['steps']!r}, group_size={data['group_size']!r}"
+    )
+  channels = data["channels"]
+  if not isinstance(channels, dict):
+    raise ValueError("extend_rhythm: channels must be a dict")
+  unknown = sorted(c for c in channels if c not in _RHYTHM_CHANNEL_INSTRUMENTS)
+  if unknown:
+    raise ValueError(
+      f"extend_rhythm: unknown channel(s) {unknown}; supported: {sorted(_RHYTHM_CHANNEL_INSTRUMENTS)}"
+    )
+  seed_hits = {}
+  for channel_name, steps_in in channels.items():
+    if not isinstance(steps_in, (list, tuple)) or len(steps_in) != 16:
+      raise ValueError(f"extend_rhythm: channel {channel_name!r} must be a list of 16 steps")
+    seed_hits[channel_name] = [
+      _rhythm_step_velocity(v, "extend_rhythm", channel_name, i) is not _RHYTHM_REST
+      for i, v in enumerate(steps_in)
+    ]
+
+  built = []
+  for i in range(bars):
+    bar_channels = {name: list(steps_in) for name, steps_in in channels.items()}
+    if style == "repeat_with_fills":
+      if (i + 1) % 4 == 0 or i == bars - 1:
+        for name in ("kick", "hihat"):
+          if name in bar_channels:
+            bar_channels[name][12:16] = [False] * 4
+        bar_channels.setdefault("snare", [False] * 16)
+        bar_channels["snare"][12:16] = list(_RHYTHM_FILL_VELOCITIES)
+    elif style == "building":
+      bar_channels["hihat"] = _rhythm_building_hihat(i)
+    else:  # ghost_notes
+      snare_out = bar_channels.setdefault("snare", [False] * 16)
+      ghost_residue = 3 if i % 2 == 0 else 1
+      for step in range(16):
+        if step % 4 != ghost_residue:
+          continue
+        if seed_hits.get("snare", [False] * 16)[step] or seed_hits.get("kick", [False] * 16)[step]:
+          continue
+        snare_out[step] = _RHYTHM_GHOST_VELOCITY
+    built.append(bar_channels)
+
+  # Every bar gets the same channel set, in the seed's order then the canonical order for created channels.
+  order = list(channels)
+  for name in _RHYTHM_CHANNEL_INSTRUMENTS:
+    if name not in order and any(name in b for b in built):
+      order.append(name)
+  result = []
+  for bar_channels in built:
+    bar = {k: copy.deepcopy(v) for k, v in data.items() if k != "channels"}
+    bar["channels"] = {name: bar_channels.get(name, [False] * 16) for name in order}
+    result.append(bar)
+  return result
+
+
+def rhythm_bars_to_stream(bars):
+  """Turn a LIST of rhythm-data dicts (one per bar, e.g. extend_rhythm's result) into one Score: each bar goes
+  through rhythm_data_to_stream and the bars are joined end to end with sequence_list — no second hit-placement or
+  sequencing mechanism. A list of one bar is fine.
+
+  Every bar must agree with bar 0 on time_signature, steps, group_size and tempo_bpm, else ValueError naming
+  the first mismatch. A channel that some bars lack is padded with an all-rest channel in the bars that lack
+  it (the union of channels, in first-seen order) so the staves line up when sequenced by position. Every bar is
+  validated exactly as rhythm_data_to_stream validates it; a failure names the bar index. The input is not
+  mutated. Accent marks and velocities survive (they are made per bar by rhythm_data_to_stream)."""
+  _require_music21()
+  if not isinstance(bars, (list, tuple)) or not bars:
+    raise ValueError(
+      f"rhythm_bars_to_stream: bars must be a non-empty list of rhythm-data dicts, got {bars!r}"
+    )
+  for i, bar in enumerate(bars):
+    if not isinstance(bar, dict):
+      raise ValueError(f"rhythm_bars_to_stream: bar {i} must be a rhythm-data dict, got {type(bar).__name__}")
+  first = bars[0]
+  for i, bar in enumerate(bars[1:], start=1):
+    for key_name in ("time_signature", "steps", "group_size", "tempo_bpm"):
+      if bar.get(key_name) != first.get(key_name):
+        raise ValueError(
+          f"rhythm_bars_to_stream: bar {i} disagrees with bar 0 on {key_name} "
+          f"(bar 0={first.get(key_name)!r}, bar {i}={bar.get(key_name)!r})"
+        )
+  order = []
+  for bar in bars:
+    if isinstance(bar.get("channels"), dict):
+      order.extend(name for name in bar["channels"] if name not in order)
+  streams = []
+  for i, bar in enumerate(bars):
+    padded = bar
+    if isinstance(bar.get("channels"), dict) and isinstance(bar.get("steps"), int) and not isinstance(bar["steps"], bool):
+      padded = dict(bar)
+      padded["channels"] = {name: bar["channels"].get(name, [False] * bar["steps"]) for name in order}
+    try:
+      streams.append(rhythm_data_to_stream(padded))
+    except ValueError as e:
+      raise ValueError(f"rhythm_bars_to_stream: bar {i}: {e}") from None
+  return sequence_list(sections=streams)
 
 
 def drums_shuffle():

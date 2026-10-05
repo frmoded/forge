@@ -130,6 +130,10 @@ try:
     # Beat-as-data Phase 3 (drain 2026-10-04-2330) — first modulation primitive: accent one
     # rhythm-data pattern's hits by another's. Rhythm-data in, rhythm-data out.
     "accent_mask": _music_lib.accent_mask,
+    # Beat-as-data Phase 4 (drain 2026-10-05-2100) — grow a one-bar seed into N bars, and turn a list of
+    # per-bar rhythm data into one Score.
+    "extend_rhythm": _music_lib.extend_rhythm,
+    "rhythm_bars_to_stream": _music_lib.rhythm_bars_to_stream,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}
@@ -243,6 +247,8 @@ _MUSIC_LAZY_CHIP_NAMES = (
   "rhythm_data_to_stream",
   # Beat-as-data Phase 3 (drain 2026-10-04-2330).
   "accent_mask",
+  # Beat-as-data Phase 4 (drain 2026-10-05-2100).
+  "extend_rhythm", "rhythm_bars_to_stream",
 )
 
 _MODA_LAZY_CHIP_NAMES = (

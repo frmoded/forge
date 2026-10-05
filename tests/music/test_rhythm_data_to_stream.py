@@ -33,14 +33,22 @@ def _four_on_floor():
 def test_single_channel_hit_placement_is_exact():
   score = lib.rhythm_data_to_stream(_data(channels={"kick": _four_on_floor()}))
   assert len(score.parts) == 1
-  # Four 16th-note hits on the beats: offsets 0,1,2,3, each one step (0.25 ql) long.
-  assert _hits(score.parts[0]) == [(0.0, 0.25), (1.0, 0.25), (2.0, 0.25), (3.0, 0.25)]
+  # Four hits on the beats: onsets 0,1,2,3 (unchanged). Updated 2026-10-05 (drain 2026-10-05-2100 §1(e)): hits are now WRITTEN as long as the gap to the next hit in the channel
+  # (notation only). The onsets asserted here are the ones this test always pinned; only the written lengths changed.
+  # Each is written a quarter long (the gap to the next hit; the last one runs to the bar line) — it used to be a 16th + rests.
+  assert _hits(score.parts[0]) == [(0.0, 1.0), (1.0, 1.0), (2.0, 1.0), (3.0, 1.0)]
 
 
 def test_runs_of_false_steps_coalesce_into_one_rest():
-  score = lib.rhythm_data_to_stream(_data(channels={"kick": _four_on_floor()}))
-  # Three false steps between hits -> ONE 0.75 rest each, not three 0.25 rests; 4 hits -> 4 rests.
-  assert _rests(score.parts[0]) == [(0.25, 0.75), (1.25, 0.75), (2.25, 0.75), (3.25, 0.75)]
+  """A run of rest steps is ONE Rest, not one per step. Updated 2026-10-05 (drain 2026-10-05-2100 §1(e)): a hit's written
+  length now covers the rests after it, so the only rests left are LEADING ones. The coalescing is therefore pinned on a leading
+  run: four rest steps before the first hit = one 1.0 rest, not four 0.25 rests."""
+  late = [i in (4, 8, 12) for i in range(16)]
+  score = lib.rhythm_data_to_stream(_data(channels={"kick": late}))
+  assert _rests(score.parts[0]) == [(0.0, 1.0)]
+  assert _hits(score.parts[0]) == [(1.0, 1.0), (2.0, 1.0), (3.0, 1.0)]
+  # and a channel whose hits already cover the bar has no rests at all
+  assert _rests(lib.rhythm_data_to_stream(_data(channels={"kick": _four_on_floor()})).parts[0]) == []
 
 
 def test_multi_channel_each_channel_is_its_own_part_with_its_instrument():
@@ -54,7 +62,7 @@ def test_multi_channel_each_channel_is_its_own_part_with_its_instrument():
   names = [p.getInstrument().instrumentName for p in score.parts]
   assert names == ["Kick", "Snare", "Closed Hi-Hat"]
   assert [len(_hits(p)) for p in score.parts] == [4, 2, 16]
-  assert _hits(score.parts[1]) == [(1.0, 0.25), (3.0, 0.25)]
+  assert _hits(score.parts[1]) == [(1.0, 2.0), (3.0, 1.0)]          # onsets 1.0 and 3.0 as before; written 2.0 (gap) and 1.0 (to the bar line)
 
 
 def test_all_false_channel_is_one_bar_of_rest_and_no_notes():
@@ -67,8 +75,9 @@ def test_all_false_channel_is_one_bar_of_rest_and_no_notes():
 def test_waltz_three_four_uses_twelve_steps_and_a_three_beat_bar():
   d = _data(time_signature="3/4", steps=12, channels={"kick": [i in (0, 4, 8) for i in range(12)]})
   part = lib.rhythm_data_to_stream(d).parts[0]
-  assert _hits(part) == [(0.0, 0.25), (1.0, 0.25), (2.0, 0.25)]
-  assert _rests(part)[-1] == (2.25, 0.75)   # bar is 3.0 long, not 4.0
+  assert _hits(part) == [(0.0, 1.0), (1.0, 1.0), (2.0, 1.0)]        # onsets as before; a quarter each (was a 16th + rests)
+  assert _rests(part) == []
+  assert part.getElementsByClass("Measure")[0].duration.quarterLength == 3.0   # bar is 3.0 long, not 4.0
 
 
 def test_every_part_carries_time_signature_and_tempo_on_measure_one():
@@ -100,8 +109,12 @@ def test_placement_matches_drum_chorus_own_bar_construction():
   bar1 = theirs.getElementsByClass("Measure")[0]
   their_hits = [(float(n.offset), float(n.quarterLength)) for n in bar1.notes]
   their_rests = [(float(r.offset), float(r.quarterLength)) for r in bar1.getElementsByClass(note.Rest)]
-  assert _hits(mine) == their_hits
-  assert _rests(mine) == their_rests
+  # Updated 2026-10-05 (drain 2026-10-05-2100 §1(e)): drum_chorus still writes one-step hits followed by rests, while the
+  # converter now writes each hit as long as the gap to the next. What this guard exists to prove — ONE hit-placement
+  # algorithm — is the ONSETS, so compare those; test_rhythm_notation.py pins that the converter delegates to play_at_offsets.
+  assert [off for off, _ in _hits(mine)] == [off for off, _ in their_hits]
+  assert _hits(mine) == [(0.0, 3.0), (3.0, 3.0)]
+  assert their_rests and not _rests(mine)
 
 
 def test_composes_with_voices_and_sequence_unchanged():
@@ -488,20 +501,23 @@ def test_accent_marks_survive_sequence_list_and_voices_list():
   assert _accent_count(lay) == [1, 1, 6, 0, 0, 0]                        # the plain rock layer stays unmarked
 
 
-def test_all_boolean_output_is_byte_identical_to_before_this_change():
-  """Golden check (taken from the pre-change code, 2026-10-05): MIDI bytes and MusicXML (normalised) of the all-boolean
-  rock, syncopated, multiplex and sequence pipelines. Hashes are first-16-hex of sha256."""
+def test_all_boolean_output_bytes_are_pinned_after_the_deliberate_notation_change():
+  """RE-PINNED 2026-10-05 (drain 2026-10-05-2100 §1(e)). The Iteration-56 golden (MIDI bytes + normalised MusicXML of the
+  all-boolean rock / syncopated / multiplex / sequence pipelines) was byte-identical across the accent-mark change. This
+  drain changes the WRITTEN durations on purpose (a hit is as long as the gap to the next hit), which legitimately moves the
+  MIDI note-off times and rewrites the MusicXML note/rest elements, so those bytes changed. What must NOT have changed is
+  proven separately and exactly in test_rhythm_notation.py: the parsed note-on events (offset, drum slot, velocity) and the
+  accent marks equal the goldens captured from the pre-change code. These hashes pin the new bytes against further drift."""
   rock_s, synco_s = lib.rhythm_data_to_stream(_rock()), lib.rhythm_data_to_stream(_synco())
   h = lambda b: hashlib.sha256(b).hexdigest()[:16]
-  assert h(_midi_bytes(rock_s)) == "6c02645971500ce9"
-  assert h(_musicxml_normalised(rock_s)) == "a089ec38ccc19fe0"
-  assert h(_midi_bytes(synco_s)) == "6e66aa6a61046c69"
-  assert h(_musicxml_normalised(synco_s)) == "2bc6b94489579f67"
+  assert h(_midi_bytes(rock_s)) == "e15076f494c7d596"
+  assert h(_musicxml_normalised(rock_s)) == "dfa9e0b13e132246"
+  assert h(_midi_bytes(synco_s)) == "d20266a6995e7ee5"
+  assert h(_musicxml_normalised(synco_s)) == "afb9f67344417347"
   multiplex = lib.voices_list(sections=[rock_s, synco_s])
-  assert h(_midi_bytes(multiplex)) == "b79d126caa092e22"
-  assert h(_musicxml_normalised(multiplex)) == "b258c6d8965599cb"
+  assert h(_midi_bytes(multiplex)) == "4bf2f5745c32e107"
+  assert h(_musicxml_normalised(multiplex)) == "e64f5f48e8f75f87"
   seq = lib.sequence_list(sections=[lib.rhythm_data_to_stream(_rock()), lib.rhythm_data_to_stream(_synco())])
-  assert h(_midi_bytes(seq)) == "3dcae346faf53782"
-  assert h(_musicxml_normalised(seq)) == "907bb305602e9110"
-  # and the accented pattern's MIDI is unchanged by the marks too
-  assert h(_midi_bytes(lib.rhythm_data_to_stream(lib.accent_mask(_rock(), _synco())))) == "74587562e638a5bc"
+  assert h(_midi_bytes(seq)) == "87331f81457a26d2"
+  assert h(_musicxml_normalised(seq)) == "2ceca07ee9b21869"
+  assert h(_midi_bytes(lib.rhythm_data_to_stream(lib.accent_mask(_rock(), _synco())))) == "db87212aeafe0b30"

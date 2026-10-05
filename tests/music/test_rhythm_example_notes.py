@@ -83,3 +83,52 @@ def test_new_example_notes_derive_as_synced_from_their_hash_lineage(name):
   text = open(os.path.join(_RHYTHM_DIR, name + ".md"), encoding="utf-8").read()
   fm = yaml.safe_load(re.match(r"---\n(.*?)\n---", text, re.S).group(1))
   assert derive_sync_state(fm) == "synced"
+
+
+# ---- Beatbox Phase 4 (drain 2026-10-05-2100): the three extend_rhythm example notes ---------------------------------
+
+def _hit_counts(score):
+  return [len(p.flatten().notes) for p in score.parts]
+
+
+def _accent_counts(score):
+  return [sum(any(type(a).__name__ == "Accent" for a in n.articulations) for n in p.flatten().notes) for p in score.parts]
+
+
+def _starts(part):
+  return [float(n.offset) for n in part.flatten().notes]
+
+
+def test_rhythm_extended_fills_is_four_bars_with_the_fill_in_bar_four(world):
+  score = _run_note(world, "rhythm_extended_fills")
+  assert _names(score) == ["Kick", "Snare", "Closed Hi-Hat"]
+  assert [len(p.getElementsByClass("Measure")) for p in score.parts] == [4, 4, 4]
+  # kick 2/bar x 4; snare 2/bar x 3 + (backbeat + 4 fill hits) in bar 4; hi-hat 8/bar x 3 + 6 in bar 4 (steps 12 and 14 cleared)
+  assert _hit_counts(score) == [8, 11, 30]
+  assert _accent_counts(score) == [0, 1, 0]                        # only the fill's final 112 reaches the accent threshold
+  snare = score.parts[1].flatten().notes
+  assert [n.volume.velocity for n in snare][-4:] == [64, 80, 96, 112]
+  assert _starts(score.parts[1])[-4:] == [15.0, 15.25, 15.5, 15.75]
+
+
+def test_rhythm_extended_building_adds_hihat_density_bar_by_bar(world):
+  score = _run_note(world, "rhythm_extended_building")
+  assert [len(p.getElementsByClass("Measure")) for p in score.parts] == [4, 4, 4]
+  assert _hit_counts(score) == [8, 8, 4 + 8 + 16 + 16]             # kick and snare unchanged; hi-hat quarters, eighths, 16ths, 16ths
+  assert _accent_counts(score) == [0, 0, 0]                        # building never reaches the accent threshold
+  assert [n.volume.velocity for n in score.parts[2].flatten().notes][:4] == [80, 80, 80, 80]
+
+
+def test_rhythm_extended_ghost_adds_four_quiet_snare_hits_to_every_bar(world):
+  score = _run_note(world, "rhythm_extended_ghost")
+  assert [len(p.getElementsByClass("Measure")) for p in score.parts] == [4, 4, 4]
+  assert _hit_counts(score) == [8, 8 + 4 * 4, 32]                  # snare: 2 backbeats + 4 ghosts per bar
+  assert sum(1 for n in score.parts[1].flatten().notes if n.volume.velocity == 36) == 16
+  assert _accent_counts(score) == [0, 0, 0]
+
+
+@pytest.mark.parametrize("name", ["rhythm_extended_fills", "rhythm_extended_building", "rhythm_extended_ghost"])
+def test_extended_example_notes_derive_as_synced(name):
+  text = open(os.path.join(_RHYTHM_DIR, name + ".md"), encoding="utf-8").read()
+  fm = yaml.safe_load(re.match(r"---\n(.*?)\n---", text, re.S).group(1))
+  assert derive_sync_state(fm) == "synced"
