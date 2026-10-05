@@ -127,6 +127,9 @@ try:
     # Beat-as-data Phase 1 (drain 2026-10-03-0930) — rhythm-box JSON -> Score,
     # one percussion Part per channel; composes with sequence()/voices().
     "rhythm_data_to_stream": _music_lib.rhythm_data_to_stream,
+    # Beat-as-data Phase 3 (drain 2026-10-04-2330) — first modulation primitive: accent one
+    # rhythm-data pattern's hits by another's. Rhythm-data in, rhythm-data out.
+    "accent_mask": _music_lib.accent_mask,
   }
 except ImportError:
   _FORGE_MUSIC_LIB_NAMES = {}
@@ -238,6 +241,8 @@ _MUSIC_LAZY_CHIP_NAMES = (
   "piano_voicing", "violin_bowing", "vocal_line",
   # Beat-as-data Phase 1 (drain 2026-10-03-0930).
   "rhythm_data_to_stream",
+  # Beat-as-data Phase 3 (drain 2026-10-04-2330).
+  "accent_mask",
 )
 
 _MODA_LAZY_CHIP_NAMES = (

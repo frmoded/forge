@@ -3136,6 +3136,30 @@ _RHYTHM_CHANNEL_INSTRUMENTS = {
   "hihat": closed_hihat,
 }
 
+# music21 leaves Note.volume.velocity unset and its MIDI writer plays 90 (verified against music21 8.3 by a
+# MIDI write/parse round trip). Used explicitly for a plain `true` step in a channel that also has int steps.
+_RHYTHM_DEFAULT_VELOCITY = 90
+_RHYTHM_REST = object()   # sentinel: "this step is a rest" (None is taken: it means "plain hit, no velocity")
+
+
+def _rhythm_step_velocity(value, fn_name, channel_name, index):
+  """Classify one rhythm-data step. Returns _RHYTHM_REST for false/0, None for a plain `true` (default
+  velocity), or the int velocity 1-127. Anything else raises ValueError naming the function, channel and
+  step index. bool is checked before int because Python's True/False are ints."""
+  if value is True:
+    return None
+  if value is False:
+    return _RHYTHM_REST
+  if isinstance(value, int):
+    if value == 0:
+      return _RHYTHM_REST
+    if 1 <= value <= 127:
+      return value
+  raise ValueError(
+    f"{fn_name}: channel {channel_name!r} step {index}: invalid step value {value!r} "
+    f"(expected false/0, true, or an int velocity 1-127)"
+  )
+
 
 def rhythm_data_to_stream(data):
   """Convert a rhythm-box pattern (the JSON a rhythm-data note holds, as exported by the
@@ -3147,10 +3171,21 @@ def rhythm_data_to_stream(data):
     group_size      steps per beat (4); `steps` must be a whole number of groups
     swing_pct       0-100 (see NOTE below)
     tempo_bpm       quarter-note BPM
-    channels        {"kick"|"snare"|"hihat": [bool] * steps}
+    channels        {"kick"|"snare"|"hihat": [step] * steps}
 
-  One bar per channel. A True step becomes a note one step long (bar length / steps); each run
-  of False steps becomes ONE Rest of the matching total length (not one Rest per step). Placement
+  Each `step` is one of (Beat-as-data Phase 3 — additive; all-boolean data behaves exactly as before):
+    false or 0      a rest
+    true            a hit at the engine's default velocity (music21 leaves the note's velocity unset and
+                    its MIDI writer plays 90; in a channel that ALSO has int steps, a plain true is set to
+                    90 explicitly so the mixed case is deterministic)
+    int 1-127       a hit at that MIDI velocity
+  Anything else (a string, a float, a negative, an int above 127, null, a list...) raises ValueError
+  naming the channel and step index — never silently coerced. Velocities are applied per channel, to
+  that channel's hits in ascending step order, through play_at_offsets' existing `velocity=[...]` path
+  (with_velocity's cyclic-list pattern) — there is no second velocity mechanism.
+
+  One bar per channel. A hit step becomes a note one step long (bar length / steps); each run
+  of rest steps becomes ONE Rest of the matching total length (not one Rest per step). Placement
   is play_at_offsets' own cursor/gap algorithm — the same hit-then-rest construction drum_chorus's
   _drum_bar uses — fed with hit offsets, so there is one placement algorithm for engine drums, not
   two. Each Part carries its instrument plus, on measure 1, the TimeSignature and a
@@ -3196,9 +3231,19 @@ def rhythm_data_to_stream(data):
   for channel_name, hits in channels.items():
     if not isinstance(hits, (list, tuple)) or len(hits) != steps:
       raise ValueError(
-        f"rhythm_data_to_stream: channel {channel_name!r} must be a list of {steps} booleans"
+        f"rhythm_data_to_stream: channel {channel_name!r} must be a list of {steps} steps "
+        f"(each false/0, true, or an int velocity 1-127)"
       )
-    offsets = [i * step_ql for i, hit in enumerate(hits) if hit]
+    steps_parsed = [
+      _rhythm_step_velocity(v, "rhythm_data_to_stream", channel_name, i) for i, v in enumerate(hits)
+    ]
+    offsets = [i * step_ql for i, v in enumerate(steps_parsed) if v is not _RHYTHM_REST]
+    hit_velocities = [v for v in steps_parsed if v is not _RHYTHM_REST]
+    # Only a channel that actually carries an int velocity gets a velocity list; an all-boolean channel
+    # is built exactly as before (velocity=None leaves every note's velocity untouched).
+    velocity = None
+    if any(v is not None for v in hit_velocities):
+      velocity = [_RHYTHM_DEFAULT_VELOCITY if v is None else v for v in hit_velocities]
     parts.append(play_at_offsets(
       _RHYTHM_CHANNEL_INSTRUMENTS[channel_name](),
       offsets,
@@ -3206,8 +3251,85 @@ def rhythm_data_to_stream(data):
       bars=1,
       time_signature=data["time_signature"],
       tempo_bpm=data["tempo_bpm"],
+      velocity=velocity,
     ))
   return voices(*parts)
+
+
+def _accent_mask_check_int(name, value):
+  if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 127:
+    raise ValueError(f"accent_mask: {name} must be an int velocity 1-127, got {value!r}")
+
+
+def accent_mask(base, mask, mask_channel=None, accent=112, normal=72):
+  """Modulate one rhythm with another: accent `base`'s hits wherever `mask` hits. Beat-as-data Phase 3 —
+  the first modulation primitive. Rhythm-data in, rhythm-data out (feed the result to rhythm_data_to_stream).
+
+  A step of the result is, per channel of `base`:
+    base rest                         -> a rest (rests stay silent regardless of the mask)
+    base hit, at a mask-hit step      -> `accent`
+    base hit, at any other step       -> `normal`
+  A step is a *mask hit* when ANY channel of `mask` hits there (the union across channels), or, when
+  `mask_channel` is given, only when that one channel hits there (ValueError if `mask` has no such
+  channel). A base step that already carries an int velocity is just "a hit" and is overwritten.
+
+  `base` and `mask` must agree on time_signature, steps and group_size, else ValueError naming the
+  mismatch — no resampling, no silent alignment. The result keeps base's time_signature, steps,
+  group_size, swing_pct, tempo_bpm and channel names (base's tempo wins — first input wins); it is a new
+  dict that shares nothing with either input, and neither input is mutated. `accent` and `normal` are
+  ints 1-127. Steps use the same schema as rhythm_data_to_stream (false/0, true, int 1-127)."""
+  for label, d in (("base", base), ("mask", mask)):
+    if not isinstance(d, dict):
+      raise ValueError(f"accent_mask: {label} must be a rhythm-data dict, got {type(d).__name__}")
+    for key_name in ("time_signature", "steps", "group_size", "channels"):
+      if key_name not in d:
+        raise ValueError(f"accent_mask: {label} is missing required field {key_name!r}")
+    if not isinstance(d["channels"], dict) or not d["channels"]:
+      raise ValueError(f"accent_mask: {label} channels must be a non-empty dict")
+  for key_name in ("time_signature", "steps", "group_size"):
+    if base[key_name] != mask[key_name]:
+      raise ValueError(
+        f"accent_mask: base and mask disagree on {key_name} "
+        f"(base={base[key_name]!r}, mask={mask[key_name]!r})"
+      )
+  _accent_mask_check_int("accent", accent)
+  _accent_mask_check_int("normal", normal)
+  steps = base["steps"]
+  if mask_channel is not None and mask_channel not in mask["channels"]:
+    raise ValueError(
+      f"accent_mask: mask_channel {mask_channel!r} is not a channel of mask "
+      f"(mask channels: {sorted(mask['channels'])})"
+    )
+
+  def _hit_flags(label, channels, only=None):
+    out = {}
+    for channel_name, channel_steps in channels.items():
+      if only is not None and channel_name != only:
+        continue
+      if not isinstance(channel_steps, (list, tuple)) or len(channel_steps) != steps:
+        raise ValueError(
+          f"accent_mask: {label} channel {channel_name!r} must be a list of {steps} steps"
+        )
+      out[channel_name] = [
+        _rhythm_step_velocity(v, "accent_mask", channel_name, i) is not _RHYTHM_REST
+        for i, v in enumerate(channel_steps)
+      ]
+    return out
+
+  mask_hits = [False] * steps
+  for flags in _hit_flags("mask", mask["channels"], only=mask_channel).values():
+    mask_hits = [a or b for a, b in zip(mask_hits, flags)]
+  base_hits = _hit_flags("base", base["channels"])
+
+  result = copy.deepcopy(base)
+  result["channels"] = {
+    channel_name: [
+      (accent if mask_hits[i] else normal) if is_hit else False
+      for i, is_hit in enumerate(flags)
+    ]
+    for channel_name, flags in base_hits.items()
+  }
+  return result
 
 
 def drums_shuffle():
