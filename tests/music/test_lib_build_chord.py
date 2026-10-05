@@ -2,7 +2,7 @@
 
 CW 1210 — shared music21 chord-building library note, replacing the
 `{{ }}` value slot previously duplicated inline inside
-`music-theory/theory_exercises/build_seventh_chord.md`'s Recipe. A `{{ }}`
+`music-theory/exercises/build_seventh_chord.md`'s Recipe (renamed from theory_exercises/ on 2026-09-13). A `{{ }}`
 slot holds a literal Python comprehension there rather than a
 natural-language request — this chip removes the slot entirely by giving
 the Recipe a real, grammar-legal `Call [[build_chord]]` target.
@@ -16,6 +16,7 @@ import re
 import pytest
 
 from forge.music import lib
+from tests.music._helpers import music_theory_note
 
 music21 = pytest.importorskip("music21")
 
@@ -74,12 +75,11 @@ class TestBuildSeventhChordNoteRegression:
   production entry point" rule.
   """
 
-  NOTE_PATH = (
-    "/Users/odedfuhrmann/projects/music-theory/theory_exercises/"
-    "build_seventh_chord.md"
-  )
+  NOTE_PATH = music_theory_note("exercises/build_seventh_chord.md")
 
   def _recipe_and_python(self):
+    if self.NOTE_PATH is None:
+      pytest.skip("music-theory vault (exercises/) not found")
     text = open(self.NOTE_PATH, encoding="utf-8").read()
     recipe = re.search(
       r"^# Recipe\s*\n\n(.*?)\n\n# Python", text, re.S | re.M).group(1)

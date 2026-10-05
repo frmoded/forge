@@ -105,14 +105,23 @@ def _run(tutorial_resolver, snippet_id, **inputs):
 
 class TestActionNotesExec:
   def test_hello_world(self, tutorial_resolver):
-    # CW-tutorial-01-hello-recipe-print-shift (drain 2026-07-23-1305):
-    # hello_world's Recipe was rewritten from `[[print]] "hello, world".`
-    # to `Return "hello, world".` to eliminate the phantom `[[print]]`
-    # few-shot bleed vector to the LLM. Post-shift the value renders in
-    # the Forge panel via the returned value (same user-visible
-    # outcome), not stdout — the test assertion follows.
-    _, result = _run(tutorial_resolver, "hello_world")
-    assert result == "hello, world"
+    # History: drain 2026-07-23-1305 rewrote hello_world to `Return "hello, world".` and this assertion
+    # followed (value, not stdout). Then forge-tutorial da09e5e / ecefacd (2026-09-14, driver-reported)
+    # deliberately changed it back to `Print "hello, world".` — the v29 amendment made capitalised `Print`
+    # the keyword, and the Description now reads "Prints the exact text". So the observable is STDOUT again
+    # and the return value is None (drain 2026-10-05-0100 brought the assertion back in line).
+    stdout, result = _run(tutorial_resolver, "hello_world")
+    assert stdout == "hello, world\n"
+    assert result is None
+
+  def test_fix_me(self, tutorial_resolver):
+    """`fix_me` (02-variables) is BROKEN ON PURPOSE — a learner exercise whose last line is the quoted
+    string `Return "greeting".` instead of the variable. It is meant to build "Hello, Codey!" but returns
+    the literal text "greeting". This pins that the exercise stays broken in exactly that way: if someone
+    "fixes" the note, the lesson is gone and this goes red. (Added drain 2026-10-05-0100: the coverage guard
+    below demanded a smoke test for every action note and `fix_me` had none.)"""
+    _, result = _run(tutorial_resolver, "fix_me")
+    assert result == "greeting"
 
   def test_greeting(self, tutorial_resolver):
     # CW-tutorial-full-return-sweep (drain 2026-07-23-1500):
@@ -190,8 +199,11 @@ class TestActionNotesExec:
   def test_show_factorial(self, tutorial_resolver):
     # CW-tutorial-full-return-sweep (drain 2026-07-23-1500):
     # show_factorial.md now Returns instead of printing.
+    # forge-tutorial 36466af (2026-09-12) pinned its argument from n=5 to n=7, so the result is 7! = 5040
+    # (was 120 = 5!; drain 2026-10-05-0100 followed the vault). `factorial` itself is unchanged: the
+    # direct n=5 / n=1 tests above still pin it.
     _, result = _run(tutorial_resolver, "show_factorial")
-    assert result == 120
+    assert result == 5040
 
   def test_octopus_fact(self, tutorial_resolver):
     """octopus_fact uses `{{...}}` slot syntax. Pre-V2.1 (drain at

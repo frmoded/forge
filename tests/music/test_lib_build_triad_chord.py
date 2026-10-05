@@ -19,6 +19,7 @@ import re
 import pytest
 
 from forge.music import lib
+from tests.music._helpers import music_theory_note
 
 music21 = pytest.importorskip("music21")
 
@@ -69,12 +70,11 @@ class TestBuildTriadNoteRegression:
   through the real production entry point" rule.
   """
 
-  NOTE_PATH = (
-    "/Users/odedfuhrmann/projects/music-theory/theory_exercises/"
-    "build_triad.md"
-  )
+  NOTE_PATH = music_theory_note("exercises/build_triad.md")
 
   def _recipe_and_python(self):
+    if self.NOTE_PATH is None:
+      pytest.skip("music-theory vault (exercises/) not found")
     text = open(self.NOTE_PATH, encoding="utf-8").read()
     recipe = re.search(
       r"^# Recipe\s*\n\n(.*?)(?:\n\n# Python|\Z)", text, re.S | re.M

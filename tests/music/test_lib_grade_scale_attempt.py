@@ -14,6 +14,7 @@ before writing these expectations, not re-derived from the wording.
 import pytest
 
 from forge.music import lib
+from tests.music._helpers import music_theory_note
 
 music21 = pytest.importorskip("music21")
 
@@ -93,12 +94,11 @@ class TestConstructCMajorPianoNoteRegression:
   parse + transpile + exec — per the standing "works/verified claims
   must be tested through the real production entry point" rule."""
 
-  NOTE_PATH = (
-    "/Users/odedfuhrmann/projects/music-theory/theory_exercises/"
-    "construct_c_major_piano.md"
-  )
+  NOTE_PATH = music_theory_note("exercises/construct_c_major_piano.md")
 
   def _recipe_and_python(self):
+    if self.NOTE_PATH is None:
+      pytest.skip("music-theory vault (exercises/) not found")
     import re
     text = open(self.NOTE_PATH, encoding="utf-8").read()
     recipe = re.search(
@@ -109,6 +109,25 @@ class TestConstructCMajorPianoNoteRegression:
     python_block = python_match.group(1) if python_match else None
     return recipe, python_block
 
+  def _production_run(self, guess):
+    """Run the note the way the engine does: scan the vault, resolve the snippet, take its code from
+    resolve_action_code (the stored Python if there is one, else a transpile of the Recipe), exec it."""
+    import os
+    from forge.core.executor import exec_python, resolve_action_code
+    from forge.core.registry import GraphResolver, SnippetRegistry
+    if self.NOTE_PATH is None:
+      pytest.skip("music-theory vault (exercises/) not found")
+    vault = os.path.dirname(os.path.dirname(self.NOTE_PATH))
+    reg = SnippetRegistry()
+    reg.scan(vault)
+    res = GraphResolver(reg)
+    snip = res.resolve("construct_c_major_piano")
+    _, result = exec_python(
+      resolve_action_code(snip), {"guess": guess}, res,
+      vault_path=vault, registry=reg, snippet_id=snip["snippet_id"], domains=["music"],
+    )
+    return result
+
   def test_recipe_has_no_slot_markers(self):
     recipe, _ = self._recipe_and_python()
     assert "{{" not in recipe and "}}" not in recipe
@@ -117,19 +136,16 @@ class TestConstructCMajorPianoNoteRegression:
     from forge.recipe.parser import parse
     from forge.recipe.transpiler import transpile
     recipe, python_block = self._recipe_and_python()
-    assert python_block is not None, "note has no # Python heading"
+    if python_block is None:
+      # Since 2026-09-17 (forge-mcp recreated the note) it is RECIPE-ONLY: python_hash is the empty-string
+      # hash and no `# Python` facet is stored; Python is derived at run time. The two execution tests below
+      # run it through the real production path (resolve_action_code), which is the stronger check.
+      pytest.skip("note stores no # Python facet (recipe-only); covered by the execution tests")
     transpiled = transpile(parse(recipe), resolve_slot=None)
     assert transpiled.strip() == python_block.strip()
 
   def test_note_executes_correctly_exact_match(self):
-    from forge.core.executor import exec_python
-    _, python_block = self._recipe_and_python()
-    _, result = exec_python(
-      python_block,
-      inputs={"guess": CORRECT},
-      snippet_id="construct_c_major_piano",
-      domains=["music"],
-    )
+    result = self._production_run(CORRECT)
     assert isinstance(result, music21.stream.Part)
     text_expr = list(result)[0]
     assert isinstance(text_expr, music21.expressions.TextExpression)
@@ -146,14 +162,7 @@ class TestConstructCMajorPianoNoteRegression:
     while writing this test: the first version used "X4"/"Y4" (fine
     for the pure grading unit tests above, which never render) and hit
     a real music21 "Cannot make a step out of 'X'" error here."""
-    from forge.core.executor import exec_python
-    _, python_block = self._recipe_and_python()
     guess = ["D4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"]
-    _, result = exec_python(
-      python_block,
-      inputs={"guess": guess},
-      snippet_id="construct_c_major_piano",
-      domains=["music"],
-    )
+    result = self._production_run(guess)
     text_expr = list(result)[0]
     assert text_expr.content == "Not yet - wrong at position(s): [1]"

@@ -37,3 +37,18 @@ def _find_vault():
         if c and Path(c, "slow_burn", "twelve_bar_blues_progression.md").is_file():
             return c
     return None
+
+
+def music_theory_note(rel):
+    """Path of a note in the music-theory SOURCE vault, or None when that vault isn't checked out.
+
+    Resolution order: $FORGE_MUSIC_THEORY_VAULT_PATH, the sibling of this repo (the layout every forge
+    checkout uses: <projects>/forge next to <projects>/music-theory), then ~/projects/music-theory. Tests that
+    read a vault note skip with an explicit reason on None instead of hard-coding an absolute /Users/... path
+    (drain 2026-10-05-0100: three test files hard-coded `theory_exercises/`, which was renamed `exercises/`
+    on 2026-09-13, and failed silently-red ever since)."""
+    sibling = Path(__file__).resolve().parents[3] / "music-theory"
+    for root in (os.environ.get("FORGE_MUSIC_THEORY_VAULT_PATH"), sibling, os.path.expanduser("~/projects/music-theory")):
+        if root and Path(root, rel).is_file():
+            return str(Path(root, rel))
+    return None
