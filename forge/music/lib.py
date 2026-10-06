@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 from collections.abc import Sequence
 from typing import Optional, Union
@@ -132,6 +133,17 @@ _RHYTHM_SHORTHAND: dict[str, float] = {
 }
 
 
+def _edition_lacks_music21():
+  """True when the runtime says it belongs to an edition that never ships music21 (the Lean edition).
+
+  The plugin sets FORGE_EDITION ("lean" | "music") in the Pyodide runtime (the bootstrap block in
+  forge-client-obsidian/src/pyodide-host.ts, next to the library-order interpolation). Anything else, including
+  unset (a headless engine, a test), means "unknown": music21 being absent there is a load-timing or install
+  problem, not an edition fact, so the caller keeps the existing "wait" message. Read at CALL time, so it also
+  survives the executor's lazy re-import of this module."""
+  return os.environ.get("FORGE_EDITION") == "lean"
+
+
 def _require_music21():
   """Raise a friendly RuntimeError if music21 sentinels are None.
 
@@ -139,8 +151,18 @@ def _require_music21():
   If wheel-mount is in progress, either all seven are None or all
   seven are real; a partial state persisting past this check is not
   observed in pyodide and defending against it costs readability.
+
+  Two different absences, two different messages (drain 2026-10-05-2330): on the Lean edition music21 will NEVER
+  load, so "wait a few seconds and retry" is a dead end and the message says the edition does not include music
+  and names the Music edition; anywhere else absence means the wheel is still loading and the existing "wait"
+  message stands. music21 present is never an error, whatever the edition flag says.
   """
   if note is None or stream is None:
+    if _edition_lacks_music21():
+      raise RuntimeError(
+        "Music features are not included in the Lean edition of Forge Actions. "
+        "Install the Music edition to run music notes."
+      )
     raise RuntimeError(
       "music21 is not yet mounted in this pyodide runtime. "
       "This usually resolves within a few seconds of plugin startup — "
