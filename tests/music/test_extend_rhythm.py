@@ -53,10 +53,33 @@ def test_fills_four_bars_only_bar_three_is_filled_hand_worked():
   assert _hits(fill["hihat"]) == {0: True, 2: True, 4: True, 6: True, 8: True, 10: True}   # hi-hat 12 and 14 cleared
 
 
-@pytest.mark.parametrize("n, filled", [(1, [0]), (2, [1]), (3, [2]), (4, [3]), (5, [3, 4]), (6, [3, 5]), (7, [3, 6]), (8, [3, 7])])
-def test_fills_land_where_i_plus_one_is_a_multiple_of_four_or_on_the_last_bar(n, filled):
+# Fill rule (driver-approved 2026-10-06): bar i (0-indexed) is filled when (i + 1) % 4 == 0 — the end of every 4-bar phrase —
+# OR when it is the LAST bar and the bar before it was not filled. Hand-worked:
+#   1 -> [0]   2 -> [1]   3 -> [2]   4 -> [3]   5 -> [3]   6 -> [3, 5]   7 -> [3, 6]   8 -> [3, 7]
+#   9 -> [3, 7]   10 -> [3, 7, 9]   12 -> [3, 7, 11]
+# Only bars=5, 9, 13... (the last bar directly after a phrase end) differ from the old rule, which filled them twice in a row.
+@pytest.mark.parametrize("n, filled", [
+  (1, [0]), (2, [1]), (3, [2]), (4, [3]), (5, [3]), (6, [3, 5]), (7, [3, 6]), (8, [3, 7]),
+  (9, [3, 7]), (10, [3, 7, 9]), (11, [3, 7, 10]), (12, [3, 7, 11]), (13, [3, 7, 11]),
+])
+def test_fills_land_at_the_end_of_each_four_bar_phrase_and_on_a_last_bar_that_does_not_follow_a_fill(n, filled):
   bars = lib.extend_rhythm(_rock(), bars=n, style="repeat_with_fills")
   assert [i for i, b in enumerate(bars) if b["channels"]["snare"][12:16] == FILL] == filled
+
+
+@pytest.mark.parametrize("n", range(1, 65))
+def test_fills_are_never_back_to_back_and_the_final_two_bars_always_contain_one(n):
+  bars = lib.extend_rhythm(_rock(), bars=n, style="repeat_with_fills")
+  is_fill = [b["channels"]["snare"][12:16] == FILL for b in bars]
+  assert not any(a and b for a, b in zip(is_fill, is_fill[1:])), f"back-to-back fills with bars={n}: {is_fill}"
+  assert any(is_fill[-2:]), f"the phrase never ends in a fill with bars={n}: {is_fill}"
+
+
+def test_bars_five_no_longer_fills_the_extra_last_bar_directly_after_a_phrase_end():
+  """The reported oddity (Iteration 57 FEEDBACK §3 item 1): bars=5 used to fill bars 3 AND 4."""
+  bars = lib.extend_rhythm(_rock(), bars=5, style="repeat_with_fills")
+  assert bars[4] == _rock()                                               # bar 5 is a plain copy of the seed
+  assert bars[3]["channels"]["snare"][12:16] == FILL
 
 
 def test_fills_clear_kick_and_hihat_on_the_last_beat_even_when_the_seed_has_them_there():

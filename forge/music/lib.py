@@ -3420,9 +3420,11 @@ def extend_rhythm(data, bars=4, style="repeat_with_fills"):
   to rhythm_bars_to_stream); pure — `data` is never mutated and no list is shared between the returned bars.
 
   `bars` is an int 1-64 (bool rejected). `style` is one of:
-    repeat_with_fills  every bar is a copy of the seed; bar i also gets a FILL when (i + 1) % 4 == 0 or it is the
-                       last bar: steps 12-15 of kick and hihat are cleared and snare steps 12-15 become
-                       [64, 80, 96, 112] (replacing whatever the snare had there).
+    repeat_with_fills  every bar is a copy of the seed; bar i also gets a FILL when (i + 1) % 4 == 0 (the end of every
+                       4-bar phrase) or when it is the LAST bar and the bar before it was not filled (so a result
+                       never ends in two fills back to back): steps 12-15 of kick and hihat are cleared and snare
+                       steps 12-15 become [64, 80, 96, 112] (replacing whatever the snare had there). Filled bars:
+                       1 -> [0], 4 -> [3], 5 -> [3], 6 -> [3, 5], 8 -> [3, 7], 9 -> [3, 7], 10 -> [3, 7, 9].
     building           kick and snare are the seed's in every bar; the hi-hat is REBUILT by density — bar 0
                        quarters (steps 0, 4, 8, 12), bar 1 eighths (even steps), bar >= 2 sixteenths — at
                        velocity 80 on steps divisible by 4, else 56. The seed's own hi-hat is ignored.
@@ -3472,7 +3474,9 @@ def extend_rhythm(data, bars=4, style="repeat_with_fills"):
   for i in range(bars):
     bar_channels = {name: list(steps_in) for name, steps_in in channels.items()}
     if style == "repeat_with_fills":
-      if (i + 1) % 4 == 0 or i == bars - 1:
+      # Fill at the end of each 4-bar phrase; and on a last bar that does NOT directly follow one (the bar before bar i,
+      # i - 1, was filled by the phrase rule exactly when i % 4 == 0 — the last-bar rule only ever applies to the last bar).
+      if (i + 1) % 4 == 0 or (i == bars - 1 and not (i > 0 and i % 4 == 0)):
         for name in ("kick", "hihat"):
           if name in bar_channels:
             bar_channels[name][12:16] = [False] * 4
