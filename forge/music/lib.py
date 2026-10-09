@@ -1499,6 +1499,44 @@ def high_tom():
   return _force_perc_channel(inst, 'High Tom', 'HT')
 
 
+# Beat-as-data Phase 7 — world-rhythm percussion. music21 8.3 has a Cowbell class (percMapPitch 56) but no Claves and no
+# Conga class, so claves and the two congas are generic UnpitchedPercussion instruments identified by percMapPitch, the same
+# way the three hi-hats and three toms share one class. GM key numbers per the General MIDI Level 1 percussion key map:
+# 56 Cowbell, 62 Mute Hi Conga, 64 Low Conga, 75 Claves (music21's own PercussionMapper confirms 56 / 62-64; it has no
+# entry for 75).
+
+def cowbell():
+  """Bell / cowbell. GM note 56 (Cowbell) on channel 10. Part name 'Bell' (what a 12/8 bell pattern is called)."""
+  _require_music21()
+  inst = instrument.Cowbell()
+  inst.percMapPitch = 56
+  return _force_perc_channel(inst, 'Bell', 'BL')
+
+
+def claves():
+  """Claves. GM note 75 (Claves) on channel 10."""
+  _require_music21()
+  inst = instrument.UnpitchedPercussion()
+  inst.percMapPitch = 75
+  return _force_perc_channel(inst, 'Claves', 'CLV')
+
+
+def conga_high():
+  """High conga (muted stroke). GM note 62 (Mute Hi Conga) on channel 10."""
+  _require_music21()
+  inst = instrument.UnpitchedPercussion()
+  inst.percMapPitch = 62
+  return _force_perc_channel(inst, 'High Conga', 'HCG')
+
+
+def conga_low():
+  """Low conga. GM note 64 (Low Conga) on channel 10."""
+  _require_music21()
+  inst = instrument.UnpitchedPercussion()
+  inst.percMapPitch = 64
+  return _force_perc_channel(inst, 'Low Conga', 'LCG')
+
+
 def crash_cymbal():
   """Crash cymbal 1. GM note 49 on channel 10."""
   _require_music21()
@@ -1867,6 +1905,13 @@ _KIT_NOTATION_MAP = {
   # higher than hi-hat per kit convention. Ride on top line.
   ('CrashCymbals', None): ('A5', _KIT_VOICE_HANDS, 'x'),
   ('RideCymbals', None): ('F5', _KIT_VOICE_HANDS, 'x'),
+  # Beat-as-data Phase 7 — world-rhythm percussion in the single-staff kit view. Without entries these fell through to the
+  # snare's staff position and read as snare hits. Bell above the cymbals, claves above the bell (both x-heads); congas
+  # sit low in the staff (high conga above low), plain heads.
+  ('Cowbell', None): ('B5', _KIT_VOICE_HANDS, 'x'),
+  ('UnpitchedPercussion', 75): ('D6', _KIT_VOICE_HANDS, 'x'),       # claves
+  ('UnpitchedPercussion', 62): ('B4', _KIT_VOICE_HANDS, 'normal'),  # high conga
+  ('UnpitchedPercussion', 64): ('G4', _KIT_VOICE_HANDS, 'normal'),  # low conga
 }
 
 
@@ -3168,6 +3213,11 @@ _RHYTHM_CHANNEL_INSTRUMENTS = {
   "kick": kick,
   "snare": snare,
   "hihat": closed_hihat,
+  # Beat-as-data Phase 7: world-rhythm percussion (GM keys 56 / 75 / 62 / 64).
+  "bell": cowbell,
+  "claves": claves,
+  "conga_high": conga_high,
+  "conga_low": conga_low,
 }
 
 # music21 leaves Note.volume.velocity unset and its MIDI writer plays 90 (verified against music21 8.3 by a
