@@ -1097,7 +1097,7 @@ The LLM consumes these as part of B5's authoring context.
   live in the user's authoring vault. Forge's runtime does not write
   to them; modifications happen via the user editing the markdown
   file — including through a plugin UI the user operates directly (an
-  explicit, user-initiated edit such as a widget's Save button,
+  explicit, user-initiated edit such as a widget's save or autosave,
   equivalent to typing in the editor) — or replacing the asset file.
   Note code never writes to a data note (D6).
 - **Captured data notes** are created via the "Save as data
