@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v29)
+# Forge — Core Invariants and Discipline (V2a v30)
 
 ## Mission
 
@@ -1109,6 +1109,8 @@ The LLM consumes these as part of B5's authoring context.
 - **System-generated data notes** (snapshots) are written by Forge
   as part of edge capture. They live in `<vault>/.forge/edges/`. Users
   do not author these directly; Forge maintains them automatically.
+
+*Clarification of hand-authored data notes (v30 amendment, 2026-10-07, driver-approved).* An explicit, user-initiated edit made through a plugin UI the user operates directly — for example a widget's autosave while the user edits a rhythm note in the Beat Box — is the user editing the file, exactly as typing in the editor is. Note code still never writes to a data note (D6). This came out of the beat-as-data Phase 5 work (a widget that edits a rhythm data note).
 
 **D6.** *(Optional / deferred)* Runtime-writable data notes — where
 note code mutates the body of another data note at compute time
