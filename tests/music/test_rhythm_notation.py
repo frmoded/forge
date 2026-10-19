@@ -142,7 +142,9 @@ GOLDEN = {
   "accented": ("b0e562af28547690", 12, [1, 1, 6]),
   "waltz": ("27928e1ebcb40356", 15, [0, 0]),
   "triplet": ("8fe72070fde608b3", 5, [0, 0]),
-  "mixed": ("9d9074d840fea0ee", 6, [2, 0]),
+  # "mixed" keys are hihat, snare; the Score is now in canonical order (snare, hihat), so only the per-part accent list is reordered (drain 2026-10-19-0900 §3).
+  # The note-on digest and count are untouched: they are sorted across parts.
+  "mixed": ("9d9074d840fea0ee", 6, [0, 2]),
 }
 
 

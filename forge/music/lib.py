@@ -3320,7 +3320,13 @@ def rhythm_data_to_stream(data):
   bar_ql = meter.TimeSignature(data["time_signature"]).barDuration.quarterLength
   step_ql = bar_ql / steps
   parts = []
-  for channel_name, hits in channels.items():
+  # Drain 2026-10-19-0900 §3 — PARTS FOLLOW THE CANONICAL CHANNEL ORDER (the order of _RHYTHM_CHANNEL_INSTRUMENTS: kick, snare, hihat, bell,
+  # claves, conga_high, conga_low), NOT the JSON key order. The key order of a note's `channels` is the Rhythm Box's ring order, a display
+  # choice the student changes with "Move ring"; `sequence()` merges staves by voice POSITION first, so two notes whose keys disagreed
+  # would split into padded, misaligned staves (the failure canonical_voice_order documents for percussion_lab). The Score never follows
+  # ring order.
+  for channel_name in (c for c in _RHYTHM_CHANNEL_INSTRUMENTS if c in channels):
+    hits = channels[channel_name]
     if not isinstance(hits, (list, tuple)) or len(hits) != steps:
       raise ValueError(
         f"rhythm_data_to_stream: channel {channel_name!r} must be a list of {steps} steps "

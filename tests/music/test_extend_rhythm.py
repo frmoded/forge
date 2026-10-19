@@ -358,8 +358,8 @@ def test_bars_to_stream_pads_a_MIDDLE_channel_too_because_sequence_groups_staves
   the hi-hat into the snare's slot and split the staves, so the converter list is padded to the union first."""
   no_snare = {**_rock(), "channels": {"kick": _rock()["channels"]["kick"], "hihat": _rock()["channels"]["hihat"]}}
   score = lib.rhythm_bars_to_stream([no_snare, _rock()])
-  # first-seen channel order across the bars: kick, hihat (bar 0), then snare (bar 1) — one stave per instrument, none split
-  assert [p.getInstrument().instrumentName for p in score.parts] == ["Kick", "Closed Hi-Hat", "Snare"]
+  # one stave per instrument, none split — in the CANONICAL channel order (drain 2026-10-19-0900 §3; it used to be first-seen order across the bars)
+  assert [p.getInstrument().instrumentName for p in score.parts] == ["Kick", "Snare", "Closed Hi-Hat"]
   assert [len(p.getElementsByClass("Measure")) for p in score.parts] == [2, 2, 2]
 
 

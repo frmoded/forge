@@ -76,10 +76,12 @@ def test_each_new_channel_has_its_part_name_in_the_musicxml(name, expected):
   assert f"<part-name>{part_name}</part-name>" in xml
 
 
-def test_part_order_is_the_order_of_the_channels_in_the_data():
+def test_part_order_is_the_CANONICAL_channel_order_not_the_order_of_the_keys_in_the_data():
+  """Drain 2026-10-19-0900 §3 replaced the earlier rule "part order is the order of the channels in the data": the key order is the Rhythm
+  Box's ring order (a display choice), the Score's order is canonical (kick, snare, hihat, bell, claves, conga_high, conga_low)."""
   d = _data(conga_low=_hit(16, {0}), bell=_hit(16, {1}), kick=_hit(16, {2}), claves=_hit(16, {3}))
   names = [p.getInstrument().instrumentName for p in lib.rhythm_data_to_stream(d).parts]
-  assert names == ["Low Conga", "Bell", "Kick", "Claves"]
+  assert names == ["Kick", "Bell", "Claves", "Low Conga"]
 
 
 def test_the_registry_has_exactly_the_three_old_and_four_new_channels():

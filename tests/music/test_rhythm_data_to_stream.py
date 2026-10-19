@@ -521,3 +521,71 @@ def test_all_boolean_output_bytes_are_pinned_after_the_deliberate_notation_chang
   assert h(_midi_bytes(seq)) == "87331f81457a26d2"
   assert h(_musicxml_normalised(seq)) == "2ceca07ee9b21869"
   assert h(_midi_bytes(lib.rhythm_data_to_stream(lib.accent_mask(_rock(), _synco())))) == "db87212aeafe0b30"
+
+
+# ---- channel ORDER is a display choice, never a Score choice (drain 2026-10-19-0900 §3; driver decision on Iteration 81) ------------------------
+# The Rhythm Box's "Move ring" rewrites the ORDER of a note's `channels` keys. The Score must not follow it: `sequence()` merges staves by
+# voice POSITION first (see canonical_voice_order), so two rhythm notes whose keys disagree would split into padded, misaligned staves.
+import itertools
+
+_CANONICAL = ["Kick", "Snare", "Closed Hi-Hat"]
+
+
+def _names(score):
+  return [p.getInstrument().instrumentName for p in score.parts]
+
+
+def _signature(score):
+  return [(p.getInstrument().instrumentName, _hits(p), _rests(p)) for p in score.parts]
+
+
+def _reordered(data, order):
+  return {**data, "channels": {k: data["channels"][k] for k in order}}
+
+
+def test_staff_order_is_canonical_for_every_permutation_of_the_keys():
+  base = _rock()
+  for order in itertools.permutations(["kick", "snare", "hihat"]):
+    score = lib.rhythm_data_to_stream(_reordered(base, order))
+    assert _names(score) == _CANONICAL, f"keys {order} gave {_names(score)}"
+
+
+def test_the_whole_world_vocabulary_has_one_canonical_order_too():
+  steps = [i % 4 == 0 for i in range(16)]
+  every = {c: steps for c in ("conga_low", "claves", "hihat", "bell", "snare", "conga_high", "kick")}
+  names = _names(lib.rhythm_data_to_stream(_data(channels=every)))
+  assert names == list(dict.fromkeys(_names(lib.rhythm_data_to_stream(_data(channels=dict(reversed(list(every.items()))))))))
+  assert names[:3] == _CANONICAL, names
+
+
+def test_a_key_reorder_changes_nothing_else_about_the_score():
+  base = _synco()
+  reference = _signature(lib.rhythm_data_to_stream(base))
+  for order in itertools.permutations(["kick", "snare", "hihat"]):
+    assert _signature(lib.rhythm_data_to_stream(_reordered(base, order))) == reference, order
+
+
+def test_sequence_of_a_reordered_note_and_an_unreordered_one_keeps_one_stave_per_instrument():
+  """rhythm_sequence is straight_rock then syncopated; Move-ring on one of them must not split the staves."""
+  plain = lib.sequence_list([lib.rhythm_data_to_stream(_rock()), lib.rhythm_data_to_stream(_synco())])
+  moved = lib.sequence_list([
+    lib.rhythm_data_to_stream(_rock()),
+    lib.rhythm_data_to_stream(_reordered(_synco(), ["snare", "kick", "hihat"])),
+  ])
+  assert _names(plain) == _CANONICAL
+  assert _names(moved) == _CANONICAL
+  assert [len(p.getElementsByClass("Measure")) for p in moved.parts] == [2, 2, 2]
+  assert _signature(moved) == _signature(plain)
+
+
+def test_non_vacuity_the_premise_is_real_sequence_does_split_staves_when_positions_disagree():
+  """If this ever stops splitting, the canonical-order guard above is no longer protecting anything."""
+  a = lib.rhythm_data_to_stream(_rock())
+  b_parts = list(reversed(lib.rhythm_data_to_stream(_synco()).parts))     # the same instruments, positions swapped by hand
+  b = lib.voices(*b_parts)
+  assert len(lib.sequence(a, b).parts) > 3
+
+
+def test_unknown_channels_still_raise_whatever_the_order():
+  with pytest.raises(ValueError):
+    lib.rhythm_data_to_stream(_data(channels={"kick": [False] * 16, "cowbellz": [False] * 16}))
