@@ -92,6 +92,12 @@ Validation rules:
 - For library vaults, declared `name` and `version` match what the
   registry promised
 
+## Keys the engine does not read
+The engine reads only the fields above (`name`, `version`, `description`, `dependencies`, `domains`, `[imports]`) and **ignores any other top-level key**. Host
+applications use that room for their own constants: the Obsidian plugin reads `profile = "score_first"` (a constant of the vault; see the plugin's
+`docs/vault-profile.md`). Such a key must sit **above** any `[table]` header — in TOML every key after a table header belongs to that table — and an engine that
+does not know it is not an error.
+
 ## Compatibility and evolution
 This spec is v1. Adding new optional fields to the manifest is
 backward-compatible. Removing or changing semantics of existing
