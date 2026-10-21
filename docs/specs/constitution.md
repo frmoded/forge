@@ -1,4 +1,4 @@
-# Forge — Core Invariants and Discipline (V2a v30)
+# Forge — Core Invariants and Discipline (V2a v31)
 
 ## Mission
 
@@ -799,11 +799,16 @@ plugin-side write path (`writeSlotsSection`, called from
 `handleSlotCacheMiss` immediately after a `/resolve-slot`
 round-trip, merging new resolutions non-destructively).
 
-**Cache only when the cache pays for itself.** Slot-free Recipes
-continue transpiling fresh on every compute; transpile is
-deterministic and fast, so caching adds file noise without saving
-cost. Only slot-bearing Recipes persist `# Python` because the LLM
-resolution cost must be amortized.
+**Every action note persists `# Python` (S8); only slot-bearing
+Recipes need it for cost.** Authoring (and restamping) writes
+`# Python` for every action note, slot-free or not, so that opening a
+note never writes to it. For a slot-free Recipe the persisted Python
+is a derived artifact: transpile is deterministic and fast, so compute
+MAY still transpile fresh, and the file is restamped when the Recipe
+changes. Slot-bearing Recipes are the case where the cache pays for
+itself, because the LLM resolution cost must be amortized.
+
+*Clarification of B7.3 against S8 (v31 amendment, 2026-10-21, driver-approved).* The previous text said only slot-bearing Recipes persist `# Python`, which contradicted S8 (`# Python` is required) and the read-only-on-open goal. The driver ruled that all action notes carry `# Python`; B7.3 now governs only whether compute may reuse it. 36 slot-free notes in music-theory, music-core and forge-moda were backfilled on that basis (2026-10-21). Known exceptions, by driver decision: the forge-tutorial `countdown` teaching note stays bare, and six slot-bearing notes without a `# Slots` cache are deferred.
 
 Cache semantics follow S9's state machine. `forge-service` detects
 Recipe changes via `recipe_derived_from_description_hash` and
