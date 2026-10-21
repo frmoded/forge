@@ -1960,6 +1960,39 @@ def has_percussion(score: stream.Score) -> bool:
   return False
 
 
+def _kit_place_voice_events(voice, events):
+  """Place the notes of ONE kit voice (hands or feet) so the voice is time-faithful when serialized.
+
+  `events` is [(offset, Unpitched)] in source order: every percussion channel folded into this voice, each note as long as that CHANNEL rings (until the channel's next hit).
+  Notes of different channels therefore overlap, and music21's MusicXML exporter lays a Voice's notes END TO END: it writes <chord/> only for a Chord and never a <backup> inside
+  a voice, so overlapped time is ADDED instead of shared (drain 2026-10-21-1930: bar_004's hands voice was 23 steps long in a 12-step bar). The in-memory offsets were right; the
+  serialization was not. So a voice must be monophonic when it is built:
+    * notes that start together become ONE PercussionChord (shared stem, <chord/> in the XML), as drum notation writes simultaneous hits; every member keeps its own id,
+      notehead, stored instrument and editorial reference;
+    * a note (or chord) lasts no longer than the time to the NEXT onset in this voice.
+  A voice with no overlap and no simultaneous onsets is placed exactly as before (each note at its offset, its own length): nothing that was correct changes."""
+  from music21 import percussion as _percussion
+  groups: dict = {}
+  for off, n in events:
+    groups.setdefault(off, []).append(n)
+  onsets = sorted(groups)
+  for i, off in enumerate(onsets):
+    members = groups[off]
+    room = (onsets[i + 1] - off) if i + 1 < len(onsets) else None
+    lengths = [m.quarterLength if room is None else min(m.quarterLength, room) for m in members]
+    if len(members) == 1:
+      if lengths[0] != members[0].quarterLength:
+        members[0].quarterLength = lengths[0]
+      voice.insert(off, members[0])
+      continue
+    ql = max(lengths)
+    for m in members:
+      m.quarterLength = ql
+    chord_ = _percussion.PercussionChord(members)
+    chord_.quarterLength = ql
+    voice.insert(off, chord_)
+
+
 def to_kit_notation(score: stream.Score) -> stream.Score:
   """v0.3.x — fold percussion Parts of a Score into a single staff with
   two voices (stems-up for hands, stems-down for kick), preserving
@@ -2080,6 +2113,8 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
       v_hands.id = '1'
       v_feet = stream.Voice()
       v_feet.id = '2'
+      hands_events: list = []
+      feet_events: list = []
       for src_part in percussion_parts:
         src_inst = src_part.getInstrument(returnDefault=False)
         spec = _kit_lookup(src_inst)
@@ -2111,9 +2146,11 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
             new_note.volume = copy.deepcopy(src_note.volume)
           offset_in_measure = src_note.getOffsetInHierarchy(src_measure)
           if voice_id == _KIT_VOICE_HANDS:
-            v_hands.insert(offset_in_measure, new_note)
+            hands_events.append((offset_in_measure, new_note))
           else:
-            v_feet.insert(offset_in_measure, new_note)
+            feet_events.append((offset_in_measure, new_note))
+      _kit_place_voice_events(v_hands, hands_events)
+      _kit_place_voice_events(v_feet, feet_events)
       kit_measure.insert(0, v_hands)
       kit_measure.insert(0, v_feet)
       kit_part.append(kit_measure)
@@ -2128,6 +2165,8 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
     voice_hands.id = '1'
     voice_feet = stream.Voice()
     voice_feet.id = '2'
+    flat_hands_events: list = []
+    flat_feet_events: list = []
     for src_part in percussion_parts:
       src_inst = src_part.getInstrument(returnDefault=False)
       src_spec = _kit_lookup(src_inst)
@@ -2153,9 +2192,11 @@ def to_kit_notation(score: stream.Score) -> stream.Score:
           new_note.volume = copy.deepcopy(src_note.volume)
         offset = src_note.getOffsetInHierarchy(src_part)
         if voice_id == _KIT_VOICE_HANDS:
-          voice_hands.insert(offset, new_note)
+          flat_hands_events.append((offset, new_note))
         else:
-          voice_feet.insert(offset, new_note)
+          flat_feet_events.append((offset, new_note))
+    _kit_place_voice_events(voice_hands, flat_hands_events)
+    _kit_place_voice_events(voice_feet, flat_feet_events)
     kit_part.insert(0, voice_hands)
     kit_part.insert(0, voice_feet)
 

@@ -17,7 +17,7 @@ Per v0.2.143 prompt §3.4, 12 failing-first tests covering:
 """
 
 import pytest
-from music21 import clef, instrument, note, stream
+from music21 import clef, instrument, note, percussion, stream
 
 from forge.music.lib import (
   kick,
@@ -53,11 +53,17 @@ def _make_piano_part():
 
 
 def _all_kit_notes(kit_part):
-  """Walk the kit Part and return notes grouped by voice id."""
+  """Walk the kit Part and return notes grouped by voice id.
+
+  Drain 2026-10-21-1930: hits that START TOGETHER in one voice are grouped in a PercussionChord (so the voice serializes time-faithfully); the helper expands a chord
+  into its member notes, so every assertion below is still about individual kit notes (each member keeps its own id, notehead, stored instrument)."""
   out = {'1': [], '2': []}
   for voice in kit_part.getElementsByClass(stream.Voice):
     for n in voice.recurse().notes:
-      out[voice.id].append(n)
+      if isinstance(n, percussion.PercussionChord):
+        out[voice.id].extend(n.notes)
+      else:
+        out[voice.id].append(n)
   return out
 
 
