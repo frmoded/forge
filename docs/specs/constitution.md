@@ -808,7 +808,7 @@ MAY still transpile fresh, and the file is restamped when the Recipe
 changes. Slot-bearing Recipes are the case where the cache pays for
 itself, because the LLM resolution cost must be amortized.
 
-*Clarification of B7.3 against S8 (v31 amendment, 2026-10-21, driver-approved).* The previous text said only slot-bearing Recipes persist `# Python`, which contradicted S8 (`# Python` is required) and the read-only-on-open goal. The driver ruled that all action notes carry `# Python`; B7.3 now governs only whether compute may reuse it. 36 slot-free notes in music-theory, music-core and forge-moda were backfilled on that basis (2026-10-21). Known exceptions, by driver decision: the forge-tutorial `countdown` teaching note stays bare, and six slot-bearing notes without a `# Slots` cache are deferred.
+*Clarification of B7.3 against S8 (v31 amendment, 2026-10-21, driver-approved).* The previous text said only slot-bearing Recipes persist `# Python`, which contradicted S8 (`# Python` is required) and the read-only-on-open goal. The driver ruled that all action notes carry `# Python`; B7.3 now governs only whether compute may reuse it. 36 slot-free notes in music-theory, music-core and forge-moda were backfilled on that basis (2026-10-21). Known exception, by driver decision: six slot-bearing notes without a `# Slots` cache are deferred. (The forge-tutorial `countdown` teaching note was an exception until 2026-10-22, when it began shipping the engine's own derived `# Python`, driver-approved; forge-tutorial `2e9e777`.)
 
 Cache semantics follow S9's state machine. `forge-service` detects
 Recipe changes via `recipe_derived_from_description_hash` and
