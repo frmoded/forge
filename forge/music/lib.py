@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import re
 from collections.abc import Sequence
@@ -3512,7 +3513,7 @@ def _rhythm_building_hihat(bar_index):
   ]
 
 
-def extend_rhythm(data, bars=4, style="repeat_with_fills"):
+def extend_rhythm(data, bars=4, style="repeat_with_fills", tempo_change_pct=0):
   """Grow a one-bar rhythm-data seed into `bars` bars. Returns a LIST of rhythm-data dicts, one per bar (feed it
   to rhythm_bars_to_stream); pure — `data` is never mutated and no list is shared between the returned bars.
 
@@ -3532,10 +3533,20 @@ def extend_rhythm(data, bars=4, style="repeat_with_fills"):
   ValueError rather than being resampled. A channel missing from the seed counts as all rest; a style that adds
   hits to a missing channel creates it, and every returned bar then carries the same channel set (so the bars
   line up when sequenced by position). Top-level fields (time_signature, steps, group_size, swing_pct,
-  tempo_bpm) are the seed's. The accent threshold is never reached by building's or ghost_notes' velocities;
-  a fill's final 112 is an accent."""
+  tempo_bpm) are the seed's — unless `tempo_change_pct` is given. The accent threshold is never reached by
+  building's or ghost_notes' velocities; a fill's final 112 is an accent.
+
+  `tempo_change_pct` (a number from -90 to +100, bool rejected; default 0 = exactly the result above) is a
+  ritardando (negative) or accelerando (positive) over the bars: bar i gets
+  tempo_bpm = round(T * (1 + (tempo_change_pct / 100) * i / (bars - 1))), T being the seed's tempo_bpm, rounded
+  HALF UP to an int. The first bar keeps T, the last bar reaches T * (1 + tempo_change_pct / 100), and a single
+  bar stays at T. The tempo changes in STEPS, one per bar (a tempo mark at each bar when the bars are joined by
+  rhythm_bars_to_stream), not as a continuous ramp inside a bar. Example: seed 100 bpm, bars=8, tempo_change_pct=-20
+  gives 100, 97, 94, 91, 89, 86, 83, 80. With a non-zero percentage the seed's tempo_bpm must be a number."""
   if isinstance(bars, bool) or not isinstance(bars, int) or not 1 <= bars <= 64:
     raise ValueError(f"extend_rhythm: bars must be an int from 1 to 64, got {bars!r}")
+  if isinstance(tempo_change_pct, bool) or not isinstance(tempo_change_pct, (int, float)) or not -90 <= tempo_change_pct <= 100:
+    raise ValueError(f"extend_rhythm: tempo_change_pct must be a number from -90 to 100, got {tempo_change_pct!r}")
   if style not in _RHYTHM_EXTEND_STYLES:
     raise ValueError(
       f"extend_rhythm: unknown style {style!r}; valid styles: {', '.join(_RHYTHM_EXTEND_STYLES)}"
@@ -3602,7 +3613,20 @@ def extend_rhythm(data, bars=4, style="repeat_with_fills"):
     bar = {k: copy.deepcopy(v) for k, v in data.items() if k != "channels"}
     bar["channels"] = {name: bar_channels.get(name, [False] * 16) for name in order}
     result.append(bar)
+  if tempo_change_pct != 0:
+    seed_tempo = data.get("tempo_bpm")
+    if isinstance(seed_tempo, bool) or not isinstance(seed_tempo, (int, float)) or not seed_tempo > 0:
+      raise ValueError(f"extend_rhythm: tempo_change_pct needs the seed's tempo_bpm to be a positive number, got {seed_tempo!r}")
+    for i, bar in enumerate(result):
+      if bars > 1:
+        bar["tempo_bpm"] = _rhythm_stepped_tempo(seed_tempo, tempo_change_pct, i, bars)
   return result
+
+
+def _rhythm_stepped_tempo(seed_tempo, pct, bar_index, bars):
+  """Bar `bar_index` of `bars` on a linear ramp from `seed_tempo` to seed_tempo * (1 + pct/100), as an int, rounded half up (never below 1)."""
+  exact = seed_tempo * (1 + (pct / 100) * bar_index / (bars - 1))
+  return max(1, int(math.floor(exact + 0.5)))
 
 
 def rhythm_bars_to_stream(bars):
@@ -3610,8 +3634,10 @@ def rhythm_bars_to_stream(bars):
   through rhythm_data_to_stream and the bars are joined end to end with sequence_list — no second hit-placement or
   sequencing mechanism. A list of one bar is fine.
 
-  Every bar must agree with bar 0 on time_signature, steps, group_size and tempo_bpm, else ValueError naming
-  the first mismatch. A channel that some bars lack is padded with an all-rest channel in the bars that lack
+  Every bar must agree with bar 0 on time_signature, steps and group_size, else ValueError naming the first
+  mismatch. tempo_bpm MAY differ from bar to bar (a ritardando, e.g. extend_rhythm's tempo_change_pct): each
+  bar keeps its own MetronomeMark through the join, so the Score, its MusicXML and its MIDI carry a mark at bar 1
+  and at every bar where the tempo changes; every bar's tempo_bpm must be a positive number. A channel that some bars lack is padded with an all-rest channel in the bars that lack
   it (the union of channels, in first-seen order) so the staves line up when sequenced by position. Every bar is
   validated exactly as rhythm_data_to_stream validates it; a failure names the bar index. The input is not
   mutated. Accent marks and velocities survive (they are made per bar by rhythm_data_to_stream)."""
@@ -3625,12 +3651,16 @@ def rhythm_bars_to_stream(bars):
       raise ValueError(f"rhythm_bars_to_stream: bar {i} must be a rhythm-data dict, got {type(bar).__name__}")
   first = bars[0]
   for i, bar in enumerate(bars[1:], start=1):
-    for key_name in ("time_signature", "steps", "group_size", "tempo_bpm"):
+    for key_name in ("time_signature", "steps", "group_size"):
       if bar.get(key_name) != first.get(key_name):
         raise ValueError(
           f"rhythm_bars_to_stream: bar {i} disagrees with bar 0 on {key_name} "
           f"(bar 0={first.get(key_name)!r}, bar {i}={bar.get(key_name)!r})"
         )
+  for i, bar in enumerate(bars):
+    t = bar.get("tempo_bpm")
+    if "tempo_bpm" in bar and (isinstance(t, bool) or not isinstance(t, (int, float)) or not t > 0):   # a MISSING tempo keeps rhythm_data_to_stream's own message
+      raise ValueError(f"rhythm_bars_to_stream: bar {i}: tempo_bpm must be a positive number, got {t!r}")
   order = []
   for bar in bars:
     if isinstance(bar.get("channels"), dict):

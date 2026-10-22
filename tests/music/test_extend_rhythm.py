@@ -374,7 +374,8 @@ def test_bars_to_stream_rejects_a_non_dict_bar_and_names_its_index():
     lib.rhythm_bars_to_stream([_rock(), "nope"])
 
 
-@pytest.mark.parametrize("field, value", [("time_signature", "3/4"), ("steps", 8), ("group_size", 2), ("tempo_bpm", 120)])
+# M5 (drain 2026-10-22-1850): tempo_bpm is no longer in this list ON PURPOSE — bars may differ in tempo (a ritardando); tests/music/test_m5_tempo.py covers it.
+@pytest.mark.parametrize("field, value", [("time_signature", "3/4"), ("steps", 8), ("group_size", 2)])
 def test_bars_to_stream_rejects_bars_that_disagree_naming_the_first_mismatch(field, value):
   other = _rock()
   other[field] = value
