@@ -3629,6 +3629,126 @@ def _rhythm_stepped_tempo(seed_tempo, pct, bar_index, bars):
   return max(1, int(math.floor(exact + 0.5)))
 
 
+# Slack for comparing a mixed presence against a threshold: 1 - 0.9 is 0.09999999999999998 in floats, so a hit sitting
+# exactly at its own slider weight must not be lost to representation error.
+_RHYTHM_MIX_EPSILON = 1e-9
+
+
+def _rhythm_mix_number(value, name, low, high):
+  if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+    raise ValueError(f"mix_rhythm: {name} must be a number from {low} to {high}, got {value!r}")
+  return value
+
+
+def _rhythm_mix_fields(data, which):
+  """Validate the top-level fields of one input bar of mix_rhythm."""
+  if not isinstance(data, dict):
+    raise ValueError(f"mix_rhythm: {which} must be a rhythm-data dict, got {type(data).__name__}")
+  for key_name in ("time_signature", "steps", "group_size", "tempo_bpm", "channels"):
+    if key_name not in data:
+      raise ValueError(f"mix_rhythm: {which} is missing required field {key_name!r}")
+  tempo = data["tempo_bpm"]
+  if isinstance(tempo, bool) or not isinstance(tempo, (int, float)) or not tempo > 0:
+    raise ValueError(f"mix_rhythm: {which} tempo_bpm must be a positive number, got {tempo!r}")
+  swing = data.get("swing_pct", 0)
+  if isinstance(swing, bool) or not isinstance(swing, (int, float)) or not 0 <= swing <= 100:
+    raise ValueError(f"mix_rhythm: {which} swing_pct must be a number 0-100, got {swing!r}")
+  steps = data["steps"]
+  if isinstance(steps, bool) or not isinstance(steps, int) or steps <= 0:
+    raise ValueError(f"mix_rhythm: {which} steps must be a positive int, got {steps!r}")
+  if not isinstance(data["channels"], dict):
+    raise ValueError(f"mix_rhythm: {which} channels must be a dict")
+
+
+def _rhythm_mix_channels(data, which):
+  """Parse the channels of one input bar of mix_rhythm; returns {channel: [step velocity or _RHYTHM_REST or None]} (None = plain true)."""
+  channels = data["channels"]
+  unknown = sorted(c for c in channels if c not in _RHYTHM_CHANNEL_INSTRUMENTS)
+  if unknown:
+    raise ValueError(
+      f"mix_rhythm: {which} has unknown channel(s) {unknown}; supported: {sorted(_RHYTHM_CHANNEL_INSTRUMENTS)}"
+    )
+  parsed = {}
+  for channel_name, steps_in in channels.items():
+    if not isinstance(steps_in, (list, tuple)) or len(steps_in) != data["steps"]:
+      raise ValueError(f"mix_rhythm: {which} channel {channel_name!r} must be a list of {data['steps']} steps")
+    parsed[channel_name] = [_rhythm_step_velocity(v, "mix_rhythm", channel_name, i) for i, v in enumerate(steps_in)]
+  return parsed
+
+
+def mix_rhythm(a, b, weight=0.5, threshold=0.5, ghost=False):
+  """One rhythm-data bar that is a weighted mix of two bars (score-first M7 Phase A). Pure — `a` and `b` are never
+  mutated and the result shares no list with them; no randomness.
+
+  `a` and `b` are rhythm-data dicts that agree on time_signature, steps and group_size (any step count, not only 16;
+  the first disagreement, in that order, raises ValueError naming mix_rhythm, the field and both values).
+  `weight` (a number 0-1, bool rejected) is the weight of `a`: 1 is all `a`, 0 is all `b`. `threshold` is a number
+  0-1; `ghost` is a bool.
+
+  Channels are the union, in first-seen order (a's, then b's new ones); a channel one bar lacks counts as all rest.
+  Per step and channel, presence is 1 for a hit (true or an int velocity) and 0 for a rest, and
+  v = weight * presence_a + (1 - weight) * presence_b. A hit is PLACED when v >= threshold (compared with a 1e-9
+  slack so a hit sitting exactly at its own slider weight is never lost to float error) and v > 0 — a step that
+  neither bar hits is never a hit, even at threshold 0. TIES: at weight 0.5 and threshold 0.5, a hit in only ONE
+  bar has v = 0.5 and IS placed (the result is the union of the hits); raise the threshold above 0.5 for the
+  intersection. A hit only `a` has is placed when weight >= threshold; one only `b` has when 1 - weight >= threshold.
+
+  A placed hit's velocity is the mean of the velocities of the bars that HAVE a hit there and carry a positive
+  weight, weighted by `weight` and `1 - weight` renormalised over those bars; a plain `true` counts as 90. The mean
+  is rounded HALF UP to an int 1-127. The hit stays a plain `true` only if every contributing hit was a plain `true`.
+  With ghost=True, a step that fails the threshold but has v >= threshold / 2 and v > 0 becomes a ghost hit at
+  velocity 36 (the same velocity extend_rhythm's ghost_notes uses). So weight 1 gives `a` exactly (hits and
+  velocities, a plain true staying plain) and weight 0 gives `b`, at any threshold up to 1.
+
+  tempo_bpm and swing_pct are weight * a + (1 - weight) * b, rounded half up to an int (a tempo never below 1; a
+  missing swing_pct counts as 0). The other top-level fields are `a`'s. The result is one rhythm-data dict; feed
+  it to rhythm_bars_to_stream (alone or in a list) like any one-bar pattern."""
+  weight = _rhythm_mix_number(weight, "weight", 0, 1)
+  threshold = _rhythm_mix_number(threshold, "threshold", 0, 1)
+  if not isinstance(ghost, bool):
+    raise ValueError(f"mix_rhythm: ghost must be a bool, got {ghost!r}")
+  _rhythm_mix_fields(a, "a")
+  _rhythm_mix_fields(b, "b")
+  for key_name in ("time_signature", "steps", "group_size"):
+    if a[key_name] != b[key_name]:
+      raise ValueError(
+        f"mix_rhythm: a and b must agree on {key_name}, but a has {a[key_name]!r} and b has {b[key_name]!r}"
+      )
+  channels_a = _rhythm_mix_channels(a, "a")
+  channels_b = _rhythm_mix_channels(b, "b")
+  steps = a["steps"]
+  order = list(channels_a) + [name for name in channels_b if name not in channels_a]
+  rest_row = [_RHYTHM_REST] * steps
+  mixed = {}
+  for name in order:
+    row_a = channels_a.get(name, rest_row)
+    row_b = channels_b.get(name, rest_row)
+    out_row = []
+    for i in range(steps):
+      hit_a = row_a[i] is not _RHYTHM_REST
+      hit_b = row_b[i] is not _RHYTHM_REST
+      v = (weight if hit_a else 0) + ((1 - weight) if hit_b else 0)
+      if v > 0 and v >= threshold - _RHYTHM_MIX_EPSILON:
+        contributors = [(w, row[i]) for w, row, hit in ((weight, row_a, hit_a), (1 - weight, row_b, hit_b)) if hit and w > 0]
+        if all(velocity is None for _, velocity in contributors):
+          out_row.append(True)
+        else:
+          total = sum(w for w, _ in contributors)
+          mean = sum(w * (_RHYTHM_DEFAULT_VELOCITY if velocity is None else velocity) for w, velocity in contributors) / total
+          out_row.append(min(127, max(1, int(math.floor(mean + 0.5)))))
+      elif ghost and v > 0 and v >= threshold / 2 - _RHYTHM_MIX_EPSILON:
+        out_row.append(_RHYTHM_GHOST_VELOCITY)
+      else:
+        out_row.append(False)
+    mixed[name] = out_row
+  result = {k: copy.deepcopy(val) for k, val in a.items() if k != "channels"}
+  mix_of = lambda x, y: max(1, int(math.floor(weight * x + (1 - weight) * y + 0.5)))
+  result["tempo_bpm"] = mix_of(a["tempo_bpm"], b["tempo_bpm"])
+  result["swing_pct"] = int(math.floor(weight * a.get("swing_pct", 0) + (1 - weight) * b.get("swing_pct", 0) + 0.5))
+  result["channels"] = mixed
+  return result
+
+
 def rhythm_bars_to_stream(bars):
   """Turn a LIST of rhythm-data dicts (one per bar, e.g. extend_rhythm's result) into one Score: each bar goes
   through rhythm_data_to_stream and the bars are joined end to end with sequence_list — no second hit-placement or
