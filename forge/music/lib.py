@@ -3640,39 +3640,39 @@ def _rhythm_mix_number(value, name, low, high):
   return value
 
 
-def _rhythm_mix_fields(data, which):
+def _rhythm_mix_fields(data, which, fn_name="mix_rhythm"):
   """Validate the top-level fields of one input bar of mix_rhythm."""
   if not isinstance(data, dict):
-    raise ValueError(f"mix_rhythm: {which} must be a rhythm-data dict, got {type(data).__name__}")
+    raise ValueError(f"{fn_name}: {which} must be a rhythm-data dict, got {type(data).__name__}")
   for key_name in ("time_signature", "steps", "group_size", "tempo_bpm", "channels"):
     if key_name not in data:
-      raise ValueError(f"mix_rhythm: {which} is missing required field {key_name!r}")
+      raise ValueError(f"{fn_name}: {which} is missing required field {key_name!r}")
   tempo = data["tempo_bpm"]
   if isinstance(tempo, bool) or not isinstance(tempo, (int, float)) or not tempo > 0:
-    raise ValueError(f"mix_rhythm: {which} tempo_bpm must be a positive number, got {tempo!r}")
+    raise ValueError(f"{fn_name}: {which} tempo_bpm must be a positive number, got {tempo!r}")
   swing = data.get("swing_pct", 0)
   if isinstance(swing, bool) or not isinstance(swing, (int, float)) or not 0 <= swing <= 100:
-    raise ValueError(f"mix_rhythm: {which} swing_pct must be a number 0-100, got {swing!r}")
+    raise ValueError(f"{fn_name}: {which} swing_pct must be a number 0-100, got {swing!r}")
   steps = data["steps"]
   if isinstance(steps, bool) or not isinstance(steps, int) or steps <= 0:
-    raise ValueError(f"mix_rhythm: {which} steps must be a positive int, got {steps!r}")
+    raise ValueError(f"{fn_name}: {which} steps must be a positive int, got {steps!r}")
   if not isinstance(data["channels"], dict):
-    raise ValueError(f"mix_rhythm: {which} channels must be a dict")
+    raise ValueError(f"{fn_name}: {which} channels must be a dict")
 
 
-def _rhythm_mix_channels(data, which):
+def _rhythm_mix_channels(data, which, fn_name="mix_rhythm"):
   """Parse the channels of one input bar of mix_rhythm; returns {channel: [step velocity or _RHYTHM_REST or None]} (None = plain true)."""
   channels = data["channels"]
   unknown = sorted(c for c in channels if c not in _RHYTHM_CHANNEL_INSTRUMENTS)
   if unknown:
     raise ValueError(
-      f"mix_rhythm: {which} has unknown channel(s) {unknown}; supported: {sorted(_RHYTHM_CHANNEL_INSTRUMENTS)}"
+      f"{fn_name}: {which} has unknown channel(s) {unknown}; supported: {sorted(_RHYTHM_CHANNEL_INSTRUMENTS)}"
     )
   parsed = {}
   for channel_name, steps_in in channels.items():
     if not isinstance(steps_in, (list, tuple)) or len(steps_in) != data["steps"]:
-      raise ValueError(f"mix_rhythm: {which} channel {channel_name!r} must be a list of {data['steps']} steps")
-    parsed[channel_name] = [_rhythm_step_velocity(v, "mix_rhythm", channel_name, i) for i, v in enumerate(steps_in)]
+      raise ValueError(f"{fn_name}: {which} channel {channel_name!r} must be a list of {data['steps']} steps")
+    parsed[channel_name] = [_rhythm_step_velocity(v, fn_name, channel_name, i) for i, v in enumerate(steps_in)]
   return parsed
 
 
@@ -3747,6 +3747,155 @@ def mix_rhythm(a, b, weight=0.5, threshold=0.5, ghost=False):
   result["swing_pct"] = int(math.floor(weight * a.get("swing_pct", 0) + (1 - weight) * b.get("swing_pct", 0) + 0.5))
   result["channels"] = mixed
   return result
+
+
+_RHYTHM_MORPH_ORDERS = ("musical", "seeded", "by_channel")
+
+
+def _rhythm_morph_int(value, name, low):
+  if isinstance(value, bool) or not isinstance(value, int) or value < low:
+    raise ValueError(f"morph_rhythm: {name} must be an int of at least {low}, got {value!r}")
+  return value
+
+
+def _rhythm_morph_strength(step, group_size):
+  """How strong a metric position a step is on the bar's group grid: 3 at step 0, 2 at the other group starts, 1 at the midpoint of a group
+  (when the group has one), 0 everywhere else."""
+  if step == 0:
+    return 3
+  if step % group_size == 0:
+    return 2
+  if group_size % 2 == 0 and step % group_size == group_size // 2:
+    return 1
+  return 0
+
+
+def _rhythm_morph_shuffle(items, seed):
+  """A deterministic Fisher-Yates shuffle driven by a pure 32-bit integer hash (no `random`: the same order in CPython and in Pyodide)."""
+  items = list(items)
+  state = (seed * 2654435761 + 12345) & 0xFFFFFFFF
+  for i in range(len(items) - 1, 0, -1):
+    state = (state * 1664525 + 1013904223) & 0xFFFFFFFF
+    j = (state >> 8) % (i + 1)
+    items[i], items[j] = items[j], items[i]
+  return items
+
+
+def _rhythm_morph_prepare(a, b, order, seed):
+  """Validate the two bars and work out the ordered single-hit edits. Returns (a, b, channel names, a's rows, b's rows, edits) where a row is
+  a list of _RHYTHM_REST / None (plain hit) / int velocity and an edit is {kind, channel, step}."""
+  if order not in _RHYTHM_MORPH_ORDERS:
+    raise ValueError(f"morph_rhythm: order must be one of {list(_RHYTHM_MORPH_ORDERS)}, got {order!r}")
+  _rhythm_morph_int(seed, "seed", 0)
+  _rhythm_mix_fields(a, "a", "morph_rhythm")
+  _rhythm_mix_fields(b, "b", "morph_rhythm")
+  for key_name in ("time_signature", "steps", "group_size"):
+    if a[key_name] != b[key_name]:
+      raise ValueError(
+        f"morph_rhythm: a and b must agree on {key_name}, but a has {a[key_name]!r} and b has {b[key_name]!r}"
+      )
+  group_size = a["group_size"]
+  if isinstance(group_size, bool) or not isinstance(group_size, int) or group_size <= 0:
+    raise ValueError(f"morph_rhythm: group_size must be a positive int, got {group_size!r}")
+  channels_a = _rhythm_mix_channels(a, "a", "morph_rhythm")
+  channels_b = _rhythm_mix_channels(b, "b", "morph_rhythm")
+  steps = a["steps"]
+  names = list(channels_a) + [name for name in channels_b if name not in channels_a]
+  rest_row = [_RHYTHM_REST] * steps
+  rows_a = {name: channels_a.get(name, rest_row) for name in names}
+  rows_b = {name: channels_b.get(name, rest_row) for name in names}
+  removes, adds = [], []
+  for channel_index, name in enumerate(names):
+    for i in range(steps):
+      hit_a = rows_a[name][i] is not _RHYTHM_REST
+      hit_b = rows_b[name][i] is not _RHYTHM_REST
+      if hit_a and not hit_b:
+        removes.append((_rhythm_morph_strength(i, group_size), channel_index, i, "remove"))
+      elif hit_b and not hit_a:
+        adds.append((_rhythm_morph_strength(i, group_size), channel_index, i, "add"))
+  if order == "musical":
+    removes.sort()
+    adds.sort()
+    # interleave in proportion: after t edits, round-half-up(t * removes / d) of them are removals (so the hit count moves about linearly)
+    d = len(removes) + len(adds)
+    ordered, taken_r, taken_a = [], 0, 0
+    for t in range(1, d + 1):
+      want_r = (2 * t * len(removes) + d) // (2 * d)
+      if want_r > taken_r:
+        ordered.append(removes[taken_r])
+        taken_r += 1
+      else:
+        ordered.append(adds[taken_a])
+        taken_a += 1
+  else:
+    ordered = sorted(removes + adds, key=lambda e: (e[1], e[2]))
+    if order == "seeded":
+      ordered = _rhythm_morph_shuffle(ordered, seed)
+  edits = [{"kind": kind, "channel": names[channel_index], "step": step} for _, channel_index, step, kind in ordered]
+  return a, b, names, rows_a, rows_b, edits
+
+
+def _rhythm_morph_state(names, rows_a, rows_b, edits, k):
+  """The channels of state k: bar a with the first k edits applied (an added hit takes b's velocity, a plain true staying plain)."""
+  state = {name: [False if v is _RHYTHM_REST else (True if v is None else v) for v in rows_a[name]] for name in names}
+  for edit in edits[:k]:
+    if edit["kind"] == "remove":
+      state[edit["channel"]][edit["step"]] = False
+    else:
+      v = rows_b[edit["channel"]][edit["step"]]
+      state[edit["channel"]][edit["step"]] = True if v is None else v
+  return state
+
+
+def morph_rhythm_info(a, b, order="musical", seed=0):
+  """The single-hit edits that turn bar `a` into bar `b` in the order `morph_rhythm` applies them (score-first M7c). Returns
+  {"d": number of edits, "edits": [{"kind": "add" | "remove", "channel": name, "step": index}, ...]}. Pure; `a` and `b` are never mutated.
+  Same checks as morph_rhythm (errors name morph_rhythm)."""
+  _, _, _, _, _, edits = _rhythm_morph_prepare(a, b, order, seed)
+  return {"d": len(edits), "edits": edits}
+
+
+def morph_rhythm(a, b, bars=2, order="musical", seed=0, position=None):
+  """`bars` bars along an ordered path of single-hit edits from bar `a` to bar `b` (score-first M7c; design 4.7c). Pure and deterministic — `a` and
+  `b` are never mutated, the bars share no list with them or each other, and no `random` is used.
+
+  `a` and `b` are rhythm-data dicts that agree on time_signature, steps and group_size (any step count; the first disagreement, in that order, raises
+  ValueError naming morph_rhythm). A CELL is (channel, step). A cell with a hit in a only is a REMOVE edit, a hit in b only is an ADD edit; a cell with
+  a hit in both is no edit and keeps a's velocity. `d` is the number of edits. Channels are the union in first-seen order (a's, then b's new ones).
+
+  `order` is the order of the d edits (always deterministic, P6): "musical" (default) sorts removals and additions each by metric weakness on the bar's
+  group_size grid (step 0 strongest, then the other group starts, then a group's midpoint, then the rest; ties by channel order, then step), so strong
+  beats change last, and interleaves them in proportion (after t edits, round-half-up(t * removals / d) are removals; at a tie a removal goes first);
+  "seeded" is a deterministic shuffle of the by_channel order driven by `seed` (a non-negative int) through a pure integer hash; "by_channel" is channel
+  order, then step.
+
+  State k is bar `a` with the first k edits applied (an added hit takes b's velocity, a plain true staying plain; state 0 is a's hits, state d b's).
+  With bars >= 2 (an int), the result is a LIST of `bars` bars and bar i is state round-half-up(i * d / (bars - 1)): bars = d + 1 is atomic (each bar
+  one hit from the last); fewer bars skip states, more repeat them. With bars = 1, `position` (an int 0..d) is required and the result is that ONE bar
+  (a dict). A position with bars >= 2 is refused. tempo_bpm and swing_pct slide linearly from a's to b's along the bars (i / (bars - 1); position / d
+  for one bar; d = 0 keeps a's), rounded half up (a tempo never below 1; a missing swing_pct counts as 0). The other top-level fields are a's."""
+  _rhythm_morph_int(bars, "bars", 1)
+  _, _, names, rows_a, rows_b, edits = _rhythm_morph_prepare(a, b, order, seed)
+  d = len(edits)
+  if bars == 1:
+    if position is None:
+      raise ValueError(f"morph_rhythm: bars = 1 needs a position (an int from 0 to {d})")
+    if isinstance(position, bool) or not isinstance(position, int) or not 0 <= position <= d:
+      raise ValueError(f"morph_rhythm: position must be an int from 0 to {d}, got {position!r}")
+    plan = [(position, position, d)]
+  else:
+    if position is not None:
+      raise ValueError("morph_rhythm: position is only for bars = 1")
+    plan = [((2 * i * d + (bars - 1)) // (2 * (bars - 1)), i, bars - 1) for i in range(bars)]
+  out = []
+  for k, num, den in plan:
+    slide = lambda x, y: (x * (den - num) + y * num) / den if den else x
+    bar = {key: copy.deepcopy(val) for key, val in a.items() if key != "channels"}
+    bar["tempo_bpm"] = max(1, int(math.floor(slide(a["tempo_bpm"], b["tempo_bpm"]) + 0.5)))
+    bar["swing_pct"] = int(math.floor(slide(a.get("swing_pct", 0), b.get("swing_pct", 0)) + 0.5))
+    bar["channels"] = _rhythm_morph_state(names, rows_a, rows_b, edits, k)
+    out.append(bar)
+  return out[0] if bars == 1 else out
 
 
 def rhythm_bars_to_stream(bars):
