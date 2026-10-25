@@ -91,12 +91,22 @@ class TestBuildSeventhChordNoteRegression:
     recipe, _ = self._recipe_and_python()
     assert "{{" not in recipe and "}}" not in recipe
 
+  def _fresh_from_production(self, snippet_id):
+    """The Python the engine writes for this note TODAY: the production entry point, `resolve_action_code(snippet, force=True)` (what a hammer click or a Run write-back receives), on the note scanned from
+    its vault. It passes the note's declared inputs to the transpiler, so each becomes a kwarg of `compute`. A bare `transpile(parse(recipe))` passes none, so it can never reproduce the stored block of a
+    note that has `## Inputs`: that is what made this check red on a clean HEAD while the stored Python was correct (drain 2026-10-25-0830)."""
+    import os
+    from forge.core.executor import resolve_action_code
+    from forge.core.registry import GraphResolver, SnippetRegistry
+    vault = os.path.dirname(os.path.dirname(self.NOTE_PATH))
+    reg = SnippetRegistry()
+    reg.scan(vault)
+    return resolve_action_code(GraphResolver(reg).resolve(snippet_id), force=True)
+
   def test_stored_python_is_byte_exact_fresh_transpile(self):
-    from forge.recipe.parser import parse
-    from forge.recipe.transpiler import transpile
-    recipe, python_block = self._recipe_and_python()
-    transpiled = transpile(parse(recipe), resolve_slot=None)
-    assert transpiled.strip() == python_block.strip()
+    _, python_block = self._recipe_and_python()
+    fresh = self._fresh_from_production("build_seventh_chord")
+    assert fresh is not None and fresh.strip() == python_block.strip()
 
   @pytest.mark.parametrize("tonic,quality,expected", [
     ("C4", "dom7", ["C4", "E4", "G4", "B-4"]),

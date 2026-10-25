@@ -132,17 +132,27 @@ class TestConstructCMajorPianoNoteRegression:
     recipe, _ = self._recipe_and_python()
     assert "{{" not in recipe and "}}" not in recipe
 
+  def _fresh_from_production(self, snippet_id):
+    """The Python the engine writes for this note TODAY: the production entry point, `resolve_action_code(snippet, force=True)` (what a hammer click or a Run write-back receives), on the note scanned from
+    its vault. It passes the note's declared inputs to the transpiler, so each becomes a kwarg of `compute`. A bare `transpile(parse(recipe))` passes none, so it can never reproduce the stored block of a
+    note that has `## Inputs`: that is what made this check red on a clean HEAD while the stored Python was correct (drain 2026-10-25-0830)."""
+    import os
+    from forge.core.executor import resolve_action_code
+    from forge.core.registry import GraphResolver, SnippetRegistry
+    vault = os.path.dirname(os.path.dirname(self.NOTE_PATH))
+    reg = SnippetRegistry()
+    reg.scan(vault)
+    return resolve_action_code(GraphResolver(reg).resolve(snippet_id), force=True)
+
   def test_stored_python_is_byte_exact_fresh_transpile(self):
-    from forge.recipe.parser import parse
-    from forge.recipe.transpiler import transpile
-    recipe, python_block = self._recipe_and_python()
+    _, python_block = self._recipe_and_python()
     if python_block is None:
       # Since 2026-09-17 (forge-mcp recreated the note) it is RECIPE-ONLY: python_hash is the empty-string
       # hash and no `# Python` facet is stored; Python is derived at run time. The two execution tests below
       # run it through the real production path (resolve_action_code), which is the stronger check.
       pytest.skip("note stores no # Python facet (recipe-only); covered by the execution tests")
-    transpiled = transpile(parse(recipe), resolve_slot=None)
-    assert transpiled.strip() == python_block.strip()
+    fresh = self._fresh_from_production("construct_c_major_piano")
+    assert fresh is not None and fresh.strip() == python_block.strip()
 
   def test_note_executes_correctly_exact_match(self):
     result = self._production_run(CORRECT)
