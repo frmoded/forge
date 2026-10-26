@@ -207,7 +207,20 @@ def test_scale_construction_registration_lazy_list():
 
 # ------------------------------------------- fixture parses (I14)
 
-VAULT = pathlib.Path(__file__).resolve().parents[3] / "forge-music"
+# 2026-10-26 (drain 1330): the notes these fixtures read live in the music-theory vault (the retired forge-music name left every test below skipping). `music_theory_note` finds the vault
+# ($FORGE_MUSIC_THEORY_VAULT_PATH, the sibling of this repo, ~/projects/music-theory); a note that is not there is still a skip that says which.
+from tests.music._helpers import music_theory_note
+
+
+def _recipe_facet(body):
+  """The Recipe facet only: from the `# Recipe` heading to the next top-level heading (the notes now also carry a `# Python` facet, whose fences are not Recipe text)."""
+  after = body.split("# Recipe", 1)[1]
+  return re.split(r"^# ", after, maxsplit=1, flags=re.MULTILINE)[0].strip()
+
+
+def _note(rel):
+  found = music_theory_note(rel)
+  return pathlib.Path(found) if found else pathlib.Path(__file__).resolve().parents[3] / "music-theory" / rel
 
 FIXTURES = [
   "exercises/scale_construction_c_major_piano.md",
@@ -219,9 +232,9 @@ FIXTURES = [
 
 @pytest.mark.parametrize("rel", FIXTURES)
 def test_scale_fixture_recipe_parses(rel):
-  path = VAULT / rel
-  if not VAULT.exists():
-    pytest.skip("forge-music not checked out beside forge")
+  path = _note(rel)
+  if music_theory_note("forge.toml") is None:
+    pytest.skip("music-theory not checked out beside forge")
   if rel.endswith("scale_construction_c_major_piano.md") and not path.exists():
     # Drain 2026-08-06-1600 finding: the wizard removed this fixture
     # from the live vault during the construct_c_major_piano
@@ -233,7 +246,7 @@ def test_scale_fixture_recipe_parses(rel):
   assert path.exists(), f"{rel} missing — drain 1730 ships four fixtures"
   body = path.read_text(encoding="utf-8")
   assert "# Recipe" in body, f"{rel} has no # Recipe facet"
-  recipe = body.split("# Recipe", 1)[1].strip()
+  recipe = _recipe_facet(body)
   try:
     recipe_parser.parse(recipe)
   except Exception as exc:  # I14: a parse failure is a drain failure
@@ -242,7 +255,7 @@ def test_scale_fixture_recipe_parses(rel):
 
 @pytest.mark.parametrize("rel", FIXTURES)
 def test_scale_fixture_declares_piano_widget(rel):
-  path = VAULT / rel
+  path = _note(rel)
   if not path.exists():
     pytest.skip(f"{rel} not present")
   body = path.read_text(encoding="utf-8")

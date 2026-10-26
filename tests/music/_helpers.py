@@ -12,8 +12,13 @@ import os
 from pathlib import Path
 
 
+# 2026-10-26 (drain 1330): the vault tests read is now `music-theory` (the retired `forge-music` name left 40 tests skipping with "forge-music not
+# checked out beside forge"). Order: the explicit override, the sibling of this repo (the layout every forge checkout uses), ~/projects/music-theory,
+# and the retired name last (an old checkout that still has it keeps working).
 _CANDIDATES = [
     os.environ.get("FORGE_MUSIC_VAULT_PATH"),
+    str(Path(__file__).resolve().parents[3] / "music-theory"),
+    os.path.expanduser("~/projects/music-theory"),
     os.path.expanduser("~/projects/forge-music"),
 ]
 
@@ -49,6 +54,17 @@ def music_theory_note(rel):
     on 2026-09-13, and failed silently-red ever since)."""
     sibling = Path(__file__).resolve().parents[3] / "music-theory"
     for root in (os.environ.get("FORGE_MUSIC_THEORY_VAULT_PATH"), sibling, os.path.expanduser("~/projects/music-theory")):
+        if root and Path(root, rel).is_file():
+            return str(Path(root, rel))
+    return None
+
+
+def music_core_note(rel):
+    """Path of a note in the music-core vault (where the percussion_lab sections live since the 2026-08 migration; music-theory imports it), or None when it isn't checked out.
+
+    Same resolution as `music_theory_note`: $FORGE_MUSIC_CORE_VAULT_PATH, the sibling of this repo, then ~/projects/music-core (drain 2026-10-26-1330)."""
+    sibling = Path(__file__).resolve().parents[3] / "music-core"
+    for root in (os.environ.get("FORGE_MUSIC_CORE_VAULT_PATH"), sibling, os.path.expanduser("~/projects/music-core")):
         if root and Path(root, rel).is_file():
             return str(Path(root, rel))
     return None

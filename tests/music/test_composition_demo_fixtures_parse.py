@@ -30,12 +30,20 @@ correct idiom is to put the whole lookup inside a slot — slot contents
 are Python and take dicts and subscripts freely.
 """
 import pathlib
+import re
 
 import pytest
 
 from forge.recipe import parser
 
-VAULT = pathlib.Path(__file__).resolve().parents[3] / "forge-music"
+# 2026-10-26 (drain 1330): the notes these fixtures read live in the music-theory vault (the retired forge-music name left every test below skipping). `music_theory_note` finds the vault
+# ($FORGE_MUSIC_THEORY_VAULT_PATH, the sibling of this repo, ~/projects/music-theory); a note that is not there is still a skip that says which.
+from tests.music._helpers import music_theory_note
+
+
+def _note(rel):
+  found = music_theory_note(rel)
+  return pathlib.Path(found) if found else pathlib.Path(__file__).resolve().parents[3] / "music-theory" / rel
 
 DEMOS = [
   "exercises/rhythmic_line_demo.md",
@@ -53,14 +61,16 @@ DEMOS = [
 def recipe_of(path):
   body = path.read_text(encoding="utf-8")
   assert "# Recipe" in body, f"{path} has no # Recipe facet"
-  return body.split("# Recipe", 1)[1].strip()
+  after = body.split("# Recipe", 1)[1]
+  # the Recipe facet only: up to the next top-level heading (the notes now also carry a `# Python` facet whose fences are not Recipe text)
+  return re.split(r"^# ", after, maxsplit=1, flags=re.MULTILINE)[0].strip()
 
 
 @pytest.mark.parametrize("rel", DEMOS)
 def test_demo_recipe_parses(rel):
-  path = VAULT / rel
+  path = _note(rel)
   if not path.exists():
-    pytest.skip(f"{path} not present — forge-music not checked out beside forge")
+    pytest.skip(f"{path} not present in the music-theory vault")
   try:
     parser.parse(recipe_of(path))
   except Exception as exc:
@@ -79,7 +89,7 @@ def test_demo_recipe_has_no_bare_dict_literal(rel):
   be the tokenizer's. A note author who re-introduces a bare dict wants
   to be told what to do instead, not where the lexer gave up.
   """
-  path = VAULT / rel
+  path = _note(rel)
   if not path.exists():
     pytest.skip(f"{path} not present")
   for lineno, line in enumerate(recipe_of(path).split("\n"), 1):
