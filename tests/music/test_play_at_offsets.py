@@ -100,7 +100,8 @@ class TestMidiRoute:
     channels = set()
     for track in mf2.tracks:
       for ev in track.events:
-        if 'NOTE_ON' in str(ev.type) and getattr(ev, 'velocity', 0) > 0:
+        # Compare the enum member, not str(ev.type): on Python 3.11 an IntEnum's str() is its number ('144'), so a substring match on 'NOTE_ON' never fires.
+        if ev.type == _m21midi.ChannelVoiceMessages.NOTE_ON and getattr(ev, 'velocity', 0) > 0:
           pitches.add(ev.pitch)
           channels.add(ev.channel)
     assert channels == {10}
