@@ -3898,6 +3898,88 @@ def morph_rhythm(a, b, bars=2, order="musical", seed=0, position=None):
   return out[0] if bars == 1 else out
 
 
+_THIN_OUT_KEEPS = ("downbeat", "seeded")
+
+
+def _rhythm_region(bars, first, last, row, fn_name):
+  """Validate the arguments every region transform shares (a non-empty list of rhythm-data bars, a 1-based inclusive range, an optional row) and return
+  [(bar number, channel names to change, parsed channels)] for the bars in the range."""
+  if not isinstance(bars, list) or not bars:
+    raise ValueError(f"{fn_name}: bars must be a non-empty list of rhythm-data bars, got {bars!r}")
+  count = len(bars)
+  for index, bar in enumerate(bars):
+    _rhythm_mix_fields(bar, f"bars[{index}]", fn_name)
+  whole = lambda v: isinstance(v, int) and not isinstance(v, bool)
+  if not (whole(first) and whole(last) and 1 <= first <= last <= count):
+    raise ValueError(f"{fn_name}: first and last must be whole bar numbers with 1 <= first <= last <= {count} (the list has {count} bars), got first={first!r}, last={last!r}")
+  if row is not None and (not isinstance(row, str) or row == ""):
+    raise ValueError(f"{fn_name}: row must be a channel name (a string) or None, got {row!r}")
+  region = []
+  for number in range(first, last + 1):
+    bar = bars[number - 1]
+    group_size = bar["group_size"]
+    if isinstance(group_size, bool) or not isinstance(group_size, int) or group_size <= 0:
+      raise ValueError(f"{fn_name}: bar {number} group_size must be a positive int, got {group_size!r}")
+    parsed = _rhythm_mix_channels(bar, f"bar {number}", fn_name)
+    if row is not None and row not in parsed:
+      raise ValueError(f"{fn_name}: row {row!r} is not a channel of bar {number} (it has {list(parsed)})")
+    region.append((number, [row] if row is not None else list(parsed), parsed))
+  return region
+
+
+def thin_out_bars(bars, first, last, row=None, keep="downbeat", amount=0.5, seed=0):
+  """Make bars `first` to `last` (1-based, inclusive) of a list of rhythm-data bars sparser. In each bar of the range, for the channel `row` (or every channel when row is None),
+  amount of the hits are removed (amount 0.5 removes half of them, rounded half up; 1 removes all, 0 none). keep="downbeat" keeps the hits on the strongest beats: step 0 first, then
+  the other group starts, then the middle of a group, then the rest, and among equal ones the earlier step. keep="seeded" removes a deterministic shuffle of the hits, driven by
+  `seed`. A hit that stays keeps its velocity and no hit is ever added. Returns a new list of bars; the bars outside the range come back unchanged, and the input is never
+  modified. Refuses a range outside the list, a row a bar in the range does not have, an amount outside 0 to 1, or an unknown keep."""
+  if keep not in _THIN_OUT_KEEPS:
+    raise ValueError(f"thin_out_bars: keep must be one of {list(_THIN_OUT_KEEPS)}, got {keep!r}")
+  if isinstance(amount, bool) or not isinstance(amount, (int, float)) or not 0 <= amount <= 1:
+    raise ValueError(f"thin_out_bars: amount must be a number from 0 to 1, got {amount!r}")
+  if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+    raise ValueError(f"thin_out_bars: seed must be an int of at least 0, got {seed!r}")
+  region = _rhythm_region(bars, first, last, row, "thin_out_bars")
+  out = copy.deepcopy(bars)
+  millionths = int(round(amount * 1000000))
+  for number, names, parsed in region:
+    group_size = bars[number - 1]["group_size"]
+    for channel_index, name in enumerate(names):
+      hits = [step for step, v in enumerate(parsed[name]) if v is not _RHYTHM_REST]
+      remove_count = (millionths * len(hits) + 500000) // 1000000
+      if remove_count == 0:
+        continue
+      if keep == "downbeat":
+        ranked = sorted(hits, key=lambda step: (-_rhythm_morph_strength(step, group_size), step))
+        removed = ranked[len(ranked) - remove_count:]
+      else:
+        removed = _rhythm_morph_shuffle(hits, seed + 1000003 * number + 7919 * channel_index)[:remove_count]
+      for step in removed:
+        out[number - 1]["channels"][name][step] = False
+  return out
+
+
+def double_up_bars(bars, first, last, row=None, grid=16):
+  """Make bars `first` to `last` (1-based, inclusive) of a list of rhythm-data bars busier. In each bar of the range, for the channel `row` (or every channel when row is None),
+  every hit gets a second hit on the next step, with the same velocity, when that step is a rest and the bar has one. The new hits are not doubled again, and no hit is ever
+  removed. `grid` is the number of steps the bars in the range must have (16 for the usual sixteenth-note bar). Returns a new list of bars; the bars outside the range come
+  back unchanged, and the input is never modified. Refuses a range outside the list, a row a bar in the range does not have, or a bar whose step count is not `grid`."""
+  if isinstance(grid, bool) or not isinstance(grid, int) or grid <= 0:
+    raise ValueError(f"double_up_bars: grid must be a positive int, got {grid!r}")
+  region = _rhythm_region(bars, first, last, row, "double_up_bars")
+  for number, _names, _parsed in region:
+    if bars[number - 1]["steps"] != grid:
+      raise ValueError(f"double_up_bars: bar {number} has {bars[number - 1]['steps']} steps, but grid is {grid}")
+  out = copy.deepcopy(bars)
+  for number, names, parsed in region:
+    for name in names:
+      original = bars[number - 1]["channels"][name]
+      for step, v in enumerate(parsed[name]):
+        if v is not _RHYTHM_REST and step + 1 < len(original) and parsed[name][step + 1] is _RHYTHM_REST:
+          out[number - 1]["channels"][name][step + 1] = original[step]
+  return out
+
+
 def rhythm_bars_to_stream(bars):
   """Turn a LIST of rhythm-data dicts (one per bar, e.g. extend_rhythm's result) into one Score: each bar goes
   through rhythm_data_to_stream and the bars are joined end to end with sequence_list — no second hit-placement or
