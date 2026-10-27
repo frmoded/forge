@@ -197,7 +197,6 @@ def test_resting_bar_1_has_kicks_on_1_and_3_bars_2_4_have_only_beat_1(run_music_
 
 # ---- behavior preservation: refactored Murmuration matches pre-refactor shape ----
 
-@pytest.mark.skip(reason="stale expectation: the kick part now has 128 notes where this test pins 76 (the piece was changed after this was written); a driver decision, see questions/2026-10-26-1330-forge-music-skipped-tests-port-or-delete-proposal.md")
 def test_murmuration_after_refactor_matches_pre_refactor_structure(run_music_block):
     """Load-bearing behavior preservation. The refactored Murmuration is
     8 calls to percussion_lab/* via context.compute + sequence().
@@ -206,28 +205,29 @@ def test_murmuration_after_refactor_matches_pre_refactor_structure(run_music_blo
     (including percMapPitch distinction for closed vs open hi-hat,
     low vs mid tom).
 
-    Expected per-instrument total note counts (corrected after
-    pytest debugging):
-    kick:    [8, 8, 11, 12, 16, 8, 8, 5] → sum = 76
-    snare:   [0, 0, 16, 16, 64, 8, 8, 0] → sum = 112
-    chihat:  [0, 16, 32, 32, 0, 32, 16, 0] → sum = 128 (closed)
-    openhh:  [0, 0, 0, 4, 16, 4, 0, 0] → sum = 24
-    lowtom:  [0, 0, 0, 8, 16, 4, 0, 0] → sum = 28
-    midtom:  [0, 0, 0, 4, 16, 4, 0, 0] → sum = 24
-    crash:   [0, 0, 0, 0, 2, 0, 0, 0] → sum = 2
+    Expected per-instrument total note counts (re-measured 2026-10-27 from the
+    real piece after the driver changed it on purpose; it ran 76 / 112 / 128 /
+    24 / 28 / 24 / 2 when this was written):
+    kick:    128
+    snare:   68
+    chihat:  288 (closed)
+    openhh:  24
+    lowtom:  24
+    midtom:  24
+    crash:   4
     """
     score = run_music_block("murmuration")
     assert isinstance(score, stream.Score)
     by_inst = _parts_by_inst_id(score)
 
     expected = {
-        ('BassDrum',     35): 76,
-        ('SnareDrum',    38): 112,
-        ('HiHatCymbal',  42): 128,
+        ('BassDrum',     35): 128,
+        ('SnareDrum',    38): 68,
+        ('HiHatCymbal',  42): 288,
         ('HiHatCymbal',  46): 24,
-        ('TomTom',       41): 28,
+        ('TomTom',       41): 24,
         ('TomTom',       47): 24,
-        ('CrashCymbals', 49): 2,
+        ('CrashCymbals', 49): 4,
     }
     for key, expected_notes in expected.items():
         assert key in by_inst, (

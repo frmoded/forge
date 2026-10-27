@@ -222,8 +222,8 @@ def _note(rel):
   found = music_theory_note(rel)
   return pathlib.Path(found) if found else pathlib.Path(__file__).resolve().parents[3] / "music-theory" / rel
 
+# 2026-10-27 (drain 0900): the c_major fixture is gone for good (the wizard's Stream-with-TextExpression note superseded it); its FIXTURES entry and skip branch are deleted, not skipped.
 FIXTURES = [
-  "exercises/scale_construction_c_major_piano.md",
   "exercises/scale_construction_a_minor_piano.md",
   "exercises/scale_construction_g_major_piano.md",
   "exercises/scale_construction_f_major_piano.md",
@@ -235,14 +235,6 @@ def test_scale_fixture_recipe_parses(rel):
   path = _note(rel)
   if music_theory_note("forge.toml") is None:
     pytest.skip("music-theory not checked out beside forge")
-  if rel.endswith("scale_construction_c_major_piano.md") and not path.exists():
-    # Drain 2026-08-06-1600 finding: the wizard removed this fixture
-    # from the live vault during the construct_c_major_piano
-    # re-baseline (their Stream-with-TextExpression note supersedes
-    # it). Loud skip, not a red: recreating it here would override a
-    # wizard-lane authoring decision (L54). forge-core adjudicates
-    # whether to drop it from FIXTURES for good.
-    pytest.skip("c_major fixture removed by wizard re-baseline (drain 1600 FEEDBACK)")
   assert path.exists(), f"{rel} missing — drain 1730 ships four fixtures"
   body = path.read_text(encoding="utf-8")
   assert "# Recipe" in body, f"{rel} has no # Recipe facet"
