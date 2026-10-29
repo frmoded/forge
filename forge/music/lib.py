@@ -4029,6 +4029,77 @@ def rhythm_bars_to_stream(bars):
   return sequence_list(sections=streams)
 
 
+def combine_tracks(tracks):
+  """Play several phrases together, each on its own kit: merge their bars, channel by channel, into ONE list of rhythm-data bars.
+
+  `tracks` is a non-empty list of dicts, one per track: {"kit": a name, "channels": the channel names the kit has, "bars": a phrase's list of rhythm-data bars}.
+  A track plays only the channels its kit has (a channel of the phrase that the kit lacks is left out). Two kits may not have the same channel: that is
+  refused, naming the channel and both kits, even when neither phrase hits it. The tracks may differ in length: the result is as long as the longest, and a
+  shorter track rests (explicit rests) after its last bar. Every bar must have the same time_signature, steps and group_size, and the bars at the same
+  position in different tracks must have the same tempo_bpm and swing_pct; anything else is refused in a sentence naming the field, the bar and the kits.
+
+  Every bar of the result has the same channels, in the engine's channel order (kick, snare, hihat, bell, claves, conga_high, conga_low), whatever order the
+  tracks came in. No hit is added or lost and velocities are kept. The inputs are never changed and the result shares no list with them. Feed the result to
+  rhythm_bars_to_stream to draw or play it."""
+  fn = "combine_tracks"
+  if not isinstance(tracks, (list, tuple)) or not tracks:
+    raise ValueError(f"{fn}: tracks must be a non-empty list of {{kit, channels, bars}} dicts, got {tracks!r}")
+  claims = {}
+  checked = []
+  for index, track in enumerate(tracks):
+    if not isinstance(track, dict):
+      raise ValueError(f"{fn}: tracks[{index}] must be a {{kit, channels, bars}} dict, got {type(track).__name__}")
+    kit, channels, bars = track.get("kit"), track.get("channels"), track.get("bars")
+    if not isinstance(kit, str) or kit == "":
+      raise ValueError(f"{fn}: tracks[{index}] needs a kit name (a non-empty string), got {kit!r}")
+    if not isinstance(channels, (list, tuple)) or not channels or not all(isinstance(c, str) for c in channels):
+      raise ValueError(f"{fn}: kit {kit!r} needs a non-empty list of channel names, got {channels!r}")
+    unknown = sorted(c for c in channels if c not in _RHYTHM_CHANNEL_INSTRUMENTS)
+    if unknown:
+      raise ValueError(f"{fn}: kit {kit!r} has unknown channel(s) {unknown}; supported: {sorted(_RHYTHM_CHANNEL_INSTRUMENTS)}")
+    for channel in channels:
+      if channel in claims:
+        raise ValueError(f"{fn}: channel {channel!r} is claimed by kit {claims[channel]!r} and by kit {kit!r}; give each channel to one kit")
+      claims[channel] = kit
+    if not isinstance(bars, (list, tuple)) or not bars:
+      raise ValueError(f"{fn}: kit {kit!r} needs a non-empty list of bars, got {bars!r}")
+    for number, bar in enumerate(bars, start=1):
+      _rhythm_mix_fields(bar, f"kit {kit!r} bar {number}", fn)
+      _rhythm_mix_channels(bar, f"kit {kit!r} bar {number}", fn)
+    checked.append((kit, set(channels), bars))
+  first_kit, _first_channels, first_bars = checked[0]
+  for kit, _channels, bars in checked:
+    for number, bar in enumerate(bars, start=1):
+      for key_name in ("time_signature", "steps", "group_size"):
+        if bar[key_name] != first_bars[0][key_name]:
+          raise ValueError(f"{fn}: kit {kit!r} bar {number} has {key_name} {bar[key_name]!r} but kit {first_kit!r} bar 1 has {first_bars[0][key_name]!r}; all bars must share the same meter and steps")
+  for key_name in ("tempo_bpm", "swing_pct"):
+    reference = {}
+    for kit, _channels, bars in checked:
+      for number, bar in enumerate(bars, start=1):
+        value = bar.get(key_name, 0)
+        if number in reference and reference[number][1] != value:
+          raise ValueError(f"{fn}: kit {kit!r} bar {number} has {key_name} {value!r} but kit {reference[number][0]!r} bar {number} has {reference[number][1]!r}; tracks played together must share the same tempo")
+        reference.setdefault(number, (kit, value))
+  used = set()
+  for _kit, channels, bars in checked:
+    for bar in bars:
+      used.update(c for c in bar["channels"] if c in channels)
+  order = [c for c in _RHYTHM_CHANNEL_INSTRUMENTS if c in used]
+  steps = first_bars[0]["steps"]
+  out = []
+  for position in range(max(len(bars) for _kit, _channels, bars in checked)):
+    base = next(bars[position] for _kit, _channels, bars in checked if position < len(bars))
+    bar = {key_name: copy.deepcopy(value) for key_name, value in base.items() if key_name != "channels"}
+    bar["channels"] = {}
+    for channel in order:
+      owner_bars = next(bars for _kit, channels, bars in checked if channel in channels)
+      row = owner_bars[position]["channels"].get(channel) if position < len(owner_bars) else None
+      bar["channels"][channel] = list(row) if row is not None else [False] * steps
+    out.append(bar)
+  return out
+
+
 def drums_shuffle():
   """A 12-bar shuffle drum pattern in 12/8 — kick on beats 1+3, snare
   on 2+4, hi-hat on every dotted-quarter beat. The rhythmic backbone
