@@ -4029,19 +4029,9 @@ def rhythm_bars_to_stream(bars):
   return sequence_list(sections=streams)
 
 
-def combine_tracks(tracks):
-  """Play several phrases together, each on its own kit: merge their bars, channel by channel, into ONE list of rhythm-data bars.
-
-  `tracks` is a non-empty list of dicts, one per track: {"kit": a name, "channels": the channel names the kit has, "bars": a phrase's list of rhythm-data bars}.
-  A track plays only the channels its kit has (a channel of the phrase that the kit lacks is left out). Two kits may not have the same channel: that is
-  refused, naming the channel and both kits, even when neither phrase hits it. The tracks may differ in length: the result is as long as the longest, and a
-  shorter track rests (explicit rests) after its last bar. Every bar must have the same time_signature, steps and group_size, and the bars at the same
-  position in different tracks must have the same tempo_bpm and swing_pct; anything else is refused in a sentence naming the field, the bar and the kits.
-
-  Every bar of the result has the same channels, in the engine's channel order (kick, snare, hihat, bell, claves, conga_high, conga_low), whatever order the
-  tracks came in. No hit is added or lost and velocities are kept. The inputs are never changed and the result shares no list with them. Feed the result to
-  rhythm_bars_to_stream to draw or play it."""
-  fn = "combine_tracks"
+def _combine_tracks_prepare(tracks, fn):
+  """Validate the tracks of combine_tracks / combine_tracks_lineage; returns (checked, plays, order, length). `checked` is one dict per track in the order given:
+  kit, channels (a set), bars, phrase (a name or None), mute, solo, volume. `plays` is the list of those that sound, `order` the canonical channel order of the channels they use."""
   if not isinstance(tracks, (list, tuple)) or not tracks:
     raise ValueError(f"{fn}: tracks must be a non-empty list of {{kit, channels, bars}} dicts, got {tracks!r}")
   claims = {}
@@ -4063,40 +4053,113 @@ def combine_tracks(tracks):
       claims[channel] = kit
     if not isinstance(bars, (list, tuple)) or not bars:
       raise ValueError(f"{fn}: kit {kit!r} needs a non-empty list of bars, got {bars!r}")
+    phrase = track.get("phrase")
+    if "phrase" in track and (not isinstance(phrase, str) or phrase == ""):
+      raise ValueError(f"{fn}: kit {kit!r} phrase must be a non-empty name, got {phrase!r}")
+    for flag in ("mute", "solo"):
+      if flag in track and not isinstance(track[flag], bool):
+        raise ValueError(f"{fn}: kit {kit!r} {flag} must be true or false, got {track[flag]!r}")
+    volume = track.get("volume", 100)
+    if isinstance(volume, bool) or not isinstance(volume, int) or not 0 <= volume <= 100:
+      raise ValueError(f"{fn}: kit {kit!r} volume must be a whole number from 0 to 100, got {volume!r}")
     for number, bar in enumerate(bars, start=1):
       _rhythm_mix_fields(bar, f"kit {kit!r} bar {number}", fn)
       _rhythm_mix_channels(bar, f"kit {kit!r} bar {number}", fn)
-    checked.append((kit, set(channels), bars))
-  first_kit, _first_channels, first_bars = checked[0]
-  for kit, _channels, bars in checked:
-    for number, bar in enumerate(bars, start=1):
+    checked.append({"kit": kit, "channels": set(channels), "bars": bars, "phrase": phrase, "mute": track.get("mute", False), "solo": track.get("solo", False), "volume": volume})
+  first = checked[0]
+  for t in checked:
+    for number, bar in enumerate(t["bars"], start=1):
       for key_name in ("time_signature", "steps", "group_size"):
-        if bar[key_name] != first_bars[0][key_name]:
-          raise ValueError(f"{fn}: kit {kit!r} bar {number} has {key_name} {bar[key_name]!r} but kit {first_kit!r} bar 1 has {first_bars[0][key_name]!r}; all bars must share the same meter and steps")
-  for key_name in ("tempo_bpm", "swing_pct"):
-    reference = {}
-    for kit, _channels, bars in checked:
-      for number, bar in enumerate(bars, start=1):
-        value = bar.get(key_name, 0)
-        if number in reference and reference[number][1] != value:
-          raise ValueError(f"{fn}: kit {kit!r} bar {number} has {key_name} {value!r} but kit {reference[number][0]!r} bar {number} has {reference[number][1]!r}; tracks played together must share the same tempo")
-        reference.setdefault(number, (kit, value))
+        if bar[key_name] != first["bars"][0][key_name]:
+          raise ValueError(f"{fn}: kit {t['kit']!r} bar {number} has {key_name} {bar[key_name]!r} but kit {first['kit']!r} bar 1 has {first['bars'][0][key_name]!r}; all bars must share the same meter and steps")
+  reference = {}
+  for t in checked:
+    for number, bar in enumerate(t["bars"], start=1):
+      value = bar.get("swing_pct", 0)
+      if number in reference and reference[number][1] != value:
+        raise ValueError(f"{fn}: kit {t['kit']!r} bar {number} has swing_pct {value!r} but kit {reference[number][0]!r} bar {number} has swing_pct {reference[number][1]!r}; tracks played together must share the same swing")
+      reference.setdefault(number, (t["kit"], value))
+  any_solo = any(t["solo"] for t in checked)
+  def sounds(t):
+    if t["volume"] == 0:
+      return False
+    if t["solo"]:
+      return True
+    return not any_solo and not t["mute"]
+  plays = [t for t in checked if sounds(t)]
+  if not plays:
+    raise ValueError(f"{fn}: every track is muted, so nothing plays; unmute a kit")
   used = set()
-  for _kit, channels, bars in checked:
-    for bar in bars:
-      used.update(c for c in bar["channels"] if c in channels)
+  for t in plays:
+    for bar in t["bars"]:
+      used.update(c for c in bar["channels"] if c in t["channels"])
   order = [c for c in _RHYTHM_CHANNEL_INSTRUMENTS if c in used]
-  steps = first_bars[0]["steps"]
+  return checked, plays, order, max(len(t["bars"]) for t in checked)
+
+
+def _scale_velocity(step, volume, fn, channel, index):
+  """One step of a row at `volume` percent: a rest stays a rest, a hit's velocity (90 for a plain hit) is scaled, rounded half up, and kept within 1 to 127."""
+  velocity = _rhythm_step_velocity(step, fn, channel, index)
+  if velocity is _RHYTHM_REST:
+    return step
+  base = _RHYTHM_DEFAULT_VELOCITY if velocity is None else velocity
+  return max(1, min(127, (2 * base * volume + 100) // 200))
+
+
+def combine_tracks(tracks):
+  """Play several phrases together, each on its own kit: merge their bars, channel by channel, into ONE list of rhythm-data bars.
+
+  `tracks` is a non-empty list of dicts, one per track: {"kit": a name, "channels": the channel names the kit has, "bars": a phrase's list of rhythm-data bars}.
+  A track may also say {"mute": true}, {"solo": true} or {"volume": 0 to 100} (a whole number, 100 when absent). A muted kit plays nothing; when any kit is solo only the
+  solo kits play (a kit that is both muted and solo plays); volume scales the velocity of every hit, rounded half up and kept between 1 and 127 (a plain hit counts as 90),
+  and volume 0 is a muted kit. Muting does not shorten the result or change its tempo. If nothing would play, that is refused in a sentence.
+  A track plays only the channels its kit has (a channel of the phrase that the kit lacks is left out). Two kits may not have the same channel: that is
+  refused, naming the channel and both kits, even when neither phrase hits it. The tracks may differ in length: the result is as long as the longest, and a
+  shorter track rests (explicit rests) after its last bar. Every bar must have the same time_signature, steps and group_size, and the bars at the same
+  position in different tracks must have the same swing_pct; anything else is refused in a sentence naming the field, the bar and the kits.
+  The tempo is the FIRST track's, bar by bar: every other track's bar plays at the tempo the first track's bar at the same position has; a bar beyond the end of the
+  first track keeps the tempo of the first track that has a bar there.
+
+  Every bar of the result has the same channels, in the engine's channel order (kick, snare, hihat, bell, claves, conga_high, conga_low), whatever order the
+  tracks came in. Unless volume is changed, no hit is added or lost and velocities are kept. The inputs are never changed and the result shares no list with them.
+  Feed the result to rhythm_bars_to_stream to draw or play it."""
+  fn = "combine_tracks"
+  checked, plays, order, length = _combine_tracks_prepare(tracks, fn)
+  steps = checked[0]["bars"][0]["steps"]
+  owner = {channel: t for t in plays for channel in t["channels"]}
   out = []
-  for position in range(max(len(bars) for _kit, _channels, bars in checked)):
-    base = next(bars[position] for _kit, _channels, bars in checked if position < len(bars))
+  for position in range(length):
+    base = next(t["bars"][position] for t in checked if position < len(t["bars"]))
     bar = {key_name: copy.deepcopy(value) for key_name, value in base.items() if key_name != "channels"}
     bar["channels"] = {}
     for channel in order:
-      owner_bars = next(bars for _kit, channels, bars in checked if channel in channels)
-      row = owner_bars[position]["channels"].get(channel) if position < len(owner_bars) else None
-      bar["channels"][channel] = list(row) if row is not None else [False] * steps
+      t = owner[channel]
+      row = t["bars"][position]["channels"].get(channel) if position < len(t["bars"]) else None
+      if row is None:
+        bar["channels"][channel] = [False] * steps
+      elif t["volume"] == 100:
+        bar["channels"][channel] = list(row)
+      else:
+        bar["channels"][channel] = [_scale_velocity(v, t["volume"], fn, channel, i) for i, v in enumerate(row)]
     out.append(bar)
+  return out
+
+
+def combine_tracks_lineage(tracks):
+  """Where each channel group of combine_tracks came from: one dict per bar of the result, {"bar": its number, "tempo_bpm": the tempo it plays at,
+  "channels": {channel: {"kit": the kit, "phrase": the phrase name given on the track or None, "bar": the number of the phrase's bar it plays, or None where that
+  phrase has ended and the kit rests}}, "retimed_from": {kit: the tempo its own bar had}} (only for kits whose bar was changed to the first track's tempo).
+  The tracks are checked exactly as combine_tracks checks them; the bars of combine_tracks itself are not affected by a track's phrase name."""
+  fn = "combine_tracks_lineage"
+  checked, plays, order, length = _combine_tracks_prepare(tracks, fn)
+  owner = {channel: t for t in plays for channel in t["channels"]}
+  out = []
+  for position in range(length):
+    base = next(t["bars"][position] for t in checked if position < len(t["bars"]))
+    tempo = base["tempo_bpm"]
+    retimed = {t["kit"]: t["bars"][position]["tempo_bpm"] for t in checked if position < len(t["bars"]) and t["bars"][position]["tempo_bpm"] != tempo}
+    channels = {channel: {"kit": owner[channel]["kit"], "phrase": owner[channel]["phrase"], "bar": position + 1 if position < len(owner[channel]["bars"]) else None} for channel in order}
+    out.append({"bar": position + 1, "tempo_bpm": tempo, "channels": channels, "retimed_from": retimed})
   return out
 
 

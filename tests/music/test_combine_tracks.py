@@ -122,8 +122,9 @@ def test_the_same_kit_twice_is_the_same_conflict():
     lib.combine_tracks([_rock(), _rock()])
 
 
-@pytest.mark.parametrize("field,value", [("time_signature", "3/4"), ("steps", 12), ("group_size", 3), ("tempo_bpm", 120), ("swing_pct", 30)])
-def test_a_different_meter_steps_or_tempo_is_a_plain_refusal_naming_field_bar_and_kits(field, value):
+# 2026-10-29-0910 (deliberate): tempo_bpm LEFT this list - a different tempo is no longer a refusal, the arrangement plays at the first track's tempo (see the re-timing tests below). Meter, steps, group size and swing stay refusals.
+@pytest.mark.parametrize("field,value", [("time_signature", "3/4"), ("steps", 12), ("group_size", 3), ("swing_pct", 30)])
+def test_a_different_meter_steps_or_swing_is_a_plain_refusal_naming_field_bar_and_kits(field, value):
   other = _latin()
   if field == "steps":
     other["bars"] = [_bar(steps=12, group=4, claves={0, 3})]
@@ -137,11 +138,13 @@ def test_a_different_meter_steps_or_tempo_is_a_plain_refusal_naming_field_bar_an
   assert field in text and "bar 1" in text and "rock" in text and "latin" in text
 
 
-def test_a_tempo_that_differs_only_in_a_bar_both_tracks_have_is_found_at_that_bar():
+# 2026-10-29-0910 (deliberate): this test pinned "a tempo that differs in a bar both tracks have is a refusal naming bar 2". The driver decided RE-TIME instead: the second track's bar takes the first track's tempo.
+def test_a_tempo_that_differs_in_a_bar_both_tracks_have_is_re_timed_to_the_first_tracks_not_refused():
   a = _track("rock", ["kick"], [_bar(tempo=100, kick={0}), _bar(tempo=90, kick={0})])
   b = _track("latin", ["bell"], [_bar(tempo=100, bell={0}), _bar(tempo=95, bell={0})])
-  with pytest.raises(ValueError, match="bar 2"):
-    lib.combine_tracks([a, b])
+  out = lib.combine_tracks([a, b])
+  assert [bar["tempo_bpm"] for bar in out] == [100, 90], "bar 2 plays at rock's 90, not latin's 95"
+  assert [bar["tempo_bpm"] for bar in b["bars"]] == [100, 95], "the input is never changed"
 
 
 def test_a_ritardando_inside_every_track_is_fine_when_the_tracks_agree_bar_by_bar():
@@ -219,3 +222,158 @@ def test_the_result_feeds_rhythm_bars_to_stream():
   pytest.importorskip("music21")
   stream = lib.rhythm_bars_to_stream(lib.combine_tracks([_rock(), _latin()]))
   assert stream is not None
+
+
+# ---- 2026-10-29-0910: tempo re-timing -----------------------------------------------------------------------------------------------------------------------------------------------
+
+def test_every_bar_plays_at_the_first_tracks_tempo_whatever_the_order_the_others_come_in():
+  slow = _track("rock", ["kick"], [_bar(tempo=60, kick={0}), _bar(tempo=70, kick={0})])
+  fast = _track("latin", ["bell"], [_bar(tempo=180, bell={0}), _bar(tempo=150, bell={0})])
+  assert [b["tempo_bpm"] for b in lib.combine_tracks([slow, fast])] == [60, 70]
+  assert [b["tempo_bpm"] for b in lib.combine_tracks([fast, slow])] == [180, 150], "the FIRST track decides"
+
+
+def test_beyond_the_first_tracks_length_a_longer_track_keeps_its_own_tempo():
+  short = _track("rock", ["kick"], [_bar(tempo=100, kick={0})])
+  long = _track("latin", ["bell"], [_bar(tempo=140, bell={0}), _bar(tempo=130, bell={0}), _bar(tempo=120, bell={0})])
+  assert [b["tempo_bpm"] for b in lib.combine_tracks([short, long])] == [100, 130, 120]
+
+
+def test_the_tempo_is_the_first_tracks_even_when_that_track_is_muted():
+  rock = _track("rock", ["kick"], [_bar(tempo=100, kick={0})])
+  rock["mute"] = True
+  latin = _track("latin", ["bell"], [_bar(tempo=160, bell={0})])
+  assert [b["tempo_bpm"] for b in lib.combine_tracks([rock, latin])] == [100]
+
+
+# ---- 2026-10-29-0910: lineage (combine_tracks_lineage) -----------------------------------------------------------------------------------------------------------------------------
+
+def _named(track, phrase):
+  return dict(track, phrase=phrase)
+
+
+def test_the_bars_do_not_change_because_the_tracks_carry_phrase_names():
+  plain = lib.combine_tracks([_rock(), _latin()])
+  named = lib.combine_tracks([_named(_rock(), "phrase_001"), _named(_latin(), "phrase_002")])
+  assert plain == named
+
+
+def test_lineage_of_equal_length_tracks_names_the_phrase_and_kit_of_each_channel_group_per_bar():
+  a = _named(_track("rock", ["kick", "snare"], [_bar(kick={0}, snare={4}), _bar(kick={0}, snare={4})]), "phrase_001")
+  b = _named(_track("latin", ["bell"], [_bar(bell={0}), _bar(bell={2})]), "phrase_002")
+  lineage = lib.combine_tracks_lineage([a, b])
+  assert [row["bar"] for row in lineage] == [1, 2]
+  for position, row in enumerate(lineage, start=1):
+    assert row["tempo_bpm"] == 100 and row["retimed_from"] == {}
+    assert row["channels"] == {"kick": {"kit": "rock", "phrase": "phrase_001", "bar": position}, "snare": {"kit": "rock", "phrase": "phrase_001", "bar": position},
+                               "bell": {"kit": "latin", "phrase": "phrase_002", "bar": position}}
+
+
+def test_lineage_of_a_padded_track_says_the_shorter_one_rests_there():
+  long = _named(_track("rock", ["kick"], [_bar(kick={0}), _bar(kick={0}), _bar(kick={0})]), "phrase_001")
+  short = _named(_track("latin", ["bell"], [_bar(bell={0})]), "phrase_002")
+  lineage = lib.combine_tracks_lineage([long, short])
+  assert [row["channels"]["bell"]["bar"] for row in lineage] == [1, None, None], "no source bar where the shorter phrase has ended"
+  assert [row["channels"]["kick"]["bar"] for row in lineage] == [1, 2, 3]
+  assert all(row["channels"]["bell"]["phrase"] == "phrase_002" and row["channels"]["bell"]["kit"] == "latin" for row in lineage), "the group still belongs to its phrase and kit"
+
+
+def test_lineage_of_a_re_timed_track_records_the_tempo_it_came_with():
+  a = _named(_track("rock", ["kick"], [_bar(tempo=100, kick={0}), _bar(tempo=90, kick={0})]), "phrase_001")
+  b = _named(_track("latin", ["bell"], [_bar(tempo=100, bell={0}), _bar(tempo=95, bell={0})]), "phrase_002")
+  lineage = lib.combine_tracks_lineage([a, b])
+  assert [row["tempo_bpm"] for row in lineage] == [100, 90]
+  assert lineage[0]["retimed_from"] == {}
+  assert lineage[1]["retimed_from"] == {"latin": 95}, "only the kit whose own tempo was changed is named, with the tempo it had"
+
+
+def test_lineage_without_phrase_names_says_none_and_a_muted_kit_has_no_channels_in_it():
+  rock = _track("rock", ["kick"], [_bar(kick={0})])
+  latin = dict(_track("latin", ["bell"], [_bar(bell={0})]), mute=True)
+  lineage = lib.combine_tracks_lineage([rock, latin])
+  assert lineage[0]["channels"] == {"kick": {"kit": "rock", "phrase": None, "bar": 1}}
+
+
+# ---- 2026-10-29-0910: mute / solo / volume -------------------------------------------------------------------------------------------------------------------------------------------
+
+def _channels_of(bars):
+  return {c for bar in bars for c in bar["channels"]}
+
+
+def test_a_muted_kit_contributes_no_channel_but_the_arrangement_keeps_its_length():
+  rock = dict(_rock(), mute=True)                                          # 2 bars
+  latin = _latin()                                                          # 1 bar
+  out = lib.combine_tracks([rock, latin])
+  assert len(out) == 2, "muting rock does not shorten the arrangement"
+  assert _channels_of(out) == {"bell", "claves"}, "kick, snare and hihat are rock's: gone; latin's stray kick was never played"
+
+
+def test_every_track_muted_is_a_plain_refusal_not_an_empty_score():
+  with pytest.raises(ValueError, match="combine_tracks: every track is muted"):
+    lib.combine_tracks([dict(_rock(), mute=True), dict(_latin(), mute=True)])
+
+
+def test_solo_is_exactly_muting_every_other_kit():
+  tracks = [_rock(), _track("bells", ["bell", "claves"], [_bar(claves={0, 3}, bell={0, 8})]), _track("congas", ["conga_high"], [_bar(conga_high={0, 4})])]
+  for soloed in range(3):
+    with_solo = copy.deepcopy(tracks); with_solo[soloed]["solo"] = True
+    with_mutes = copy.deepcopy(tracks)
+    for i, t in enumerate(with_mutes):
+      if i != soloed: t["mute"] = True
+    assert lib.combine_tracks(with_solo) == lib.combine_tracks(with_mutes)
+
+
+def test_two_solos_play_together_and_solo_wins_over_mute_on_the_same_kit():
+  tracks = [dict(_rock(), solo=True), dict(_track("bells", ["bell", "claves"], [_bar(claves={0, 3}, bell={0, 8})]), solo=True), _track("congas", ["conga_high"], [_bar(conga_high={0})])]
+  assert _channels_of(lib.combine_tracks(tracks)) == {"kick", "snare", "hihat", "bell", "claves"}
+  both = [dict(_rock(), solo=True, mute=True), _latin()]
+  assert _channels_of(lib.combine_tracks(both)) == {"kick", "snare", "hihat"}, "asked to play it alone and muted: alone wins"
+
+
+def test_volume_100_changes_nothing_and_the_default_is_100():
+  assert lib.combine_tracks([dict(_rock(), volume=100), _latin()]) == lib.combine_tracks([_rock(), _latin()])
+
+
+@pytest.mark.parametrize("hit,volume,expected", [(True, 50, 45), (90, 70, 63), (3, 50, 2), (1, 10, 1), (127, 99, 126), (127, 100, 127), (100, 1, 1), (2, 25, 1), (5, 10, 1)])
+def test_volume_scales_a_velocity_rounded_half_up_and_clamped_to_1_127(hit, volume, expected):
+  bar = _bar(kick={0: hit})
+  out = lib.combine_tracks([dict(_track("rock", ["kick"], [bar]), volume=volume)])
+  assert out[0]["channels"]["kick"][0] == expected
+
+
+def test_volume_never_leaves_1_to_127_and_never_adds_or_loses_a_hit():
+  rng = random.Random(7)
+  for _ in range(200):
+    steps = 16
+    row = [rng.choice([False, True, rng.randint(1, 127)]) for _ in range(steps)]
+    bar = {"time_signature": "4/4", "steps": steps, "group_size": 4, "swing_pct": 0, "tempo_bpm": 100, "channels": {"kick": list(row)}}
+    volume = rng.randint(1, 99)                                              # 100 leaves the row exactly as it was (a plain hit stays plain), tested on its own
+    out = lib.combine_tracks([dict(_track("rock", ["kick"], [bar]), volume=volume)])[0]["channels"]["kick"]
+    for before, after in zip(row, out):
+      if before is False:
+        assert after is False
+      else:
+        assert isinstance(after, int) and not isinstance(after, bool) and 1 <= after <= 127
+    assert [v is not False for v in row] == [v is not False for v in out]
+
+
+def test_volume_zero_is_a_muted_kit():
+  assert lib.combine_tracks([dict(_rock(), volume=0), _latin()]) == lib.combine_tracks([dict(_rock(), mute=True), _latin()])
+
+
+def test_mute_solo_volume_never_change_the_inputs():
+  tracks = [dict(_rock(), volume=40, solo=True), _latin()]
+  before = copy.deepcopy(tracks)
+  lib.combine_tracks(tracks); lib.combine_tracks_lineage(tracks)
+  assert tracks == before
+
+
+@pytest.mark.parametrize("field,bad", [("mute", 1), ("mute", "yes"), ("solo", 0), ("solo", None), ("volume", True), ("volume", -1), ("volume", 101), ("volume", 50.5), ("volume", "70"), ("phrase", 3), ("phrase", "")])
+def test_a_malformed_mute_solo_volume_or_phrase_is_refused_naming_the_function_and_the_kit(field, bad):
+  with pytest.raises(ValueError, match="combine_tracks.*rock|rock.*combine_tracks"):
+    lib.combine_tracks([dict(_rock(), **{field: bad})])
+
+
+def test_two_kits_with_one_channel_are_still_refused_even_when_one_is_muted():
+  with pytest.raises(ValueError, match="kick"):
+    lib.combine_tracks([_rock(), dict(_rock(), kit="rock2", mute=True)])
