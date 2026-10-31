@@ -4163,6 +4163,65 @@ def combine_tracks_lineage(tracks):
   return out
 
 
+def _compose_sections_prepare(sections, fn):
+  """Validate the sections of compose_sections / compose_sections_lineage; returns one (number, source, bars, length) per section, in the order given (number from 1, length the
+  number of bars the section fills: its own `length`, or all its bars when none is given)."""
+  if not isinstance(sections, (list, tuple)) or not sections:
+    raise ValueError(f"{fn}: sections must be a non-empty list of {{bars, length}} dicts, got {sections!r}")
+  plan = []
+  reference = None
+  for number, section in enumerate(sections, start=1):
+    if not isinstance(section, dict):
+      raise ValueError(f"{fn}: section {number} must be a {{bars, length}} dict, got {type(section).__name__}")
+    bars = section.get("bars")
+    if not isinstance(bars, (list, tuple)) or not bars:
+      raise ValueError(f"{fn}: section {number} needs a non-empty list of bars, got {bars!r}")
+    length = section.get("length")
+    if length is not None and (isinstance(length, bool) or not isinstance(length, int) or length < 1):
+      raise ValueError(f"{fn}: section {number} length must be a whole number of bars, 1 or more, or absent for all its bars, got {length!r}")
+    source = section.get("source")
+    if "source" in section and (not isinstance(source, str) or source == ""):
+      raise ValueError(f"{fn}: section {number} source must be a non-empty note name, got {source!r}")
+    for position, bar in enumerate(bars, start=1):
+      _rhythm_mix_fields(bar, f"section {number} bar {position}", fn)
+      _rhythm_mix_channels(bar, f"section {number} bar {position}", fn)
+      if reference is None:
+        reference = bar
+        continue
+      for key_name in ("time_signature", "steps", "group_size"):
+        if bar[key_name] != reference[key_name]:
+          other = "section 1 bar 1" if number == 1 else "section 1"
+          raise ValueError(f"{fn}: section {number} bar {position} has {key_name} {bar[key_name]!r} but {other} has {reference[key_name]!r}; all sections must share the same meter and steps")
+    plan.append((number, source, bars, len(bars) if length is None else length))
+  return plan
+
+
+def compose_sections(sections):
+  """Play sections one after another: the bars of a COMPOSITION (a piece made of sections), as ONE list of rhythm-data bars.
+
+  `sections` is a non-empty list of dicts, one per section: {"bars": a non-empty list of rhythm-data bars (what a phrase or an arrangement made), "length": N bars or None/absent,
+  "source": the name of the note the bars came from (optional, only for compose_sections_lineage)}. A section with `length` more than its bars is REPEATED (its bars again from the
+  first) until it has `length` bars; one with `length` less is CUT to it; no `length` is all its bars, once. A section is never padded with rests and never stretched. The sections
+  are then joined in order. Every bar keeps its OWN tempo: nothing is re-timed across sections (an arrangement re-times; a piece does not). Sections that disagree on time_signature,
+  steps or group_size are refused in one sentence naming both sections, the field and both values.
+
+  Pure: the inputs are never changed and the result shares no list with them; no randomness; no hit is added or lost and velocities are kept. Feed the result to rhythm_bars_to_stream
+  to draw or play it."""
+  out = []
+  for _number, _source, bars, length in _compose_sections_prepare(sections, "compose_sections"):
+    out.extend(copy.deepcopy(bars[index % len(bars)]) for index in range(length))
+  return out
+
+
+def compose_sections_lineage(sections):
+  """Where each bar of compose_sections came from: one dict per bar of the result, {"section": its number from 1, "source": the section's note name or None, "bar": the number (from 1)
+  of the section's own bar it plays, "tempo_bpm": the tempo it plays at}. The sections are checked exactly as compose_sections checks them."""
+  out = []
+  for number, source, bars, length in _compose_sections_prepare(sections, "compose_sections_lineage"):
+    out.extend({"section": number, "source": source, "bar": index % len(bars) + 1, "tempo_bpm": bars[index % len(bars)]["tempo_bpm"]} for index in range(length))
+  return out
+
+
 def drums_shuffle():
   """A 12-bar shuffle drum pattern in 12/8 — kick on beats 1+3, snare
   on 2+4, hi-hat on every dotted-quarter beat. The rhythmic backbone
