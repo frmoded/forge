@@ -4065,7 +4065,7 @@ def _combine_tracks_prepare(tracks, fn):
     for number, bar in enumerate(bars, start=1):
       _rhythm_mix_fields(bar, f"kit {kit!r} bar {number}", fn)
       _rhythm_mix_channels(bar, f"kit {kit!r} bar {number}", fn)
-    checked.append({"kit": kit, "channels": set(channels), "bars": bars, "phrase": phrase, "mute": track.get("mute", False), "solo": track.get("solo", False), "volume": volume})
+    checked.append({"kit": kit, "channels": set(channels), "kit_channels": list(channels), "bars": bars, "phrase": phrase, "mute": track.get("mute", False), "solo": track.get("solo", False), "volume": volume})
   first = checked[0]
   for t in checked:
     for number, bar in enumerate(t["bars"], start=1):
@@ -4093,6 +4093,14 @@ def _combine_tracks_prepare(tracks, fn):
   for t in plays:
     for bar in t["bars"]:
       used.update(c for c in bar["channels"] if c in t["channels"])
+  if not used:
+    # nothing of any sounding track's bars is on its kit: every result bar would have no channels and rhythm_bars_to_stream would refuse them in words about its own insides. A track that is silent while another plays is not an error.
+    said = []
+    for t in plays:
+      wanted = [c for c in _RHYTHM_CHANNEL_INSTRUMENTS if any(c in bar["channels"] for bar in t["bars"])]
+      whose = f"phrase '{t['phrase']}' uses" if t["phrase"] else "its bars use"
+      said.append(f"kit '{t['kit']}' has none of the channels {whose} ({', '.join(wanted)}); the kit has {', '.join(t['kit_channels'])}.")
+    raise ValueError(f"{fn}: " + " ".join(said))
   order = [c for c in _RHYTHM_CHANNEL_INSTRUMENTS if c in used]
   return checked, plays, order, max(len(t["bars"]) for t in checked)
 

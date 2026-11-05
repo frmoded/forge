@@ -377,3 +377,66 @@ def test_a_malformed_mute_solo_volume_or_phrase_is_refused_naming_the_function_a
 def test_two_kits_with_one_channel_are_still_refused_even_when_one_is_muted():
   with pytest.raises(ValueError, match="kick"):
     lib.combine_tracks([_rock(), dict(_rock(), kit="rock2", mute=True)])
+
+
+# ---- 2026-11-05 (smoke 13 E, drain 1178): a kit that shares no channel with the phrase says so ----------------------------------------------------------------------------------------------
+
+LATIN_SAYS = ("combine_tracks: kit 'latin' has none of the channels phrase 'phrase_001' uses (kick, snare); "
+              "the kit has bell, claves, conga_high, conga_low.")
+
+
+def _kick_snare_phrase_on(kit, channels, phrase="phrase_001", **extra):
+  track = _track(kit, channels, [_bar(kick={0, 8}, snare={4, 12})])
+  if phrase is not None:
+    track["phrase"] = phrase
+  track.update(extra)
+  return track
+
+
+def test_a_phrase_that_shares_no_channel_with_its_kit_is_refused_in_a_sentence_naming_kit_phrase_and_channels():
+  with pytest.raises(ValueError) as e:
+    lib.combine_tracks([_kick_snare_phrase_on("latin", ["bell", "claves", "conga_high", "conga_low"])])
+  assert str(e.value) == LATIN_SAYS
+
+
+def test_the_same_phrase_on_the_rock_kit_still_plays():
+  out = lib.combine_tracks([_kick_snare_phrase_on("rock", ["kick", "snare", "hihat"])])
+  assert list(out[0]["channels"]) == ["kick", "snare"] and _hits(out[0], "kick") == [0, 8]
+
+
+def test_the_lineage_twin_refuses_the_same_way_in_its_own_name():
+  with pytest.raises(ValueError, match=r"^combine_tracks_lineage: kit 'latin' has none of the channels phrase 'phrase_001' uses \(kick, snare\); the kit has bell, claves, conga_high, conga_low\.$"):
+    lib.combine_tracks_lineage([_kick_snare_phrase_on("latin", ["bell", "claves", "conga_high", "conga_low"])])
+
+
+def test_without_a_phrase_name_the_sentence_says_its_bars():
+  with pytest.raises(ValueError, match=r"^combine_tracks: kit 'latin' has none of the channels its bars use \(kick, snare\); the kit has bell, claves\.$"):
+    lib.combine_tracks([_kick_snare_phrase_on("latin", ["bell", "claves"], phrase=None)])
+
+
+def test_a_track_that_contributes_nothing_while_another_does_is_not_an_error_and_the_result_draws():
+  """A mixed arrangement still works: the latin track's phrase hits only a kick, the rock track plays. The latin track is silent (today's behaviour, unchanged); the result has the rock channels and goes on to rhythm_bars_to_stream."""
+  latin_silent = _kick_snare_phrase_on("latin", ["bell", "claves"], phrase="phrase_009")
+  out = lib.combine_tracks([_rock(), latin_silent])
+  assert list(out[0]["channels"]) == ["kick", "snare", "hihat"]
+  assert _hits(out[0], "kick") == [0, 8]
+  assert lib.rhythm_bars_to_stream(out) is not None          # nothing downstream crashes
+
+
+def test_every_sounding_track_empty_names_each_of_them():
+  a = _kick_snare_phrase_on("latin", ["bell", "claves"], phrase="phrase_001")
+  b = _track("congas", ["conga_high", "conga_low"], [_bar(kick={0})])
+  b["phrase"] = "phrase_002"
+  with pytest.raises(ValueError) as e:
+    lib.combine_tracks([a, b])
+  msg = str(e.value)
+  assert msg.startswith("combine_tracks: kit 'latin' has none of the channels phrase 'phrase_001' uses (kick, snare); the kit has bell, claves.")
+  assert "kit 'congas' has none of the channels phrase 'phrase_002' uses (kick); the kit has conga_high, conga_low." in msg
+
+
+def test_a_muted_track_that_shares_nothing_is_not_an_error_when_another_track_plays_and_a_solo_one_is_judged_alone():
+  muted_latin = _kick_snare_phrase_on("latin", ["bell", "claves"], mute=True)
+  assert list(lib.combine_tracks([_rock(), muted_latin])[0]["channels"]) == ["kick", "snare", "hihat"]
+  solo_latin = _kick_snare_phrase_on("latin", ["bell", "claves"], solo=True)
+  with pytest.raises(ValueError, match=r"kit 'latin' has none of the channels"):
+    lib.combine_tracks([_rock(), solo_latin])               # only the solo track sounds, and it has nothing to play
