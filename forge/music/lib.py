@@ -3334,6 +3334,10 @@ def rhythm_data_to_stream(data):
   _require_music21()
   if not isinstance(data, dict):
     raise ValueError(f"rhythm_data_to_stream: data must be a dict, got {type(data).__name__}")
+  if "notes" in data:                       # 2026-11-23-1030: a MELODY bar (notes with pitch and length): one pitched Part; the rhythm bar below is untouched
+    if "channels" in data:
+      raise ValueError("rhythm_data_to_stream: the data has both channels and notes; a bar is a rhythm bar (channels) or a melody bar (notes), not both")
+    return melody_data_to_stream(data)
   for key_name in ("time_signature", "steps", "group_size", "tempo_bpm", "channels"):
     if key_name not in data:
       raise ValueError(f"rhythm_data_to_stream: missing required field {key_name!r}")
@@ -3413,6 +3417,102 @@ def rhythm_data_to_stream(data):
           hit_note.articulations.append(mark)
     parts.append(part)
   return voices(*parts)
+
+
+# 2026-11-23-1030 (pitch in bars, Stage 1a) - a MELODY bar: {time_signature, steps, group_size, tempo_bpm, instrument, notes: [{step (from 1), pitch, length (in steps)}]}.
+# The instrument is a General MIDI program, by NAME, from this small table (name -> music21 class, 0-based program; MusicXML writes program + 1, so the cello is `<midi-program>43`). The mandolin is
+# steel guitar (25): General MIDI has no mandolin, and music21's own Mandolin sets no program and inherits the strings' 48 (a mandolin would sound as a string ensemble). The guitar is the nylon one (24).
+_MELODY_INSTRUMENTS = {"piano": ("Piano", 0), "guitar": ("AcousticGuitar", 24), "mandolin": ("Mandolin", 25), "violin": ("Violin", 40), "cello": ("Violoncello", 42)}
+# A pitch is a letter, an optional accidental and an octave: `C4` is middle C, `F#3` a sharp, `Bb4` a flat; `B-4` (music21's own flat) is read too. Double accidentals are not names here.
+_MELODY_PITCH = re.compile(r"^([A-Ga-g])([#b-]?)([0-9])$")
+
+
+def _melody_pitch(value, where):
+  """A pitch name as a person writes it (`Bb4`, `F#3`) or as music21 does (`B-4`) -> a music21 Pitch. Anything else is refused naming the note."""
+  m = _MELODY_PITCH.match(value) if isinstance(value, str) else None
+  if m is None:
+    raise ValueError(f"melody_data_to_stream: {where}: pitch {value!r} is not a note name with an octave (a letter A-G, an optional # or b, and an octave 0-9: C4, F#3, Bb4)")
+  p = pitch.Pitch(f"{m.group(1).upper()}{'-' if m.group(2) in ('b', '-') else m.group(2)}{m.group(3)}")
+  if not 0 <= p.midi <= 127:
+    raise ValueError(f"melody_data_to_stream: {where}: pitch {value!r} is outside the 128 MIDI notes")
+  return p
+
+
+def melody_data_to_stream(data):
+  """Convert a MELODY bar (the JSON a melody-bar note holds) into a Score with ONE pitched Part (one staff, one voice). Called by `rhythm_data_to_stream` when the data has `notes`.
+
+  `data` is a dict: time_signature ("4/4"), steps (the grid of one bar: 16 sixteenths in 4/4), group_size (steps per beat; must divide steps), tempo_bpm (quarter-note BPM),
+  instrument (piano, guitar, mandolin, violin or cello: its General MIDI program is set on the Part, so MusicXML carries `<midi-program>`), and
+  notes: a list of {"step": 1.. (counts from 1), "pitch": "G3", "length": steps}. A note starts on its step and lasts `length` steps exactly; it must END INSIDE THE BAR (no tie across the
+  barline yet). One voice: two notes may not start on one step, and a note may not start while another still sounds. The notes may come in any order; each gap is ONE Rest of the matching
+  length. The clef is the one that fits the notes (treble or bass); the Part carries the TimeSignature and a MetronomeMark(tempo_bpm) on measure 1."""
+  _require_music21()
+  fn = "melody_data_to_stream"
+  if not isinstance(data, dict):
+    raise ValueError(f"{fn}: data must be a dict, got {type(data).__name__}")
+  for key_name in ("time_signature", "steps", "group_size", "tempo_bpm", "instrument", "notes"):
+    if key_name not in data:
+      raise ValueError(f"{fn}: missing required field {key_name!r}")
+  steps, group_size, tempo_bpm = data["steps"], data["group_size"], data["tempo_bpm"]
+  if isinstance(steps, bool) or not isinstance(steps, int) or steps <= 0:
+    raise ValueError(f"{fn}: steps must be a positive int, got {steps!r}")
+  if isinstance(group_size, bool) or not isinstance(group_size, int) or group_size <= 0 or steps % group_size:
+    raise ValueError(f"{fn}: group_size must be a positive int dividing steps (steps={steps!r}, group_size={group_size!r})")
+  if isinstance(tempo_bpm, bool) or not isinstance(tempo_bpm, (int, float)) or tempo_bpm <= 0:
+    raise ValueError(f"{fn}: tempo_bpm must be a positive number, got {tempo_bpm!r}")
+  name = data["instrument"].lower() if isinstance(data["instrument"], str) else None
+  if name not in _MELODY_INSTRUMENTS:
+    known = list(_MELODY_INSTRUMENTS)
+    raise ValueError(f"{fn}: unknown instrument {data['instrument']!r}; the instruments are {', '.join(known[:-1])} and {known[-1]}")
+  rows = data["notes"]
+  if not isinstance(rows, (list, tuple)):
+    raise ValueError(f"{fn}: notes must be a list, got {type(rows).__name__}")
+  parsed = []
+  for i, row in enumerate(rows, start=1):
+    where = f"note {i}"
+    if not isinstance(row, dict):
+      raise ValueError(f"{fn}: {where} must be a dict with step, pitch and length, got {type(row).__name__}")
+    for key_name in ("step", "pitch", "length"):
+      if key_name not in row:
+        raise ValueError(f"{fn}: {where}: missing required field {key_name!r}")
+    extra = sorted(set(row) - {"step", "pitch", "length"})
+    if extra:
+      raise ValueError(f"{fn}: {where}: unexpected field {extra[0]!r} (a note is step, pitch and length; one voice has no velocity yet)")
+    step, length = row["step"], row["length"]
+    if isinstance(step, bool) or not isinstance(step, int) or not 1 <= step <= steps:
+      raise ValueError(f"{fn}: {where}: step must be a whole number from 1 to {steps}, got {step!r}")
+    if isinstance(length, bool) or not isinstance(length, int) or length < 1:
+      raise ValueError(f"{fn}: {where}: length must be a whole number of steps, 1 or more, got {length!r}")
+    if step + length - 1 > steps:
+      raise ValueError(f"{fn}: {where}: a note must end inside the bar: {row['pitch']} on step {step} for {length} step{'' if length == 1 else 's'} would end after step {steps} (a tie across the barline is not possible yet)")
+    parsed.append((step, length, _melody_pitch(row["pitch"], where), row["pitch"]))
+  parsed.sort(key=lambda t: t[0])
+  for (s1, l1, _, p1), (s2, _, _, p2) in zip(parsed, parsed[1:]):
+    if s2 < s1 + l1:
+      raise ValueError(
+        f"{fn}: one voice plays one note at a time: {p2} on step {s2} starts while {p1} (step {s1} for {l1} step{'' if l1 == 1 else 's'}) still sounds"
+      )
+  bar_ql = meter.TimeSignature(data["time_signature"]).barDuration.quarterLength
+  step_ql = bar_ql / steps
+  inst_class, program = _MELODY_INSTRUMENTS[name]
+  inst = getattr(instrument, inst_class)()
+  inst.midiProgram = program
+  measure = stream.Measure(number=1)
+  measure.append(meter.TimeSignature(data["time_signature"]))
+  measure.append(tempo.MetronomeMark(number=tempo_bpm))
+  cursor = 0
+  for step, length, p, _ in parsed:
+    if step - 1 > cursor:
+      measure.insert(cursor * step_ql, note.Rest(quarterLength=(step - 1 - cursor) * step_ql))
+    measure.insert((step - 1) * step_ql, note.Note(p, quarterLength=length * step_ql))
+    cursor = step - 1 + length
+  if cursor < steps:
+    measure.insert(cursor * step_ql, note.Rest(quarterLength=(steps - cursor) * step_ql))
+  measure.insert(0, clef.bestClef(measure.flatten()) if parsed else clef.TrebleClef())
+  part = stream.Part()
+  part.insert(0, inst)
+  part.append(measure)
+  return voices(part)
 
 
 def _accent_mask_check_int(name, value):
