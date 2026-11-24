@@ -3515,6 +3515,40 @@ def melody_data_to_stream(data):
   return voices(part)
 
 
+_MELODY_ON_BEATS = "That works on beats, not on notes"
+
+
+def _melody_bars_to_stream(bars):
+  """2026-11-24-1031: a LIST of melody bars (each one `melody_data_to_stream`'s data) as ONE Score with ONE pitched Part: the bars one after the other, measures numbered from 1. The Part carries the
+  instrument once, ONE clef for the whole run (the one that fits all its notes, never a change in the middle), the time signature once, and a MetronomeMark where the tempo changes (bar 1 and every bar
+  whose tempo differs from the bar before). Every bar is validated as `melody_data_to_stream` does (a failure names the bar); the bars must agree on the grid (checked by the caller) and on the instrument."""
+  measures = []
+  first = None
+  for i, bar in enumerate(bars):
+    try:
+      one = melody_data_to_stream(bar)
+    except ValueError as e:
+      raise ValueError(f"rhythm_bars_to_stream: bar {i}: {e}") from None
+    if first is None:
+      first = one.parts[0]
+    elif bar["instrument"].lower() != bars[0]["instrument"].lower():
+      raise ValueError(f"rhythm_bars_to_stream: a melody phrase plays one instrument: bar {i} is for the {bar['instrument'].lower()} and bar 0 is for the {bars[0]['instrument'].lower()}; give every bar the same instrument")
+    m = copy.deepcopy(one.parts[0].getElementsByClass(stream.Measure)[0])
+    m.removeByClass(clef.Clef)
+    if i > 0:
+      m.removeByClass(meter.TimeSignature)
+      if bar["tempo_bpm"] == bars[i - 1]["tempo_bpm"]:
+        m.removeByClass(tempo.MetronomeMark)
+    m.number = i + 1
+    measures.append(m)
+  part = stream.Part()
+  part.insert(0, first.getInstrument())
+  for m in measures:
+    part.append(m)
+  part.getElementsByClass(stream.Measure)[0].insert(0, clef.bestClef(part.flatten()) if len(part.flatten().notes) else clef.TrebleClef())
+  return voices(part)
+
+
 def _accent_mask_check_int(name, value):
   if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 127:
     raise ValueError(f"accent_mask: {name} must be an int velocity 1-127, got {value!r}")
@@ -3647,6 +3681,12 @@ def extend_rhythm(data, bars=4, style="repeat_with_fills", tempo_change_pct=0):
     raise ValueError(f"extend_rhythm: bars must be an int from 1 to 64, got {bars!r}")
   if isinstance(tempo_change_pct, bool) or not isinstance(tempo_change_pct, (int, float)) or not -90 <= tempo_change_pct <= 100:
     raise ValueError(f"extend_rhythm: tempo_change_pct must be a number from -90 to 100, got {tempo_change_pct!r}")
+  if isinstance(data, dict) and "notes" in data:     # 2026-11-24-1031: a MELODY bar is repeated as it is: nothing is added, the tempo is its own
+    if style != "repeat" or tempo_change_pct != 0:
+      raise ValueError(f"extend_rhythm: {_MELODY_ON_BEATS}: fills, building up, ghost notes and a change of tempo are for a rhythm bar; a melody bar is repeated as it is (style \"repeat\").")
+    return [copy.deepcopy(data) for _ in range(bars)]
+  if style == "repeat":
+    raise ValueError("extend_rhythm: a plain repeat is for melody bars; a rhythm bar is extended with fills, building up or ghost notes")
   if style not in _RHYTHM_EXTEND_STYLES:
     raise ValueError(
       f"extend_rhythm: unknown style {style!r}; valid styles: {', '.join(_RHYTHM_EXTEND_STYLES)}"
@@ -3744,6 +3784,8 @@ def _rhythm_mix_fields(data, which, fn_name="mix_rhythm"):
   """Validate the top-level fields of one input bar of mix_rhythm."""
   if not isinstance(data, dict):
     raise ValueError(f"{fn_name}: {which} must be a rhythm-data dict, got {type(data).__name__}")
+  if "notes" in data:                       # 2026-11-24-1031: Mix, Morph, Thin out and Double up work on hits, not on pitches
+    raise ValueError(f"{fn_name}: {which} is a melody bar. {_MELODY_ON_BEATS}.")
   for key_name in ("time_signature", "steps", "group_size", "tempo_bpm", "channels"):
     if key_name not in data:
       raise ValueError(f"{fn_name}: {which} is missing required field {key_name!r}")
@@ -4112,6 +4154,12 @@ def rhythm_bars_to_stream(bars):
     t = bar.get("tempo_bpm")
     if "tempo_bpm" in bar and (isinstance(t, bool) or not isinstance(t, (int, float)) or not t > 0):   # a MISSING tempo keeps rhythm_data_to_stream's own message
       raise ValueError(f"rhythm_bars_to_stream: bar {i}: tempo_bpm must be a positive number, got {t!r}")
+  melody = ["notes" in bar for bar in bars]
+  if any(melody):                                   # 2026-11-24-1031: a phrase is all melody bars or all rhythm bars; the melody bars are ONE Part
+    for i, is_melody in enumerate(melody):
+      if is_melody != melody[0]:
+        raise ValueError(f"rhythm_bars_to_stream: a phrase is all rhythm bars or all melody bars: bar {i} is a {'melody' if is_melody else 'rhythm'} bar and bar 0 is a {'melody' if melody[0] else 'rhythm'} bar")
+    return _melody_bars_to_stream(bars)
   order = []
   for bar in bars:
     if isinstance(bar.get("channels"), dict):
@@ -4162,6 +4210,8 @@ def _combine_tracks_prepare(tracks, fn):
     volume = track.get("volume", 100)
     if isinstance(volume, bool) or not isinstance(volume, int) or not 0 <= volume <= 100:
       raise ValueError(f"{fn}: kit {kit!r} volume must be a whole number from 0 to 100, got {volume!r}")
+    if any(isinstance(bar, dict) and "notes" in bar for bar in bars):       # 2026-11-24-1031: a kit plays beats; a melody needs a track of its own kind (an instrument), which does not exist yet
+      raise ValueError(f"{fn}: kit {kit!r} was given a melody phrase: a kit plays beats, not notes (a melody track, an instrument instead of a kit, is not possible yet)")
     for number, bar in enumerate(bars, start=1):
       _rhythm_mix_fields(bar, f"kit {kit!r} bar {number}", fn)
       _rhythm_mix_channels(bar, f"kit {kit!r} bar {number}", fn)
@@ -4291,11 +4341,19 @@ def _compose_sections_prepare(sections, fn):
     if "source" in section and (not isinstance(source, str) or source == ""):
       raise ValueError(f"{fn}: section {number} source must be a non-empty note name, got {source!r}")
     for position, bar in enumerate(bars, start=1):
-      _rhythm_mix_fields(bar, f"section {number} bar {position}", fn)
-      _rhythm_mix_channels(bar, f"section {number} bar {position}", fn)
+      where = f"section {number} bar {position}"
+      if isinstance(bar, dict) and "notes" in bar:       # 2026-11-24-1031: a section of MELODY bars is played too (a composition plays beats or notes, never both)
+        for key_name in ("time_signature", "steps", "group_size", "tempo_bpm", "instrument"):
+          if key_name not in bar:
+            raise ValueError(f"{fn}: {where} is missing required field {key_name!r}")
+      else:
+        _rhythm_mix_fields(bar, where, fn)
+        _rhythm_mix_channels(bar, where, fn)
       if reference is None:
         reference = bar
         continue
+      if ("notes" in bar) != ("notes" in reference):
+        raise ValueError(f"{fn}: a composition plays beats or notes, not both: {where} is a {'melody' if 'notes' in bar else 'rhythm'} bar and section 1 bar 1 is a {'melody' if 'notes' in reference else 'rhythm'} bar")
       for key_name in ("time_signature", "steps", "group_size"):
         if bar[key_name] != reference[key_name]:
           other = "section 1 bar 1" if number == 1 else "section 1"
